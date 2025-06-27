@@ -233,15 +233,15 @@ async function handleSentiment(request, env) {
     // Prepare text for Cohere classification
     const textsToAnalyze = headlines.map(h => h.title || h).slice(0, 10); // Limit to 10
     
-    // Use Cohere v2 classify endpoint
-    const response = await fetch('https://api.cohere.ai/v2/classify', {
+    // Use Cohere v1 classify endpoint (v2 has different format)
+    const response = await fetch('https://api.cohere.ai/v1/classify', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${env.COHERE_API_KEY}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'embed-english-light-v3.0',
+        model: 'embed-english-light-v2.0',
         inputs: textsToAnalyze,
         examples: [
           { text: "Bitcoin soars to new all-time high", label: "positive" },
