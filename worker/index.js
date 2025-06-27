@@ -72,7 +72,7 @@ async function handlePrice(request, env) {
     // Fetch current price from Blockchair
     const response = await fetch(`https://api.blockchair.com/${coinId}/stats`, {
       headers: {
-        'X-API-Key': env.BLOCKCHAIR_KEY,
+        'X-API-Key': env.BLOCKCHAIR_API_KEY,
       },
     });
     
@@ -120,7 +120,7 @@ async function handleHistory(request, env) {
       `https://api.blockchair.com/${coinId}/charts/market-price?days=${days}`,
       {
         headers: {
-          'X-API-Key': env.BLOCKCHAIR_KEY,
+          'X-API-Key': env.BLOCKCHAIR_API_KEY,
         },
       }
     );
@@ -162,7 +162,7 @@ async function handleNews(request, env) {
     // Fetch news from NewsData.io
     const searchQuery = `${coinName} cryptocurrency`;
     const response = await fetch(
-      `https://newsdata.io/api/1/news?apikey=${env.NEWSDATA_KEY}&q=${encodeURIComponent(searchQuery)}&language=en&size=10`
+      `https://newsdata.io/api/1/news?apikey=${env.NEWSDATA_API_KEY}&q=${encodeURIComponent(searchQuery)}&language=en&size=10`
     );
     
     if (!response.ok) {
@@ -225,7 +225,7 @@ async function handleSentiment(request, env) {
     const response = await fetch('https://api.cohere.ai/v2/classify', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${env.COHERE_KEY}`,
+        'Authorization': `Bearer ${env.COHERE_API_KEY}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
