@@ -272,9 +272,10 @@
                 score: data.score,
                 category: data.category,
                 emoji: emoji,
-                count: data.total,
+                count: data.analyzed || data.total,
                 confidence: data.confidence,
-                breakdown: data.breakdown
+                breakdown: data.breakdown,
+                method: data.method
             };
             
         } catch (error) {
