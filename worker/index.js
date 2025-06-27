@@ -269,80 +269,98 @@ async function analyzeSentimentWithCohere(headlines, env) {
   // Limit to 5 headlines for API limits
   const textsToAnalyze = headlines.map(h => h.title || h).slice(0, 5);
   
-  // Prepare sentiment classification examples
-  const examples = [
-    { text: "Bitcoin soars to new all-time high", label: "positive" },
-    { text: "Cryptocurrency adoption accelerates globally", label: "positive" },
-    { text: "Major institutions embrace digital assets", label: "positive" },
-    { text: "Bitcoin rally continues with strong momentum", label: "positive" },
-    { text: "Crypto market shows bullish sentiment", label: "positive" },
-    { text: "Digital currency gains mainstream acceptance", label: "positive" },
-    { text: "Blockchain technology revolutionary breakthrough", label: "positive" },
-    { text: "Bitcoin price crashes below support", label: "negative" },
-    { text: "Regulatory concerns impact crypto market", label: "negative" },
-    { text: "Exchange hack causes market panic", label: "negative" },
-    { text: "Crypto market faces bearish pressure", label: "negative" },
-    { text: "Bitcoin drops amid selling pressure", label: "negative" },
-    { text: "Cryptocurrency ban threatens market", label: "negative" },
-    { text: "Market volatility sparks investor fear", label: "negative" },
-    { text: "Bitcoin price remains stable today", label: "neutral" },
-    { text: "Crypto market shows mixed signals", label: "neutral" },
-    { text: "Bitcoin trading volume steady", label: "neutral" },
-    { text: "Market consolidation continues", label: "neutral" },
-    { text: "Cryptocurrency news roundup", label: "neutral" }
-  ];
+  console.log('Cohere API Key available:', !!env.COHERE_API_KEY);
+  console.log('Texts to analyze:', textsToAnalyze);
   
-  // Make request to Cohere Classify API
-  const response = await fetch('https://api.cohere.com/v1/classify', {
+  // Create prompt for sentiment analysis using Chat API
+  const prompt = `Analyze the sentiment of these cryptocurrency news headlines and classify each as "positive", "negative", or "neutral":
+
+${textsToAnalyze.map((text, i) => `${i + 1}. ${text}`).join('\n')}
+
+Respond with ONLY a JSON array in this exact format:
+[{"text": "headline 1", "sentiment": "positive"}, {"text": "headline 2", "sentiment": "negative"}, ...]
+
+Use these criteria:
+- "positive": bullish, optimistic, gains, growth, adoption, institutional investment
+- "negative": bearish, crashes, bans, hacks, fears, regulatory concerns  
+- "neutral": stable, mixed, updates, general news without clear sentiment`;
+
+  // Make request to Cohere Chat API v2
+  const response = await fetch('https://api.cohere.com/v2/chat', {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${env.COHERE_API_KEY}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      inputs: textsToAnalyze,
-      examples: examples,
-      truncate: 'END'
+      model: 'command-r',
+      messages: [
+        {
+          role: 'user',
+          content: prompt
+        }
+      ],
+      temperature: 0.3,
+      max_tokens: 1000
     }),
   });
   
   if (!response.ok) {
+    // Get the actual error response
+    let errorDetails = 'Unknown error';
+    try {
+      const errorBody = await response.text();
+      errorDetails = errorBody;
+      console.log('Cohere Chat API error response:', errorDetails);
+    } catch (e) {
+      console.log('Could not parse error response');
+    }
+    
     if (response.status === 429) {
       throw new Error('Rate limit exceeded - using fallback');
     }
-    throw new Error(`Cohere API error: ${response.status}`);
+    throw new Error(`Cohere Chat API error: ${response.status} - ${errorDetails}`);
   }
   
   const data = await response.json();
+  console.log('Cohere Chat API success:', data);
   
-  if (!data.classifications || !Array.isArray(data.classifications)) {
-    throw new Error('Invalid response format from Cohere');
+  // Parse the response
+  let sentimentResults = [];
+  try {
+    const messageContent = data.message?.content?.[0]?.text || '';
+    console.log('Raw AI response:', messageContent);
+    
+    // Try to extract JSON from the response
+    const jsonMatch = messageContent.match(/\[.*\]/s);
+    if (jsonMatch) {
+      sentimentResults = JSON.parse(jsonMatch[0]);
+    } else {
+      throw new Error('No JSON array found in response');
+    }
+  } catch (parseError) {
+    console.log('Failed to parse AI response:', parseError.message);
+    throw new Error('Invalid response format from Cohere Chat API');
   }
   
   // Calculate sentiment scores
   let positiveCount = 0;
   let negativeCount = 0;
   let neutralCount = 0;
-  let totalConfidence = 0;
   
-  data.classifications.forEach(classification => {
-    const prediction = classification.prediction;
-    const confidence = classification.confidence || 0;
-    
-    if (prediction === 'positive') {
+  sentimentResults.forEach(result => {
+    const sentiment = result.sentiment?.toLowerCase();
+    if (sentiment === 'positive') {
       positiveCount++;
-    } else if (prediction === 'negative') {
+    } else if (sentiment === 'negative') {
       negativeCount++;
     } else {
       neutralCount++;
     }
-    
-    totalConfidence += confidence;
   });
   
-  const analyzed = data.classifications.length;
+  const analyzed = sentimentResults.length;
   const total = headlines.length;
-  const averageConfidence = analyzed > 0 ? totalConfidence / analyzed : 0;
   
   // Calculate overall sentiment score (-5 to +5 scale)
   const positiveRatio = positiveCount / analyzed;
@@ -356,13 +374,17 @@ async function analyzeSentimentWithCohere(headlines, env) {
     category = 'bearish';
   }
   
+  // Estimate confidence based on how decisive the sentiment distribution is
+  const maxRatio = Math.max(positiveRatio, negativeRatio, neutralCount / analyzed);
+  const confidence = maxRatio;
+  
   return jsonResponse({
     score: Math.round(score * 100) / 100,
     category,
-    confidence: Math.round(averageConfidence * 100) / 100,
+    confidence: Math.round(confidence * 100) / 100,
     total: total,
     analyzed: analyzed,
-    method: 'cohere-classify-api',
+    method: 'cohere-chat-api',
     breakdown: {
       positive: positiveCount,
       negative: negativeCount,
