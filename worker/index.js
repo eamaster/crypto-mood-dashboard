@@ -230,58 +230,180 @@ async function handleSentiment(request, env) {
       });
     }
     
-    // Simple keyword-based sentiment analysis as fallback
-    const positiveKeywords = ['soar', 'surge', 'rally', 'bull', 'up', 'gain', 'rise', 'high', 'pump', 'moon', 'adoption', 'breakthrough', 'success'];
-    const negativeKeywords = ['crash', 'dump', 'bear', 'down', 'fall', 'drop', 'decline', 'low', 'hack', 'ban', 'regulation', 'fear', 'panic'];
-    
-    let positiveCount = 0;
-    let negativeCount = 0;
-    let neutralCount = 0;
-    
-    headlines.forEach(headline => {
-      const text = (headline.title || headline).toLowerCase();
-      const hasPositive = positiveKeywords.some(keyword => text.includes(keyword));
-      const hasNegative = negativeKeywords.some(keyword => text.includes(keyword));
-      
-      if (hasPositive && !hasNegative) {
-        positiveCount++;
-      } else if (hasNegative && !hasPositive) {
-        negativeCount++;
-      } else {
-        neutralCount++;
-      }
-    });
-    
-    const total = headlines.length;
-    const positiveRatio = positiveCount / total;
-    const negativeRatio = negativeCount / total;
-    
-    // Calculate sentiment score (-5 to +5 scale)
-    let score = (positiveRatio - negativeRatio) * 5;
-    
-    // Determine category
-    let category;
-    if (score > 1) category = 'bullish';
-    else if (score < -1) category = 'bearish';
-    else category = 'neutral';
-    
-    return jsonResponse({
-      score: score,
-      category: category,
-      confidence: Math.max(positiveRatio, negativeRatio, neutralCount / total),
-      total: total,
-      breakdown: {
-        positive: positiveCount,
-        negative: negativeCount,
-        neutral: neutralCount,
-      },
-      method: 'keyword-based (fallback)'
-    });
+    // Try Cohere AI first, with fallback to keyword analysis
+    try {
+      return await analyzeSentimentWithCohere(headlines, env);
+    } catch (error) {
+      console.log('Cohere API failed, using keyword fallback:', error.message);
+      return analyzeSentimentWithKeywords(headlines);
+    }
     
   } catch (error) {
-    console.error('Error analyzing sentiment:', error);
+    console.error('Sentiment analysis error:', error);
     return errorResponse(`Failed to analyze sentiment: ${error.message}`);
   }
+}
+
+async function analyzeSentimentWithCohere(headlines, env) {
+  // Limit to 3 headlines for free tier rate limits
+  const textsToAnalyze = headlines.map(h => h.title || h).slice(0, 3);
+  
+  // Add delay for rate limiting (free student version)
+  await new Promise(resolve => setTimeout(resolve, 200));
+  
+  const response = await fetch('https://api.cohere.ai/v1/classify', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${env.COHERE_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'embed-english-light-v3.0',
+      inputs: textsToAnalyze,
+      examples: [
+        { text: "Bitcoin soars to new all-time high", label: "positive" },
+        { text: "Cryptocurrency adoption accelerates globally", label: "positive" },
+        { text: "Major institutions embrace digital assets", label: "positive" },
+        { text: "Bitcoin rally continues with strong momentum", label: "positive" },
+        { text: "Crypto market shows bullish sentiment", label: "positive" },
+        { text: "Bitcoin price crashes below support", label: "negative" },
+        { text: "Regulatory concerns impact crypto market", label: "negative" },
+        { text: "Exchange hack causes market panic", label: "negative" },
+        { text: "Crypto market faces bearish pressure", label: "negative" },
+        { text: "Bitcoin drops amid selling pressure", label: "negative" },
+        { text: "Bitcoin price remains stable today", label: "neutral" },
+        { text: "Crypto market shows mixed signals", label: "neutral" },
+        { text: "Bitcoin trading volume steady", label: "neutral" }
+      ]
+    }),
+  });
+  
+  if (!response.ok) {
+    if (response.status === 429) {
+      throw new Error('Rate limit exceeded - using fallback');
+    }
+    throw new Error(`Cohere API error: ${response.status}`);
+  }
+  
+  const data = await response.json();
+  
+  if (!data.classifications || !Array.isArray(data.classifications)) {
+    throw new Error('Invalid response format from Cohere');
+  }
+  
+  // Calculate sentiment scores
+  let positiveCount = 0;
+  let negativeCount = 0;
+  let neutralCount = 0;
+  let totalConfidence = 0;
+  
+  data.classifications.forEach(classification => {
+    const prediction = classification.prediction;
+    const confidence = classification.confidence || 0;
+    
+    if (prediction === 'positive') {
+      positiveCount++;
+    } else if (prediction === 'negative') {
+      negativeCount++;
+    } else {
+      neutralCount++;
+    }
+    
+    totalConfidence += confidence;
+  });
+  
+  const analyzed = data.classifications.length;
+  const total = headlines.length;
+  const averageConfidence = analyzed > 0 ? totalConfidence / analyzed : 0;
+  
+  // Calculate overall sentiment score (-5 to +5 scale)
+  const positiveRatio = positiveCount / analyzed;
+  const negativeRatio = negativeCount / analyzed;
+  const score = (positiveRatio - negativeRatio) * 5;
+  
+  let category = 'neutral';
+  if (score > 1) {
+    category = 'bullish';
+  } else if (score < -1) {
+    category = 'bearish';
+  }
+  
+  return jsonResponse({
+    score: Math.round(score * 100) / 100,
+    category,
+    confidence: Math.round(averageConfidence * 100) / 100,
+    total: total,
+    analyzed: analyzed,
+    method: 'cohere-ai',
+    breakdown: {
+      positive: positiveCount,
+      negative: negativeCount,
+      neutral: neutralCount
+    }
+  });
+}
+
+function analyzeSentimentWithKeywords(headlines) {
+  const positiveKeywords = [
+    'soar', 'surge', 'rally', 'bull', 'bullish', 'gain', 'gains', 'rise', 'rising', 
+    'up', 'high', 'moon', 'pump', 'breakthrough', 'adoption', 'institutional',
+    'investment', 'buy', 'support', 'strong', 'growth', 'increase', 'positive',
+    'optimistic', 'confidence', 'milestone', 'achievement', 'success', 'upgrade',
+    'partnership', 'expansion', 'innovation', 'record', 'all-time', 'ath'
+  ];
+  
+  const negativeKeywords = [
+    'crash', 'dump', 'bear', 'bearish', 'fall', 'drop', 'down', 'low', 'dip',
+    'decline', 'plunge', 'collapse', 'sell', 'selling', 'pressure', 'fear',
+    'panic', 'concern', 'worry', 'risk', 'volatile', 'uncertainty', 'loss',
+    'losses', 'negative', 'pessimistic', 'regulation', 'ban', 'hack', 'attack',
+    'fraud', 'scam', 'bubble', 'warning', 'alert', 'crisis', 'problem'
+  ];
+  
+  let positiveCount = 0;
+  let negativeCount = 0;
+  let neutralCount = 0;
+  
+  headlines.forEach(headline => {
+    const text = (headline.title || headline).toLowerCase();
+    const hasPositive = positiveKeywords.some(keyword => text.includes(keyword));
+    const hasNegative = negativeKeywords.some(keyword => text.includes(keyword));
+    
+    if (hasPositive && !hasNegative) {
+      positiveCount++;
+    } else if (hasNegative && !hasPositive) {
+      negativeCount++;
+    } else {
+      neutralCount++;
+    }
+  });
+  
+  const total = headlines.length;
+  const positiveRatio = positiveCount / total;
+  const negativeRatio = negativeCount / total;
+  
+  // Calculate sentiment score (-5 to +5 scale)
+  const score = (positiveRatio - negativeRatio) * 5;
+  
+  let category = 'neutral';
+  if (score > 1) {
+    category = 'bullish';
+  } else if (score < -1) {
+    category = 'bearish';
+  }
+  
+  return jsonResponse({
+    score: Math.round(score * 100) / 100,
+    category,
+    confidence: Math.max(positiveRatio, negativeRatio, neutralCount / total),
+    total: total,
+    breakdown: {
+      positive: positiveCount,
+      negative: negativeCount,
+      neutral: neutralCount,
+    },
+    method: 'keyword-analysis'
+  });
 }
 
 // =============================================================================
