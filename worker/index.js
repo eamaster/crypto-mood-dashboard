@@ -230,54 +230,29 @@ async function handleSentiment(request, env) {
       });
     }
     
-    // Prepare text for Cohere classification
-    const textsToAnalyze = headlines.map(h => h.title || h).slice(0, 10); // Limit to 10
+    // Simple keyword-based sentiment analysis as fallback
+    const positiveKeywords = ['soar', 'surge', 'rally', 'bull', 'up', 'gain', 'rise', 'high', 'pump', 'moon', 'adoption', 'breakthrough', 'success'];
+    const negativeKeywords = ['crash', 'dump', 'bear', 'down', 'fall', 'drop', 'decline', 'low', 'hack', 'ban', 'regulation', 'fear', 'panic'];
     
-    // Use Cohere v1 classify endpoint (v2 has different format)
-    const response = await fetch('https://api.cohere.ai/v1/classify', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${env.COHERE_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'embed-english-light-v2.0',
-        inputs: textsToAnalyze,
-        examples: [
-          { text: "Bitcoin soars to new all-time high", label: "positive" },
-          { text: "Cryptocurrency adoption accelerates globally", label: "positive" },
-          { text: "Major institutions embrace digital assets", label: "positive" },
-          { text: "Bitcoin price crashes below support", label: "negative" },
-          { text: "Regulatory concerns impact crypto market", label: "negative" },
-          { text: "Exchange hack causes market panic", label: "negative" },
-          { text: "Bitcoin price remains stable", label: "neutral" },
-          { text: "Cryptocurrency market shows mixed signals", label: "neutral" },
-          { text: "Trading volume within normal range", label: "neutral" },
-        ],
-      }),
-    });
-    
-    if (!response.ok) {
-      throw new Error(`Cohere API error: ${response.status}`);
-    }
-    
-    const data = await response.json();
-    
-    // Process sentiment results
     let positiveCount = 0;
     let negativeCount = 0;
     let neutralCount = 0;
     
-    if (data.classifications) {
-      data.classifications.forEach(classification => {
-        const prediction = classification.prediction;
-        if (prediction === 'positive') positiveCount++;
-        else if (prediction === 'negative') negativeCount++;
-        else neutralCount++;
-      });
-    }
+    headlines.forEach(headline => {
+      const text = (headline.title || headline).toLowerCase();
+      const hasPositive = positiveKeywords.some(keyword => text.includes(keyword));
+      const hasNegative = negativeKeywords.some(keyword => text.includes(keyword));
+      
+      if (hasPositive && !hasNegative) {
+        positiveCount++;
+      } else if (hasNegative && !hasPositive) {
+        negativeCount++;
+      } else {
+        neutralCount++;
+      }
+    });
     
-    const total = textsToAnalyze.length;
+    const total = headlines.length;
     const positiveRatio = positiveCount / total;
     const negativeRatio = negativeCount / total;
     
@@ -300,6 +275,7 @@ async function handleSentiment(request, env) {
         negative: negativeCount,
         neutral: neutralCount,
       },
+      method: 'keyword-based (fallback)'
     });
     
   } catch (error) {
