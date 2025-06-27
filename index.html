@@ -24,6 +24,7 @@
                     <option value="bitcoin">Loading coins...</option>
                 </select>
                 <button id="refreshBtn">🔄 Refresh</button>
+                <button onclick="location.href='modules/technical-analysis.html'" class="ta-button">🔍 Technical Analysis</button>
             </div>
             <div class="last-updated">
                 Last updated: <span id="lastUpdated">Never</span>
@@ -66,8 +67,8 @@
     </main>
 
     <footer>
-        <p>Data from CoinGecko & Reddit • Built with Chart.js & Sentiment.js</p>
-        <p><a href="modules/">View individual modules</a></p>
+        <p>Data from Blockchair & NewsData.io • AI by Cohere • Built with Chart.js & Cloudflare Workers</p>
+        <p><a href="modules/">View individual modules</a> • <a href="modules/technical-analysis.html">Technical Analysis</a></p>
     </footer>
 
     <script src="script.js"></script>

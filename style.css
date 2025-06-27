@@ -153,6 +153,24 @@ button:hover {
     transform: translateY(-1px);
 }
 
+.ta-button {
+    background: linear-gradient(135deg, #6c5ce7 0%, #a29bfe 100%);
+    border: none;
+    color: white;
+    font-weight: 600;
+    padding: 0.75rem 1.5rem;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 8px rgba(108, 92, 231, 0.3);
+}
+
+.ta-button:hover {
+    background: linear-gradient(135deg, #5a4fcf 0%, #9178f7 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(108, 92, 231, 0.4);
+}
+
 .last-updated {
     font-size: 0.9rem;
     color: var(--text-secondary);
