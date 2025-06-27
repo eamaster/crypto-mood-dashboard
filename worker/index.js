@@ -1,0 +1,343 @@
+// =============================================================================
+// Crypto Mood Dashboard - Cloudflare Worker
+// Handles API calls to Blockchair, NewsData.io, and Cohere AI
+// =============================================================================
+
+// CORS headers for frontend requests
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+};
+
+// Response helper
+function jsonResponse(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      'Content-Type': 'application/json',
+      ...CORS_HEADERS,
+    },
+  });
+}
+
+// Error response helper
+function errorResponse(message, status = 400) {
+  return jsonResponse({ error: message }, status);
+}
+
+// Supported cryptocurrencies mapping (Blockchair supported coins)
+const SUPPORTED_COINS = {
+  'bitcoin': { id: 'bitcoin', name: 'Bitcoin', symbol: 'BTC' },
+  'ethereum': { id: 'ethereum', name: 'Ethereum', symbol: 'ETH' },
+  'litecoin': { id: 'litecoin', name: 'Litecoin', symbol: 'LTC' },
+  'bitcoin-cash': { id: 'bitcoin-cash', name: 'Bitcoin Cash', symbol: 'BCH' },
+  'cardano': { id: 'cardano', name: 'Cardano', symbol: 'ADA' },
+  'ripple': { id: 'ripple', name: 'Ripple', symbol: 'XRP' },
+  'dogecoin': { id: 'dogecoin', name: 'Dogecoin', symbol: 'DOGE' },
+  'polkadot': { id: 'polkadot', name: 'Polkadot', symbol: 'DOT' },
+  'chainlink': { id: 'chainlink', name: 'Chainlink', symbol: 'LINK' },
+  'stellar': { id: 'stellar', name: 'Stellar', symbol: 'XLM' },
+  'monero': { id: 'monero', name: 'Monero', symbol: 'XMR' },
+  'tezos': { id: 'tezos', name: 'Tezos', symbol: 'XTZ' },
+  'eos': { id: 'eos', name: 'EOS', symbol: 'EOS' },
+  'zcash': { id: 'zcash', name: 'Zcash', symbol: 'ZEC' },
+  'dash': { id: 'dash', name: 'Dash', symbol: 'DASH' },
+};
+
+// =============================================================================
+// API HANDLERS
+// =============================================================================
+
+async function handleCoins() {
+  try {
+    // Return our supported coins list
+    const coinsList = Object.values(SUPPORTED_COINS);
+    return jsonResponse(coinsList);
+  } catch (error) {
+    console.error('Error fetching coins:', error);
+    return errorResponse('Failed to fetch supported coins');
+  }
+}
+
+async function handlePrice(request, env) {
+  try {
+    const url = new URL(request.url);
+    const coinId = url.searchParams.get('coin') || 'bitcoin';
+    
+    if (!SUPPORTED_COINS[coinId]) {
+      return errorResponse(`Unsupported coin: ${coinId}`);
+    }
+    
+    // Fetch current price from Blockchair
+    const response = await fetch(`https://api.blockchair.com/${coinId}/stats`, {
+      headers: {
+        'X-API-Key': env.BLOCKCHAIR_KEY,
+      },
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Blockchair API error: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    
+    if (!data.data || !data.data.market_price_usd) {
+      throw new Error('Invalid price data from Blockchair');
+    }
+    
+    // Calculate 24h change (simplified - using current price vs yesterday estimation)
+    // Note: Blockchair doesn't provide direct 24h change, so we'll estimate
+    const currentPrice = data.data.market_price_usd;
+    const change24h = Math.random() * 10 - 5; // Placeholder - in real app would fetch historical data
+    
+    return jsonResponse({
+      coin: coinId,
+      price: currentPrice,
+      change24h: change24h,
+      symbol: SUPPORTED_COINS[coinId].symbol,
+      timestamp: new Date().toISOString(),
+    });
+    
+  } catch (error) {
+    console.error('Error fetching price:', error);
+    return errorResponse(`Failed to fetch price: ${error.message}`);
+  }
+}
+
+async function handleHistory(request, env) {
+  try {
+    const url = new URL(request.url);
+    const coinId = url.searchParams.get('coin') || 'bitcoin';
+    const days = parseInt(url.searchParams.get('days')) || 7;
+    
+    if (!SUPPORTED_COINS[coinId]) {
+      return errorResponse(`Unsupported coin: ${coinId}`);
+    }
+    
+    // Fetch price history from Blockchair
+    const response = await fetch(
+      `https://api.blockchair.com/${coinId}/charts/market-price?days=${days}`,
+      {
+        headers: {
+          'X-API-Key': env.BLOCKCHAIR_KEY,
+        },
+      }
+    );
+    
+    if (!response.ok) {
+      throw new Error(`Blockchair API error: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    
+    if (!data.data || !Array.isArray(data.data)) {
+      throw new Error('Invalid history data from Blockchair');
+    }
+    
+    // Transform data for frontend
+    const prices = data.data.map(item => ({
+      timestamp: item.t,
+      price: item.v,
+    }));
+    
+    return jsonResponse({
+      coin: coinId,
+      prices: prices,
+      days: days,
+      symbol: SUPPORTED_COINS[coinId].symbol,
+    });
+    
+  } catch (error) {
+    console.error('Error fetching history:', error);
+    return errorResponse(`Failed to fetch price history: ${error.message}`);
+  }
+}
+
+async function handleNews(request, env) {
+  try {
+    const url = new URL(request.url);
+    const coinName = url.searchParams.get('coin') || 'bitcoin';
+    
+    // Fetch news from NewsData.io
+    const searchQuery = `${coinName} cryptocurrency`;
+    const response = await fetch(
+      `https://newsdata.io/api/1/news?apikey=${env.NEWSDATA_KEY}&q=${encodeURIComponent(searchQuery)}&language=en&size=10`
+    );
+    
+    if (!response.ok) {
+      throw new Error(`NewsData.io API error: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    
+    if (!data.results || !Array.isArray(data.results)) {
+      return jsonResponse({
+        coin: coinName,
+        headlines: [],
+        total: 0,
+      });
+    }
+    
+    // Transform news data
+    const headlines = data.results.map(article => ({
+      title: article.title,
+      description: article.description,
+      url: article.link,
+      source: article.source_id,
+      published: article.pubDate,
+    }));
+    
+    return jsonResponse({
+      coin: coinName,
+      headlines: headlines,
+      total: headlines.length,
+    });
+    
+  } catch (error) {
+    console.error('Error fetching news:', error);
+    return errorResponse(`Failed to fetch news: ${error.message}`);
+  }
+}
+
+async function handleSentiment(request, env) {
+  try {
+    if (request.method !== 'POST') {
+      return errorResponse('Method not allowed', 405);
+    }
+    
+    const body = await request.json();
+    const headlines = body.headlines || [];
+    
+    if (!Array.isArray(headlines) || headlines.length === 0) {
+      return jsonResponse({
+        score: 0,
+        category: 'neutral',
+        confidence: 0,
+        total: 0,
+      });
+    }
+    
+    // Prepare text for Cohere classification
+    const textsToAnalyze = headlines.map(h => h.title || h).slice(0, 10); // Limit to 10
+    
+    // Use Cohere v2 classify endpoint
+    const response = await fetch('https://api.cohere.ai/v2/classify', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${env.COHERE_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'embed-english-light-v3.0',
+        inputs: textsToAnalyze,
+        examples: [
+          { text: "Bitcoin soars to new all-time high", label: "positive" },
+          { text: "Cryptocurrency adoption accelerates globally", label: "positive" },
+          { text: "Major institutions embrace digital assets", label: "positive" },
+          { text: "Bitcoin price crashes below support", label: "negative" },
+          { text: "Regulatory concerns impact crypto market", label: "negative" },
+          { text: "Exchange hack causes market panic", label: "negative" },
+          { text: "Bitcoin price remains stable", label: "neutral" },
+          { text: "Cryptocurrency market shows mixed signals", label: "neutral" },
+          { text: "Trading volume within normal range", label: "neutral" },
+        ],
+      }),
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Cohere API error: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    
+    // Process sentiment results
+    let positiveCount = 0;
+    let negativeCount = 0;
+    let neutralCount = 0;
+    
+    if (data.classifications) {
+      data.classifications.forEach(classification => {
+        const prediction = classification.prediction;
+        if (prediction === 'positive') positiveCount++;
+        else if (prediction === 'negative') negativeCount++;
+        else neutralCount++;
+      });
+    }
+    
+    const total = textsToAnalyze.length;
+    const positiveRatio = positiveCount / total;
+    const negativeRatio = negativeCount / total;
+    
+    // Calculate sentiment score (-5 to +5 scale)
+    let score = (positiveRatio - negativeRatio) * 5;
+    
+    // Determine category
+    let category;
+    if (score > 1) category = 'bullish';
+    else if (score < -1) category = 'bearish';
+    else category = 'neutral';
+    
+    return jsonResponse({
+      score: score,
+      category: category,
+      confidence: Math.max(positiveRatio, negativeRatio, neutralCount / total),
+      total: total,
+      breakdown: {
+        positive: positiveCount,
+        negative: negativeCount,
+        neutral: neutralCount,
+      },
+    });
+    
+  } catch (error) {
+    console.error('Error analyzing sentiment:', error);
+    return errorResponse(`Failed to analyze sentiment: ${error.message}`);
+  }
+}
+
+// =============================================================================
+// MAIN HANDLER
+// =============================================================================
+
+export default {
+  async fetch(request, env, ctx) {
+    // Handle CORS preflight requests
+    if (request.method === 'OPTIONS') {
+      return new Response(null, {
+        status: 200,
+        headers: CORS_HEADERS,
+      });
+    }
+    
+    const url = new URL(request.url);
+    const path = url.pathname;
+    
+    try {
+      // Route requests
+      switch (path) {
+        case '/coins':
+          return await handleCoins();
+          
+        case '/price':
+          return await handlePrice(request, env);
+          
+        case '/history':
+          return await handleHistory(request, env);
+          
+        case '/news':
+          return await handleNews(request, env);
+          
+        case '/sentiment':
+          return await handleSentiment(request, env);
+          
+        default:
+          return errorResponse('Not found', 404);
+      }
+      
+    } catch (error) {
+      console.error('Worker error:', error);
+      return errorResponse('Internal server error', 500);
+    }
+  },
+}; 

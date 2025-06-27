@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crypto Mood Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.min.js"></script>
+</head>
+<body>
+    <header>
+        <div class="header-content">
+            <h1>📊 Crypto Mood Dashboard</h1>
+            <button id="themeToggle" class="theme-toggle">🌙</button>
+        </div>
+    </header>
+
+    <main>
+        <section class="controls">
+            <div class="coin-selector">
+                <label for="coinSelect">Select Cryptocurrency:</label>
+                <select id="coinSelect">
+                    <option value="bitcoin">Loading coins...</option>
+                </select>
+                <button id="refreshBtn">🔄 Refresh</button>
+            </div>
+            <div class="last-updated">
+                Last updated: <span id="lastUpdated">Never</span>
+            </div>
+        </section>
+
+        <section class="dashboard-grid">
+            <!-- Price Card -->
+            <div class="card price-card">
+                <h2>💰 Current Price</h2>
+                <div id="priceWidget" class="price-widget">
+                    <div class="price-value">$0.00</div>
+                    <div class="price-change">0.00%</div>
+                    <div class="price-symbol">BTC</div>
+                </div>
+                <div id="priceError" class="error-message" style="display: none;"></div>
+            </div>
+
+            <!-- Mood Card -->
+            <div class="card mood-card">
+                <h2>🧠 Market Mood</h2>
+                <div id="moodWidget" class="mood-widget">
+                    <div class="mood-badge">😐 Neutral</div>
+                    <div class="mood-score">Score: 0.00</div>
+                    <div class="mood-source">Based on 0 headlines</div>
+                </div>
+                <div id="newsContainer" class="news-container"></div>
+                <div id="moodError" class="error-message" style="display: none;"></div>
+            </div>
+
+            <!-- Chart Card -->
+            <div class="card chart-card">
+                <h2>📈 Price & Sentiment Trend</h2>
+                <div class="chart-container">
+                    <canvas id="mainChart"></canvas>
+                </div>
+                <div id="chartError" class="error-message" style="display: none;"></div>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <p>Data from CoinGecko & Reddit • Built with Chart.js & Sentiment.js</p>
+        <p><a href="modules/">View individual modules</a></p>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html> 

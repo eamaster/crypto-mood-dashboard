@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Coin News Demo</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        input, button {
+            padding: 10px;
+            margin: 5px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        .news-container {
+            margin-top: 20px;
+        }
+        .news-list {
+            list-style: none;
+            padding: 0;
+        }
+        .news-item {
+            background: #f8f9fa;
+            margin: 10px 0;
+            padding: 15px;
+            border-radius: 5px;
+            border-left: 4px solid #007bff;
+        }
+        .news-title {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .news-meta {
+            font-size: 12px;
+            color: #666;
+        }
+        .error {
+            color: #dc3545;
+            margin-top: 20px;
+            padding: 15px;
+            background: #f8d7da;
+            border-radius: 5px;
+        }
+        .loading {
+            text-align: center;
+            margin-top: 20px;
+            font-size: 18px;
+        }
+        .subreddit-info {
+            background: #e9ecef;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📰 Coin News Demo</h1>
+        <p>Enter a coin name to fetch top headlines from its Reddit community:</p>
+        
+        <div>
+            <input type="text" id="coinName" placeholder="bitcoin" value="bitcoin">
+            <button onclick="fetchNews()">Fetch News</button>
+        </div>
+        
+        <div id="loading" class="loading" style="display: none;">
+            ⏳ Loading news headlines...
+        </div>
+        
+        <div id="error" class="error" style="display: none;"></div>
+        
+        <div id="newsContainer" class="news-container"></div>
+    </div>
+
+    <script>
+        // Update this to your deployed worker URL
+        const WORKER_URL = 'https://crypto-mood-dashboard.your-subdomain.workers.dev';
+        
+        async function fetchNews() {
+            const coinName = document.getElementById('coinName').value.trim().toLowerCase() || 'bitcoin';
+            const loadingDiv = document.getElementById('loading');
+            const errorDiv = document.getElementById('error');
+            const newsContainer = document.getElementById('newsContainer');
+            
+            try {
+                // Show loading, hide error, clear previous results
+                loadingDiv.style.display = 'block';
+                errorDiv.style.display = 'none';
+                newsContainer.innerHTML = '';
+                
+                const response = await fetch(`${WORKER_URL}/news?coin=${coinName}`);
+                
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch news for ${coinName}. HTTP status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                
+                if (!data.headlines || data.headlines.length === 0) {
+                    throw new Error(`No news found for ${coinName}`);
+                }
+                
+                displayNews(data.headlines, coinName);
+                loadingDiv.style.display = 'none';
+                
+            } catch (error) {
+                console.error('Error fetching news:', error);
+                loadingDiv.style.display = 'none';
+                errorDiv.style.display = 'block';
+                errorDiv.innerHTML = `
+                    <strong>❌ Error: ${error.message}</strong><br>
+                    <small>Try using a different coin name or check if the subreddit exists.</small>
+                `;
+            }
+        }
+        
+        function displayNews(articles, coinName) {
+            const newsContainer = document.getElementById('newsContainer');
+            
+            // Add news source info
+            const sourceInfo = document.createElement('div');
+            sourceInfo.className = 'subreddit-info';
+            sourceInfo.innerHTML = `
+                📡 Fetched from <strong>NewsData.io</strong> • 
+                ${articles.length} articles found • 
+                Search: "${coinName} cryptocurrency"
+            `;
+            newsContainer.appendChild(sourceInfo);
+            
+            // Create news list
+            const newsList = document.createElement('ul');
+            newsList.className = 'news-list';
+            
+            articles.forEach((article, index) => {
+                const newsItem = document.createElement('li');
+                newsItem.className = 'news-item';
+                
+                // Format time
+                const publishedTime = new Date(article.published);
+                const timeAgo = getTimeAgo(publishedTime);
+                
+                newsItem.innerHTML = `
+                    <div class="news-title">
+                        ${index + 1}. ${escapeHtml(article.title)}
+                    </div>
+                    <div class="news-meta">
+                        📰 ${article.source || 'Unknown'} • 
+                        ⏰ ${timeAgo} • 
+                        <a href="${article.url}" target="_blank" rel="noopener">
+                            Read Article
+                        </a>
+                    </div>
+                    ${article.description ? `
+                        <div style="margin-top: 8px; font-size: 13px; color: #666;">
+                            ${escapeHtml(article.description.substring(0, 200))}${article.description.length > 200 ? '...' : ''}
+                        </div>
+                    ` : ''}
+                `;
+                
+                newsList.appendChild(newsItem);
+            });
+            
+            newsContainer.appendChild(newsList);
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        function getTimeAgo(date) {
+            const now = new Date();
+            const diffMs = now - date;
+            const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+            const diffDays = Math.floor(diffHours / 24);
+            
+            if (diffDays > 0) {
+                return `${diffDays} day${diffDays === 1 ? '' : 's'} ago`;
+            } else if (diffHours > 0) {
+                return `${diffHours} hour${diffHours === 1 ? '' : 's'} ago`;
+            } else {
+                const diffMins = Math.floor(diffMs / (1000 * 60));
+                return `${diffMins} minute${diffMins === 1 ? '' : 's'} ago`;
+            }
+        }
+        
+        // Allow Enter key to trigger fetch
+        document.getElementById('coinName').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                fetchNews();
+            }
+        });
+        
+        // Auto-fetch on page load
+        window.addEventListener('load', fetchNews);
+    </script>
+</body>
+</html> 

@@ -1,0 +1,32 @@
+name = "crypto-mood-dashboard"
+compatibility_date = "2024-01-01"
+main = "worker/index.js"
+
+# Environment variables (secrets)
+# Set these using: wrangler secret put <VARIABLE_NAME>
+# Example: wrangler secret put BLOCKCHAIR_KEY
+
+[env.production]
+vars = { ENVIRONMENT = "production" }
+
+[env.dev]
+vars = { ENVIRONMENT = "development" }
+
+# CORS configuration
+[[env.production.rules]]
+type = "cors"
+
+[[env.dev.rules]]
+type = "cors"
+
+# Example environment variables (set via wrangler secret put)
+# BLOCKCHAIR_KEY = "G___S4J16vrkR7eK5wn5ykSAhQiExJNB"
+# NEWSDATA_KEY = "pub_0a6ac26df9e94ac1aa0eda7f80b2f44f"
+# COHERE_KEY = "8v2ZrEf2NHbhqfKtHKmKmTbh695Nlnhsq6cdHnwH"
+
+# Rate limiting configuration
+[env.production.limits]
+cpu_ms = 50
+
+[env.dev.limits]
+cpu_ms = 100 

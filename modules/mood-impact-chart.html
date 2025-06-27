@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mood Impact Chart Demo</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sentiment@5.0.2/lib/index.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1000px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        input, button {
+            padding: 10px;
+            margin: 5px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        .chart-container {
+            margin-top: 20px;
+            height: 500px;
+            position: relative;
+        }
+        .sentiment-summary {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 5px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .sentiment-badge {
+            font-size: 24px;
+            font-weight: bold;
+            padding: 10px 20px;
+            border-radius: 20px;
+        }
+        .sentiment-bullish {
+            background: #d4edda;
+            color: #155724;
+        }
+        .sentiment-neutral {
+            background: #e9ecef;
+            color: #495057;
+        }
+        .sentiment-bearish {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .error {
+            color: #dc3545;
+            margin-top: 20px;
+            padding: 15px;
+            background: #f8d7da;
+            border-radius: 5px;
+        }
+        .loading {
+            text-align: center;
+            margin-top: 20px;
+            font-size: 18px;
+        }
+        .news-preview {
+            margin-top: 15px;
+            max-height: 150px;
+            overflow-y: auto;
+            font-size: 12px;
+            color: #666;
+        }
+        .news-item {
+            padding: 5px;
+            margin: 2px 0;
+            background: white;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📊 Mood Impact Chart Demo</h1>
+        <p>Combines 7-day price data with today's sentiment analysis from Reddit headlines:</p>
+        
+        <div>
+            <input type="text" id="coinId" placeholder="bitcoin" value="bitcoin">
+            <button onclick="fetchMoodImpactData()">Generate Chart</button>
+        </div>
+        
+        <div id="loading" class="loading" style="display: none;">
+            ⏳ Loading price data and analyzing sentiment...
+        </div>
+        
+        <div id="error" class="error" style="display: none;"></div>
+        
+        <div id="sentimentSummary" class="sentiment-summary" style="display: none;">
+            <div>
+                <strong>Today's Market Sentiment:</strong>
+                <div id="sentimentBadge" class="sentiment-badge"></div>
+            </div>
+            <div>
+                <div><strong>Headlines analyzed:</strong> <span id="headlineCount">0</span></div>
+                <div><strong>Average score:</strong> <span id="averageScore">0</span></div>
+            </div>
+        </div>
+        
+        <div id="newsPreview" class="news-preview" style="display: none;"></div>
+        
+        <div class="chart-container">
+            <canvas id="moodImpactChart"></canvas>
+        </div>
+    </div>
+
+    <script>
+        // Update this to your deployed worker URL
+        const WORKER_URL = 'https://crypto-mood-dashboard.your-subdomain.workers.dev';
+        
+        let chartInstance = null;
+        
+        async function fetchMoodImpactData() {
+            const coinId = document.getElementById('coinId').value.trim() || 'bitcoin';
+            const loadingDiv = document.getElementById('loading');
+            const errorDiv = document.getElementById('error');
+            const sentimentSummary = document.getElementById('sentimentSummary');
+            const newsPreview = document.getElementById('newsPreview');
+            
+            try {
+                // Show loading, hide other elements
+                loadingDiv.style.display = 'block';
+                errorDiv.style.display = 'none';
+                sentimentSummary.style.display = 'none';
+                newsPreview.style.display = 'none';
+                
+                // Destroy existing chart
+                if (chartInstance) {
+                    chartInstance.destroy();
+                    chartInstance = null;
+                }
+                
+                // Fetch price data and news in parallel
+                const [priceData, newsData] = await Promise.all([
+                    fetchPriceData(coinId),
+                    fetchNewsData(coinId)
+                ]);
+                
+                // Analyze sentiment
+                const sentimentData = analyzeSentimentData(newsData);
+                
+                // Create combined chart
+                createMoodImpactChart(priceData, sentimentData, coinId);
+                
+                // Update UI
+                updateSentimentSummary(sentimentData);
+                updateNewsPreview(newsData);
+                
+                loadingDiv.style.display = 'none';
+                sentimentSummary.style.display = 'flex';
+                newsPreview.style.display = 'block';
+                
+            } catch (error) {
+                console.error('Error fetching mood impact data:', error);
+                loadingDiv.style.display = 'none';
+                errorDiv.style.display = 'block';
+                errorDiv.textContent = `❌ Error: ${error.message}`;
+            }
+        }
+        
+        async function fetchPriceData(coinId) {
+            const response = await fetch(`${WORKER_URL}/history?coin=${coinId}&days=7`);
+            
+            if (!response.ok) {
+                throw new Error(`Failed to fetch price data for ${coinId}`);
+            }
+            
+            const data = await response.json();
+            
+            if (data.error) {
+                throw new Error(data.error);
+            }
+            
+            if (!data.prices || data.prices.length === 0) {
+                throw new Error(`No price data found for ${coinId}`);
+            }
+            
+            return data.prices.map(item => ({
+                x: new Date(item.timestamp),
+                y: item.price
+            }));
+        }
+        
+        async function fetchNewsData(coinId) {
+            try {
+                const response = await fetch(`${WORKER_URL}/news?coin=${coinId}`);
+                
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch news for ${coinId}`);
+                }
+                
+                const data = await response.json();
+                
+                if (data.error) {
+                    console.warn('News API error:', data.error);
+                    return [];
+                }
+                
+                if (!data.headlines || data.headlines.length === 0) {
+                    return []; // Return empty array if no news found
+                }
+                
+                return data.headlines;
+                
+            } catch (error) {
+                console.warn('News fetch failed:', error.message);
+                return []; // Return empty array on error
+            }
+        }
+        
+        async function analyzeSentimentData(headlines) {
+            if (headlines.length === 0) {
+                return {
+                    score: 0,
+                    category: 'neutral',
+                    emoji: '😐',
+                    count: 0
+                };
+            }
+            
+            try {
+                const response = await fetch(`${WORKER_URL}/sentiment`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        headlines: headlines
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`Sentiment analysis failed: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                
+                let emoji;
+                if (data.category === 'bullish') {
+                    emoji = '🐂';
+                } else if (data.category === 'bearish') {
+                    emoji = '🐻';
+                } else {
+                    emoji = '😐';
+                }
+                
+                return {
+                    score: data.score,
+                    category: data.category,
+                    emoji: emoji,
+                    count: data.total
+                };
+                
+            } catch (error) {
+                console.error('Error analyzing sentiment:', error);
+                return {
+                    score: 0,
+                    category: 'neutral',
+                    emoji: '😐',
+                    count: headlines.length
+                };
+            }
+        }
+        
+        function createMoodImpactChart(priceData, sentimentData, coinId) {
+            const ctx = document.getElementById('moodImpactChart').getContext('2d');
+            
+            // Create sentiment bar data for the last day
+            const lastDate = priceData[priceData.length - 1].x;
+            const sentimentBarData = [{
+                x: lastDate,
+                y: sentimentData.score
+            }];
+            
+            // Determine sentiment bar color
+            let sentimentColor;
+            if (sentimentData.category === 'bullish') {
+                sentimentColor = 'rgba(40, 167, 69, 0.8)';
+            } else if (sentimentData.category === 'bearish') {
+                sentimentColor = 'rgba(220, 53, 69, 0.8)';
+            } else {
+                sentimentColor = 'rgba(108, 117, 125, 0.8)';
+            }
+            
+            chartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    datasets: [
+                        {
+                            label: `${coinId.toUpperCase()} Price (USD)`,
+                            data: priceData,
+                            borderColor: '#007bff',
+                            backgroundColor: 'rgba(0, 123, 255, 0.1)',
+                            borderWidth: 2,
+                            fill: true,
+                            tension: 0.1,
+                            yAxisID: 'price'
+                        },
+                        {
+                            label: 'Today\'s Sentiment',
+                            data: sentimentBarData,
+                            type: 'bar',
+                            backgroundColor: sentimentColor,
+                            borderColor: sentimentColor.replace('0.8', '1'),
+                            borderWidth: 1,
+                            yAxisID: 'sentiment',
+                            barThickness: 30
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    },
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: {
+                                unit: 'day',
+                                displayFormats: {
+                                    day: 'MMM dd'
+                                }
+                            },
+                            title: {
+                                display: true,
+                                text: 'Date'
+                            }
+                        },
+                        price: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            title: {
+                                display: true,
+                                text: 'Price (USD)'
+                            },
+                            ticks: {
+                                callback: function(value) {
+                                    return '$' + value.toLocaleString();
+                                }
+                            }
+                        },
+                        sentiment: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            title: {
+                                display: true,
+                                text: 'Sentiment Score'
+                            },
+                            min: -5,
+                            max: 5,
+                            grid: {
+                                drawOnChartArea: false,
+                            },
+                            ticks: {
+                                callback: function(value) {
+                                    if (value > 1) return value + ' (Bullish)';
+                                    if (value < -1) return value + ' (Bearish)';
+                                    return value + ' (Neutral)';
+                                }
+                            }
+                        }
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: `${coinId.toUpperCase()} Price vs Market Sentiment`,
+                            font: {
+                                size: 16
+                            }
+                        },
+                        legend: {
+                            display: true
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    if (context.dataset.label.includes('Price')) {
+                                        return `Price: ${context.parsed.y.toLocaleString('en-US', {
+                                            style: 'currency',
+                                            currency: 'USD'
+                                        })}`;
+                                    } else {
+                                        return `Sentiment: ${context.parsed.y.toFixed(2)} (${sentimentData.category})`;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        function updateSentimentSummary(sentimentData) {
+            const badge = document.getElementById('sentimentBadge');
+            const headlineCount = document.getElementById('headlineCount');
+            const averageScore = document.getElementById('averageScore');
+            
+            badge.textContent = `${sentimentData.emoji} ${sentimentData.category.charAt(0).toUpperCase() + sentimentData.category.slice(1)}`;
+            badge.className = `sentiment-badge sentiment-${sentimentData.category}`;
+            
+            headlineCount.textContent = sentimentData.count;
+            averageScore.textContent = sentimentData.score.toFixed(2);
+        }
+        
+        function updateNewsPreview(headlines) {
+            const newsPreview = document.getElementById('newsPreview');
+            
+            if (headlines.length === 0) {
+                newsPreview.innerHTML = '<div class="news-item">No news headlines found for sentiment analysis.</div>';
+                return;
+            }
+            
+            newsPreview.innerHTML = `
+                <strong>Headlines analyzed for sentiment:</strong>
+                ${headlines.slice(0, 5).map((article, index) => `
+                    <div class="news-item">${index + 1}. ${escapeHtml(article.title || article)}</div>
+                `).join('')}
+                ${headlines.length > 5 ? `<div class="news-item">... and ${headlines.length - 5} more</div>` : ''}
+            `;
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // Allow Enter key to trigger fetch
+        document.getElementById('coinId').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                fetchMoodImpactData();
+            }
+        });
+        
+        // Auto-load chart on page load
+        window.addEventListener('load', fetchMoodImpactData);
+    </script>
+</body>
+</html> 

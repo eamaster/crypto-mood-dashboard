@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sentiment Analyzer Demo</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        textarea, button {
+            padding: 10px;
+            margin: 5px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-family: inherit;
+        }
+        textarea {
+            width: 100%;
+            min-height: 120px;
+            resize: vertical;
+            box-sizing: border-box;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        .results {
+            margin-top: 20px;
+        }
+        .sentiment-card {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 15px 0;
+            text-align: center;
+        }
+        .sentiment-score {
+            font-size: 36px;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+        .sentiment-label {
+            font-size: 20px;
+            margin: 10px 0;
+        }
+        .sentiment-details {
+            font-size: 14px;
+            color: #666;
+            margin-top: 15px;
+        }
+        .bullish {
+            background: linear-gradient(135deg, #d4edda, #c3e6cb);
+            border-left: 5px solid #28a745;
+        }
+        .neutral {
+            background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+            border-left: 5px solid #6c757d;
+        }
+        .bearish {
+            background: linear-gradient(135deg, #f8d7da, #f5c6cb);
+            border-left: 5px solid #dc3545;
+        }
+        .sample-buttons {
+            margin: 15px 0;
+        }
+        .sample-buttons button {
+            margin: 5px;
+            background: #6c757d;
+            font-size: 12px;
+            padding: 5px 10px;
+        }
+        .sample-buttons button:hover {
+            background: #5a6268;
+        }
+        .headlines-analysis {
+            margin-top: 20px;
+        }
+        .headline-item {
+            padding: 10px;
+            margin: 5px 0;
+            background: #f8f9fa;
+            border-radius: 5px;
+            border-left: 3px solid #007bff;
+        }
+        .headline-score {
+            font-weight: bold;
+            font-size: 12px;
+            float: right;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧠 Sentiment Analyzer Demo</h1>
+        <p>Enter headlines or text to analyze sentiment using Sentiment.js:</p>
+        
+        <div class="sample-buttons">
+            <button onclick="loadSample('bullish')">Load Bullish Sample</button>
+            <button onclick="loadSample('neutral')">Load Neutral Sample</button>
+            <button onclick="loadSample('bearish')">Load Bearish Sample</button>
+            <button onclick="loadSample('mixed')">Load Mixed Sample</button>
+        </div>
+        
+        <textarea id="textInput" placeholder="Enter headlines, one per line...">Bitcoin price soars to new all-time high
+Cryptocurrency adoption accelerates globally
+Major institutions embrace digital assets
+Market shows strong bullish momentum
+Positive regulatory developments worldwide</textarea>
+        
+        <br>
+        <button onclick="analyzeSentiment()">Analyze Sentiment</button>
+        
+        <div id="results" class="results"></div>
+    </div>
+
+    <script>
+        // Update this to your deployed worker URL
+        const WORKER_URL = 'https://crypto-mood-dashboard.your-subdomain.workers.dev';
+        
+        // Sample data for different sentiment types
+        const samples = {
+            bullish: [
+                "Bitcoin price soars to new all-time high",
+                "Cryptocurrency adoption accelerates globally", 
+                "Major institutions embrace digital assets",
+                "Market shows strong bullish momentum",
+                "Positive regulatory developments worldwide"
+            ],
+            bearish: [
+                "Cryptocurrency market crashes amid regulatory fears",
+                "Bitcoin price plummets to yearly lows",
+                "Major exchange hack causes widespread panic",
+                "Government bans cryptocurrency trading",
+                "Market sentiment turns extremely negative"
+            ],
+            neutral: [
+                "Bitcoin price remains stable today",
+                "Cryptocurrency market shows mixed signals",
+                "Trading volume stays within normal range", 
+                "No major news affecting crypto prices",
+                "Market consolidation continues"
+            ],
+            mixed: [
+                "Bitcoin surges while altcoins struggle",
+                "Positive news overshadowed by regulatory concerns",
+                "Strong institutional adoption but retail fear",
+                "Bull market signs amid bearish sentiment",
+                "Great technology but volatile prices"
+            ]
+        };
+        
+        function loadSample(type) {
+            const textarea = document.getElementById('textInput');
+            textarea.value = samples[type].join('\n');
+        }
+        
+        async function analyzeSentiment() {
+            const text = document.getElementById('textInput').value.trim();
+            const resultsDiv = document.getElementById('results');
+            
+            if (!text) {
+                resultsDiv.innerHTML = '<div class="sentiment-card">Please enter some text to analyze.</div>';
+                return;
+            }
+            
+            // Split text into lines (headlines)
+            const headlines = text.split('\n').filter(line => line.trim());
+            
+            if (headlines.length === 0) {
+                resultsDiv.innerHTML = '<div class="sentiment-card">Please enter some headlines to analyze.</div>';
+                return;
+            }
+            
+            try {
+                resultsDiv.innerHTML = '<div class="sentiment-card">⏳ Analyzing sentiment...</div>';
+                
+                // Call worker for sentiment analysis
+                const response = await fetch(`${WORKER_URL}/sentiment`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        headlines: headlines
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                
+                // Determine sentiment category
+                let sentimentCategory, sentimentEmoji, sentimentClass;
+                if (data.category === 'bullish') {
+                    sentimentCategory = 'Bullish';
+                    sentimentEmoji = '🐂';
+                    sentimentClass = 'bullish';
+                } else if (data.category === 'bearish') {
+                    sentimentCategory = 'Bearish';
+                    sentimentEmoji = '🐻';
+                    sentimentClass = 'bearish';
+                } else {
+                    sentimentCategory = 'Neutral';
+                    sentimentEmoji = '😐';
+                    sentimentClass = 'neutral';
+                }
+                
+                // Display results
+                resultsDiv.innerHTML = `
+                    <div class="sentiment-card ${sentimentClass}">
+                        <div class="sentiment-score">${sentimentEmoji} ${data.score.toFixed(2)}</div>
+                        <div class="sentiment-label">${sentimentCategory} Sentiment</div>
+                        <div class="sentiment-details">
+                            Average Score: ${data.score.toFixed(2)} • 
+                            Confidence: ${(data.confidence * 100).toFixed(1)}% • 
+                            ${data.total} headline${data.total === 1 ? '' : 's'} analyzed
+                        </div>
+                    </div>
+                    
+                    <div class="headlines-analysis">
+                        <h3>Headlines Analyzed:</h3>
+                        ${headlines.map((headline, index) => `
+                            <div class="headline-item">
+                                <strong>${index + 1}.</strong> ${escapeHtml(headline)}
+                            </div>
+                        `).join('')}
+                    </div>
+                    
+                    <div class="headlines-analysis">
+                        <h3>Analysis Breakdown:</h3>
+                        <div style="display: flex; gap: 20px; justify-content: center; margin: 15px 0;">
+                            <div style="text-align: center;">
+                                <div style="font-size: 24px; font-weight: bold; color: #28a745;">
+                                    ${data.breakdown ? data.breakdown.positive : 0}
+                                </div>
+                                <div style="font-size: 12px; color: #666;">Positive</div>
+                            </div>
+                            <div style="text-align: center;">
+                                <div style="font-size: 24px; font-weight: bold; color: #6c757d;">
+                                    ${data.breakdown ? data.breakdown.neutral : 0}
+                                </div>
+                                <div style="font-size: 12px; color: #666;">Neutral</div>
+                            </div>
+                            <div style="text-align: center;">
+                                <div style="font-size: 24px; font-weight: bold; color: #dc3545;">
+                                    ${data.breakdown ? data.breakdown.negative : 0}
+                                </div>
+                                <div style="font-size: 12px; color: #666;">Negative</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div style="margin-top: 20px; padding: 15px; background: #e9ecef; border-radius: 5px; font-size: 14px;">
+                        <strong>Sentiment Scale:</strong><br>
+                        🐂 Bullish: Score > +1 (Very Positive)<br>
+                        😐 Neutral: Score -1 to +1 (Balanced)<br>
+                        🐻 Bearish: Score < -1 (Very Negative)<br><br>
+                        <strong>Note:</strong> Sentiment analysis powered by Cohere AI v2. 
+                        Scores are based on advanced NLP classification with confidence levels.
+                    </div>
+                `;
+                
+            } catch (error) {
+                console.error('Error analyzing sentiment:', error);
+                resultsDiv.innerHTML = `
+                    <div class="sentiment-card bearish">
+                        <div class="sentiment-score">❌ Error</div>
+                        <div class="sentiment-label">Analysis Failed</div>
+                        <div class="sentiment-details">${error.message}</div>
+                    </div>
+                `;
+            }
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // Auto-analyze on page load
+        window.addEventListener('load', analyzeSentiment);
+    </script>
+</body>
+</html> 

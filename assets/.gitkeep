@@ -1,0 +1,18 @@
+# Assets Directory
+
+This directory contains static assets for the Crypto Mood Dashboard:
+
+## Files to add:
+- `screenshot-placeholder.png` - Main dashboard screenshot for README
+- `favicon.ico` - Website favicon (optional)
+- `logo.png` - Dashboard logo (optional)
+- `social-preview.png` - Social media preview image (optional)
+
+## Screenshot Guidelines:
+For the best README presentation, include a screenshot showing:
+- Main dashboard with price widget
+- Sentiment analysis with mood indicators  
+- Combined price + sentiment chart
+- Both light and dark theme examples
+
+Recommended dimensions: 1200x800px or 1440x900px 
