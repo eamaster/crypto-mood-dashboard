@@ -68,6 +68,12 @@
             align-items: center;
             margin-bottom: 20px;
             flex-wrap: wrap;
+            justify-content: flex-start;
+            background: white;
+            padding: 20px;
+            border-radius: 15px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+            border: 1px solid #e0e0e0;
         }
 
         .control-group {
@@ -80,6 +86,14 @@
             font-weight: 600;
             color: #555;
             font-size: 0.9em;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-left: auto;
         }
 
         select, button {
@@ -104,6 +118,10 @@
             cursor: pointer;
             font-weight: 600;
             min-width: 120px;
+            height: 42px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
         button:hover {
@@ -124,6 +142,20 @@
             padding: 20px;
             box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
             border: 1px solid #e0e0e0;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .chart-wrapper {
+            width: 100%;
+            height: 400px;
+            position: relative;
+            margin: 15px 0;
+        }
+
+        #taChart {
+            max-width: 100% !important;
+            max-height: 400px !important;
         }
 
         .indicators-panel {
@@ -243,10 +275,52 @@
             .controls {
                 flex-direction: column;
                 align-items: stretch;
+                gap: 15px;
+            }
+            
+            .button-group {
+                margin-left: 0;
+                justify-content: center;
+                width: 100%;
+            }
+            
+            .control-group {
+                width: 100%;
+            }
+            
+            select {
+                width: 100%;
+            }
+            
+            button {
+                width: 100%;
+                max-width: 200px;
             }
             
             .header h1 {
                 font-size: 2em;
+            }
+            
+            .chart-wrapper {
+                height: 300px;
+            }
+            
+            #taChart {
+                max-height: 300px !important;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .container {
+                padding: 15px;
+            }
+            
+            .chart-wrapper {
+                height: 250px;
+            }
+            
+            #taChart {
+                max-height: 250px !important;
             }
         }
     </style>
@@ -282,15 +356,19 @@
                 </select>
             </div>
             
-            <button onclick="analyzeTA()">🔍 Analyze</button>
-            <button onclick="location.href='../index.html'">🏠 Back to Dashboard</button>
+            <div class="button-group">
+                <button onclick="analyzeTA()">🔍 Analyze</button>
+                <button onclick="location.href='../index.html'">🏠 Back to Dashboard</button>
+            </div>
         </div>
 
         <div class="grid">
             <div class="chart-container">
                 <h3>📈 Price Chart with Technical Indicators</h3>
                 <div id="loading" class="loading">Click "Analyze" to load technical analysis...</div>
-                <canvas id="taChart" style="display: none; height: 400px;"></canvas>
+                <div class="chart-wrapper">
+                    <canvas id="taChart" style="display: none;"></canvas>
+                </div>
             </div>
 
             <div class="indicators-panel">
@@ -464,6 +542,9 @@
             const coinId = document.getElementById('coinSelect').value;
             const timeframe = parseInt(document.getElementById('timeframe').value);
             
+            // ✅ SCROLL FIX: Prevent any automatic scrolling during analysis
+            const currentScrollPosition = window.pageYOffset;
+            
             document.getElementById('loading').style.display = 'block';
             document.getElementById('taChart').style.display = 'none';
             document.getElementById('indicators').innerHTML = '<div class="loading">Calculating indicators...</div>';
@@ -492,18 +573,26 @@
                 
                 document.getElementById('loading').style.display = 'none';
                 
+                // ✅ SCROLL FIX: Restore scroll position to prevent unwanted scrolling
+                window.scrollTo(0, currentScrollPosition);
+                
             } catch (error) {
                 document.getElementById('loading').innerHTML = `<div class="error">Error: ${error.message}</div>`;
+                // ✅ SCROLL FIX: Restore scroll position even on error
+                window.scrollTo(0, currentScrollPosition);
             }
         }
 
         function displayChart(price, sma20, bb) {
             const ctx = document.getElementById('taChart').getContext('2d');
             
+            // ✅ CHART FIX: Properly destroy existing chart to prevent memory leaks
             if (chartInstance) {
                 chartInstance.destroy();
+                chartInstance = null;
             }
 
+            // ✅ CHART FIX: Create new chart with proper sizing constraints
             chartInstance = new Chart(ctx, {
                 type: 'line',
                 data: {
@@ -546,8 +635,11 @@
                     ]
                 },
                 options: {
+                    // ✅ CHART FIX: Proper responsive behavior without stretching
                     responsive: true,
                     maintainAspectRatio: false,
+                    // ✅ CHART FIX: Prevent chart from triggering layout changes
+                    resizeDelay: 0,
                     scales: {
                         x: {
                             type: 'time',
@@ -564,12 +656,33 @@
                             display: true,
                             text: 'Technical Analysis Chart',
                             font: { size: 16 }
+                        },
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        }
+                    },
+                    // ✅ CHART FIX: Disable animations that might cause scrolling
+                    animation: {
+                        duration: 400,
+                        easing: 'easeInOutQuart'
+                    },
+                    // ✅ CHART FIX: Ensure chart stays within bounds
+                    layout: {
+                        padding: {
+                            top: 10,
+                            bottom: 10,
+                            left: 10,
+                            right: 10
                         }
                     }
                 }
             });
 
-            document.getElementById('taChart').style.display = 'block';
+            // ✅ CHART FIX: Show chart only after it's fully rendered
+            setTimeout(() => {
+                document.getElementById('taChart').style.display = 'block';
+            }, 100);
         }
 
         function displayIndicators(rsi, sma20, signals) {
