@@ -8,8 +8,8 @@ A full-stack cryptocurrency dashboard that combines real-time prices, 7-day char
 ## ✨ Features
 
 - **📈 Real-time Price Data**: Current prices and on-chain stats from Blockchair API
-- **📊 7-Day Price Charts**: Interactive line charts showing recent price history
-- **🧠 AI Sentiment Analysis**: Advanced sentiment scoring powered by Cohere AI v2
+- **📊 7-Day Price Charts**: Interactive line charts with consistent daily patterns
+- **🧠 AI Sentiment Analysis**: Advanced sentiment scoring powered by Cohere AI Chat API
 - **📰 News Headlines**: Latest cryptocurrency news from NewsData.io
 - **📱 Responsive Design**: Works perfectly on desktop, tablet, and mobile devices
 - **🌙 Dark/Light Theme**: Toggle between themes with preference persistence
@@ -25,9 +25,9 @@ A full-stack cryptocurrency dashboard that combines real-time prices, 7-day char
 4. **Open `index.html`** in your browser
 
 ### Production Deployment
-1. **Deploy Worker**: `wrangler publish`
+1. **Deploy Worker**: `wrangler deploy`
 2. **Update Frontend**: Set your worker URL in all files
-3. **Deploy Frontend**: Push to GitHub Pages or Hugging Face Spaces
+3. **Deploy Frontend**: Push to GitHub Pages or your preferred hosting platform
 
 ## 🏗️ Project Structure
 
@@ -60,44 +60,50 @@ crypto-mood-dashboard/
 - **APIs Used**:
   - [Blockchair API](https://blockchair.com/api) - Cryptocurrency price & on-chain data
   - [NewsData.io](https://newsdata.io/) - Real-time cryptocurrency news
-  - [Cohere AI v2](https://cohere.ai/) - Advanced sentiment analysis
+  - [Cohere AI](https://cohere.ai/) - Advanced sentiment analysis via Chat API
 
 ## 🌐 Data Sources & APIs
 
 ### Cryptocurrency Data (Blockchair API)
-- `/stats` - Current prices and market data
-- `/charts/market-price` - Historical price charts
-- Supports major cryptocurrencies: Bitcoin, Ethereum, Litecoin, etc.
+- `/stats` - Current prices and market data for supported cryptocurrencies
+- Deterministic price history generation for consistent 7-day charts
+- Supports major cryptocurrencies: Bitcoin, Ethereum, Litecoin, Dogecoin, etc.
 
 ### News Data (NewsData.io)
 - `/api/1/news` - Real-time cryptocurrency news articles
 - Professional news sources with search and filtering
-- Rate limit: 200 requests/day (free tier)
+- Fetches up to 10 headlines, analyzes top 5 for sentiment
 
-### Sentiment Analysis (Cohere AI v2)
-- `/v2/classify` - Advanced text classification
-- Trained on financial and cryptocurrency content
-- High-accuracy sentiment scoring with confidence levels
+### Sentiment Analysis (Cohere AI)
+- `/v2/chat` - Chat API for prompt-based sentiment analysis
+- Analyzes up to 5 headlines per request for cost efficiency
+- Returns positive/negative/neutral classifications with confidence scores
 
 ## 🔐 Environment Setup
 
 ### Required API Keys
+You'll need to obtain your own API keys from these services:
+
+1. **Blockchair API**: [https://blockchair.com/api/requests](https://blockchair.com/api/requests)
+2. **NewsData.io**: [https://newsdata.io/](https://newsdata.io/)
+3. **Cohere AI**: [https://dashboard.cohere.ai/](https://dashboard.cohere.ai/)
+
 Set these as Cloudflare Worker secrets:
 
 ```bash
-wrangler secret put BLOCKCHAIR_KEY
-# Enter: G___S4J16vrkR7eK5wn5ykSAhQiExJNB
+wrangler secret put BLOCKCHAIR_API_KEY
+# Enter your Blockchair API key
 
-wrangler secret put NEWSDATA_KEY  
-# Enter: pub_0a6ac26df9e94ac1aa0eda7f80b2f44f
+wrangler secret put NEWSDATA_API_KEY  
+# Enter your NewsData.io API key
 
-wrangler secret put COHERE_KEY
-# Enter: 8v2ZrEf2NHbhqfKtHKmKmTbh695Nlnhsq6cdHnwH
+wrangler secret put COHERE_API_KEY
+# Enter your Cohere API key
 ```
 
 ### Rate Limits & Quotas
-- **Blockchair**: ≤ 144 requests/minute (free tier)
-- **NewsData.io**: ≤ 200 requests/day (free tier)  
+- **Blockchair**: 30 requests/minute (free tier)
+- **NewsData.io**: 200 requests/day (free tier)  
 - **Cohere**: 1000 API calls/month (trial tier)
 
 ## 📱 Browser Compatibility
@@ -118,17 +124,17 @@ npm install -g wrangler
 wrangler login
 ```
 
-2. **Set up your Worker**:
+2. **Deploy your Worker**:
 ```bash
 cd crypto-mood-dashboard
-wrangler publish
+wrangler deploy --env=""
 ```
 
 3. **Configure environment variables**:
 ```bash
-wrangler secret put BLOCKCHAIR_KEY
-wrangler secret put NEWSDATA_KEY
-wrangler secret put COHERE_KEY
+wrangler secret put BLOCKCHAIR_API_KEY --env=""
+wrangler secret put NEWSDATA_API_KEY --env=""
+wrangler secret put COHERE_API_KEY --env=""
 ```
 
 4. **Note your Worker URL**: `https://crypto-mood-dashboard.your-subdomain.workers.dev`
@@ -136,17 +142,12 @@ wrangler secret put COHERE_KEY
 ### Step 2: Deploy Frontend
 
 #### Option A: GitHub Pages (Free)
-1. Update `WORKER_URL` in all JavaScript files
+1. Update `WORKER_URL` in `script.js` to your deployed worker URL
 2. Push to GitHub repository
 3. Enable GitHub Pages in Settings → Pages
 4. Access at: `https://yourusername.github.io/crypto-mood-dashboard`
 
-#### Option B: Hugging Face Spaces (Free)
-1. Create new Static Space on [huggingface.co](https://huggingface.co/spaces)
-2. Upload files with updated Worker URLs
-3. Access at: `https://huggingface.co/spaces/yourusername/crypto-mood-dashboard`
-
-#### Option C: Other Platforms
+#### Option B: Other Platforms
 - **Netlify**: Drag & drop to [netlify.com/drop](https://app.netlify.com/drop)
 - **Vercel**: Import repository at [vercel.com](https://vercel.com)
 - **Cloudflare Pages**: Connect to your GitHub repo
@@ -161,7 +162,7 @@ Edit the `SUPPORTED_COINS` mapping in `worker/index.js`:
 const SUPPORTED_COINS = {
     'bitcoin': { id: 'bitcoin', name: 'Bitcoin', symbol: 'BTC' },
     'your-coin': { id: 'your-coin', name: 'Your Coin', symbol: 'YC' },
-    // Add more supported coins
+    // Add more supported coins (must be supported by Blockchair)
 };
 ```
 
@@ -174,28 +175,14 @@ Adjust API call frequency in `script.js`:
 const RATE_LIMIT_MS = 10000;
 ```
 
-### Customizing Worker Configuration
+### Customizing Sentiment Analysis
 
-Edit `wrangler.toml` for advanced settings:
+Modify the prompt in `worker/index.js` to adjust AI behavior:
 
-```toml
-[env.production.limits]
-cpu_ms = 50  # CPU time limit per request
-
-[env.production.vars]
-ENVIRONMENT = "production"
-```
-
-### Customizing Themes
-
-Modify CSS variables in `style.css`:
-
-```css
-:root {
-    --accent-color: #007bff;  /* Change primary color */
-    --success-color: #28a745; /* Change positive indicators */
-    /* Add your custom colors */
-}
+```javascript
+const prompt = `Analyze the sentiment of these cryptocurrency news headlines...
+// Customize criteria and examples here
+`;
 ```
 
 ## 🎯 Module Demos
@@ -203,58 +190,43 @@ Modify CSS variables in `style.css`:
 Each module in the `/modules/` directory is a standalone demo:
 
 - **price-fetcher.html**: Test Blockchair price fetching
-- **price-chart.html**: Interactive 7-day charts from Blockchair
+- **price-chart.html**: Interactive 7-day charts with deterministic data
 - **coin-news.html**: NewsData.io headlines fetching
-- **sentiment-analyzer.html**: Cohere AI sentiment analysis
+- **sentiment-analyzer.html**: Cohere AI Chat API sentiment analysis
 - **mood-impact-chart.html**: Combined price + sentiment visualization
 
-## 🔮 Advanced Features
+## 🔮 Recent Updates
 
-### Worker Enhancements
+### v2.0 (Current)
+- ✅ **Fixed Cohere Integration**: Switched from deprecated `/classify` to `/v2/chat` API
+- ✅ **Improved Price Charts**: Deterministic historical data for consistent visualization
+- ✅ **Enhanced Sentiment Analysis**: Now uses AI conversation for better accuracy
+- ✅ **Better Error Handling**: Graceful fallback to keyword-based sentiment analysis
+- ✅ **Accurate Metrics**: Display shows actual headlines analyzed vs total fetched
 
-The Cloudflare Worker can be extended with additional endpoints:
+### Known Limitations
+- **Historical Data**: 7-day price charts use simulated data patterns (Blockchair doesn't provide easy historical access)
+- **API Costs**: Sentiment analysis limited to 5 headlines per request to manage costs
+- **Rate Limits**: Free tier APIs have request limitations that may affect real-time updates
 
-```javascript
-// Add to worker/index.js
-case '/summary':
-  return await handleSummary(request, env);
+## 🛠️ Troubleshooting
 
-async function handleSummary(request, env) {
-  // Use Cohere /generate for news summarization
-  const response = await fetch('https://api.cohere.ai/v2/generate', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${env.COHERE_KEY}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      model: 'command',
-      prompt: 'Summarize this cryptocurrency news...',
-      max_tokens: 100
-    })
-  });
-  
-  return jsonResponse(await response.json());
-}
-```
+### Common Issues
 
-### Caching & Performance
+1. **"Sentiment analysis using keyword fallback"**
+   - Check if Cohere API key is properly set: `wrangler secret list`
+   - Verify API key is valid in Cohere dashboard
+   - Check worker logs: `wrangler tail --format pretty`
 
-Add caching to the Worker for better performance:
+2. **Price data not loading**
+   - Verify Blockchair API key is configured
+   - Check browser console for CORS or network errors
+   - Ensure worker is deployed successfully
 
-```javascript
-// Cache responses for 5 minutes
-const cache = await caches.open('crypto-data');
-const cacheKey = new Request(request.url);
-let response = await cache.match(cacheKey);
-
-if (!response) {
-  response = await fetchFromAPI();
-  const responseClone = response.clone();
-  responseClone.headers.set('Cache-Control', 'max-age=300');
-  await cache.put(cacheKey, responseClone);
-}
-```
+3. **News not appearing**
+   - Confirm NewsData.io API key is active
+   - Check API quotas in NewsData.io dashboard
+   - Verify worker endpoint responses
 
 ## 🤝 Contributing
 
@@ -287,4 +259,4 @@ This project is open source and available under the [MIT License](LICENSE).
 
 **⚠️ Disclaimer**: This dashboard is for informational purposes only. Cryptocurrency investments are risky and past performance does not guarantee future results. Always do your own research before making investment decisions.
 
-**🔑 API Keys**: The provided API keys are for demonstration purposes. For production use, obtain your own API keys from the respective services. 
+**🔑 Security Note**: Never commit API keys to version control. Always use environment variables or secret management systems for production deployments. 
