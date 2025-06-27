@@ -28,7 +28,7 @@
     
     // Cloudflare Worker endpoint
     // Update this to your deployed worker URL
-    const WORKER_URL = 'https://crypto-mood-dashboard.your-subdomain.workers.dev';
+    const WORKER_URL = 'https://crypto-mood-dashboard.smah0085.workers.dev';
     
     // =============================================================================
     // DOM ELEMENTS
