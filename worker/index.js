@@ -245,36 +245,43 @@ async function handleSentiment(request, env) {
 }
 
 async function analyzeSentimentWithCohere(headlines, env) {
-  // Limit to 3 headlines for free tier rate limits
-  const textsToAnalyze = headlines.map(h => h.title || h).slice(0, 3);
+  // Limit to 5 headlines for API limits
+  const textsToAnalyze = headlines.map(h => h.title || h).slice(0, 5);
   
-  // Add delay for rate limiting (free student version)
-  await new Promise(resolve => setTimeout(resolve, 200));
+  // Prepare sentiment classification examples
+  const examples = [
+    { text: "Bitcoin soars to new all-time high", label: "positive" },
+    { text: "Cryptocurrency adoption accelerates globally", label: "positive" },
+    { text: "Major institutions embrace digital assets", label: "positive" },
+    { text: "Bitcoin rally continues with strong momentum", label: "positive" },
+    { text: "Crypto market shows bullish sentiment", label: "positive" },
+    { text: "Digital currency gains mainstream acceptance", label: "positive" },
+    { text: "Blockchain technology revolutionary breakthrough", label: "positive" },
+    { text: "Bitcoin price crashes below support", label: "negative" },
+    { text: "Regulatory concerns impact crypto market", label: "negative" },
+    { text: "Exchange hack causes market panic", label: "negative" },
+    { text: "Crypto market faces bearish pressure", label: "negative" },
+    { text: "Bitcoin drops amid selling pressure", label: "negative" },
+    { text: "Cryptocurrency ban threatens market", label: "negative" },
+    { text: "Market volatility sparks investor fear", label: "negative" },
+    { text: "Bitcoin price remains stable today", label: "neutral" },
+    { text: "Crypto market shows mixed signals", label: "neutral" },
+    { text: "Bitcoin trading volume steady", label: "neutral" },
+    { text: "Market consolidation continues", label: "neutral" },
+    { text: "Cryptocurrency news roundup", label: "neutral" }
+  ];
   
-  const response = await fetch('https://api.cohere.ai/v1/classify', {
+  // Make request to Cohere Classify API
+  const response = await fetch('https://api.cohere.com/v1/classify', {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${env.COHERE_API_KEY}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'embed-english-light-v3.0',
       inputs: textsToAnalyze,
-      examples: [
-        { text: "Bitcoin soars to new all-time high", label: "positive" },
-        { text: "Cryptocurrency adoption accelerates globally", label: "positive" },
-        { text: "Major institutions embrace digital assets", label: "positive" },
-        { text: "Bitcoin rally continues with strong momentum", label: "positive" },
-        { text: "Crypto market shows bullish sentiment", label: "positive" },
-        { text: "Bitcoin price crashes below support", label: "negative" },
-        { text: "Regulatory concerns impact crypto market", label: "negative" },
-        { text: "Exchange hack causes market panic", label: "negative" },
-        { text: "Crypto market faces bearish pressure", label: "negative" },
-        { text: "Bitcoin drops amid selling pressure", label: "negative" },
-        { text: "Bitcoin price remains stable today", label: "neutral" },
-        { text: "Crypto market shows mixed signals", label: "neutral" },
-        { text: "Bitcoin trading volume steady", label: "neutral" }
-      ]
+      examples: examples,
+      truncate: 'END'
     }),
   });
   
@@ -334,7 +341,7 @@ async function analyzeSentimentWithCohere(headlines, env) {
     confidence: Math.round(averageConfidence * 100) / 100,
     total: total,
     analyzed: analyzed,
-    method: 'cohere-ai',
+    method: 'cohere-classify-api',
     breakdown: {
       positive: positiveCount,
       negative: negativeCount,
