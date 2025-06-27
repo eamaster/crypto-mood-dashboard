@@ -116,7 +116,7 @@ async function handleHistory(request, env) {
     }
     
     // Since Blockchair doesn't have a simple historical price endpoint,
-    // we'll generate mock historical data based on current price
+    // we'll generate consistent historical data based on current price
     const statsResponse = await fetch(`https://api.blockchair.com/${coinId}/stats`, {
       headers: {
         'X-API-Key': env.BLOCKCHAIR_API_KEY,
@@ -135,16 +135,37 @@ async function handleHistory(request, env) {
     
     const currentPrice = statsData.data.market_price_usd;
     
-    // Generate historical price data (mock data for demonstration)
+    // Generate deterministic historical price data (consistent for same coin/day)
     const prices = [];
     const now = Date.now();
     const millisecondsPerDay = 24 * 60 * 60 * 1000;
     
+    // Create a seed based on current date (not time) for consistency within the day
+    const today = new Date();
+    const dateSeed = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate();
+    
+    // Simple pseudo-random function with seed for consistent results
+    function seededRandom(seed) {
+      const x = Math.sin(seed) * 10000;
+      return x - Math.floor(x);
+    }
+    
     for (let i = days - 1; i >= 0; i--) {
       const timestamp = now - (i * millisecondsPerDay);
-      // Generate price variation (±5% from current price)
-      const variation = (Math.random() - 0.5) * 0.1; // ±5%
-      const price = currentPrice * (1 + variation);
+      const date = new Date(timestamp);
+      
+      // Create deterministic seed based on coin and date
+      const coinSeed = coinId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+      const dayNumber = Math.floor(timestamp / millisecondsPerDay);
+      const seed = (dateSeed + coinSeed + dayNumber) % 100000;
+      
+      // Generate consistent price variation (±8% from current price)
+      const randomValue = seededRandom(seed);
+      const variation = (randomValue - 0.5) * 0.16; // ±8% variation
+      
+      // Add some trend simulation (slight downward trend for older data)
+      const trendFactor = 1 - (i * 0.005); // Slight downward trend
+      const price = currentPrice * (1 + variation) * trendFactor;
       
       prices.push({
         timestamp: new Date(timestamp).toISOString(),
@@ -157,7 +178,7 @@ async function handleHistory(request, env) {
       prices: prices,
       days: days,
       symbol: SUPPORTED_COINS[coinId].symbol,
-      note: 'Historical data is simulated based on current price'
+      note: 'Historical data is simulated with consistent daily patterns'
     });
     
   } catch (error) {
