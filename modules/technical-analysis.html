@@ -910,13 +910,26 @@
                     </div>
                 `;
                 
+                // Prepare properly formatted data for AI explanation
+                const explanationData = {
+                    rsi: currentAnalysisData.rsi,
+                    sma: currentAnalysisData.sma,
+                    bb: currentAnalysisData.bb,
+                    signals: currentAnalysisData.signals,
+                    coin: currentAnalysisData.coin,
+                    timeframe: currentAnalysisData.timeframe,
+                    priceData: currentAnalysisData.priceData
+                };
+                
+                console.log('📊 Sending AI explanation data:', explanationData);
+                
                 // Call AI explanation endpoint
                 const response = await fetch(`${WORKER_URL}/ai-explain`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify(currentAnalysisData),
+                    body: JSON.stringify(explanationData),
                 });
                 
                 if (!response.ok) {

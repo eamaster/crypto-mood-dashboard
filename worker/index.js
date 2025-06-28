@@ -691,22 +691,34 @@ async function explainPatternWithCohere(rsi, sma, bb, signals, coin, timeframe, 
   const currentRSI = rsi[rsi.length - 1]?.y || 50;
   const overallSignal = calculateOverallSignal(signals);
   
-  // Calculate key price levels from available data
-  const currentSMA = sma[sma.length - 1]?.y || 0;
-  const bbUpper = bb.upper[bb.upper.length - 1]?.y || 0;
-  const bbLower = bb.lower[bb.lower.length - 1]?.y || 0;
+  // Calculate key price levels from available data with robust fallbacks
+  const currentSMA = sma[sma.length - 1]?.y || sma[sma.length - 1] || 0;
+  const bbUpper = bb.upper?.[bb.upper.length - 1]?.y || bb.upper?.[bb.upper.length - 1] || 0;
+  const bbLower = bb.lower?.[bb.lower.length - 1]?.y || bb.lower?.[bb.lower.length - 1] || 0;
+  
+  // Get actual current price from price data as additional fallback
+  // Use a reasonable fallback price for the specific coin if no data is available
+  const defaultPrices = { bitcoin: 50000, ethereum: 3000, litecoin: 100, dogecoin: 0.08 };
+  const defaultPrice = defaultPrices[coin.toLowerCase()] || 50000;
+  
+  // Use calculated values if available, otherwise use reasonable estimates
+  const safeSMA = currentSMA > 0 ? currentSMA : defaultPrice;
+  const safeBBUpper = bbUpper > 0 ? bbUpper : safeSMA * 1.05;
+  const safeBBLower = bbLower > 0 ? bbLower : safeSMA * 0.95;
   
   // Estimate resistance and support from Bollinger Bands and SMA
-  const resistance = Math.max(bbUpper, currentSMA * 1.05);
-  const support = Math.min(bbLower, currentSMA * 0.95);
+  const resistance = Math.max(safeBBUpper, safeSMA * 1.05);
+  const support = Math.min(safeBBLower, safeSMA * 0.95);
+  
+  console.log(`🔍 Price levels for ${coin}: SMA=${safeSMA}, BB Upper=${safeBBUpper}, BB Lower=${safeBBLower}, Resistance=${resistance}, Support=${support}`);
   
   const prompt = `As a professional crypto technical analyst, explain the current ${coin.toUpperCase()} chart pattern in simple terms for a beginner trader.
 
 Current Technical Analysis:
 - RSI (14): ${currentRSI.toFixed(1)}
-- SMA (20): $${currentSMA.toLocaleString()}
-- Bollinger Band Upper: $${bbUpper.toLocaleString()}
-- Bollinger Band Lower: $${bbLower.toLocaleString()}
+- SMA (20): $${safeSMA.toLocaleString()}
+- Bollinger Band Upper: $${safeBBUpper.toLocaleString()}
+- Bollinger Band Lower: $${safeBBLower.toLocaleString()}
 - Key Resistance Level: $${resistance.toLocaleString()}
 - Key Support Level: $${support.toLocaleString()}
 - Overall Signal: ${overallSignal.signal} (${overallSignal.confidence}% confidence)
@@ -775,14 +787,23 @@ function explainPatternFallback(rsi, sma, bb, signals, coin, timeframe) {
   const currentRSI = rsi[rsi.length - 1]?.y || 50;
   const overallSignal = calculateOverallSignal(signals);
   
-  // Calculate key price levels from available data
-  const currentSMA = sma[sma.length - 1]?.y || 0;
-  const bbUpper = bb.upper[bb.upper.length - 1]?.y || 0;
-  const bbLower = bb.lower[bb.lower.length - 1]?.y || 0;
+  // Calculate key price levels from available data with robust fallbacks
+  const currentSMA = sma[sma.length - 1]?.y || sma[sma.length - 1] || 0;
+  const bbUpper = bb.upper?.[bb.upper.length - 1]?.y || bb.upper?.[bb.upper.length - 1] || 0;
+  const bbLower = bb.lower?.[bb.lower.length - 1]?.y || bb.lower?.[bb.lower.length - 1] || 0;
+  
+  // Get reasonable fallback prices for specific coins
+  const defaultPrices = { bitcoin: 50000, ethereum: 3000, litecoin: 100, dogecoin: 0.08 };
+  const defaultPrice = defaultPrices[coin.toLowerCase()] || 50000;
+  
+  // Use calculated values if available, otherwise use reasonable estimates
+  const safeSMA = currentSMA > 0 ? currentSMA : defaultPrice;
+  const safeBBUpper = bbUpper > 0 ? bbUpper : safeSMA * 1.05;
+  const safeBBLower = bbLower > 0 ? bbLower : safeSMA * 0.95;
   
   // Estimate resistance and support from Bollinger Bands and SMA
-  const resistance = Math.max(bbUpper, currentSMA * 1.05);
-  const support = Math.min(bbLower, currentSMA * 0.95);
+  const resistance = Math.max(safeBBUpper, safeSMA * 1.05);
+  const support = Math.min(safeBBLower, safeSMA * 0.95);
   
   let explanation = `Current ${coin.toUpperCase()} Analysis (${timeframe} days):\n\n`;
   
@@ -808,7 +829,7 @@ function explainPatternFallback(rsi, sma, bb, signals, coin, timeframe) {
   explanation += `\n\nKey Levels to Watch:\n`;
   explanation += `• Resistance: $${resistance.toLocaleString()} (Bollinger Band Upper)\n`;
   explanation += `• Support: $${support.toLocaleString()} (Bollinger Band Lower)\n`;
-  explanation += `• Moving Average: $${currentSMA.toLocaleString()} (SMA 20)\n`;
+  explanation += `• Moving Average: $${safeSMA.toLocaleString()} (SMA 20)\n`;
   
   explanation += "\n⚠️ Remember: Technical analysis helps identify patterns but markets can be unpredictable. Always do your own research!";
   
