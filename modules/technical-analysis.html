@@ -89,8 +89,9 @@
             border-radius: 16px;
             padding: 2rem;
             box-shadow: var(--shadow);
-            overflow: hidden;
             position: relative;
+            min-height: 550px;
+            width: 100%;
         }
 
         .chart-container h3 {
@@ -102,21 +103,34 @@
 
         .chart-wrapper {
             width: 100%;
-            height: 400px;
+            height: 450px;
             position: relative;
             margin: 1rem 0;
             background: var(--bg-secondary, #f8f9fa);
             border: 1px solid var(--border-color, #e2e8f0);
             border-radius: 8px;
-            overflow: hidden;
+            padding: 10px;
+            box-sizing: border-box;
         }
 
         #taChart {
             width: 100% !important;
-            height: 100% !important;
+            height: 430px !important;
             max-width: 100% !important;
-            max-height: 400px !important;
-            display: block;
+            max-height: 430px !important;
+            display: none;
+            background: transparent;
+            position: relative;
+            z-index: 1;
+        }
+        
+        #taChart.visible {
+            display: block !important;
+        }
+        
+        /* Ensure chart container allows chart to render */
+        .chart-container canvas {
+            visibility: visible !important;
         }
 
         .indicators-panel {
@@ -266,11 +280,16 @@
             }
             
             #taChart {
-                max-height: 350px !important;
+                height: 320px !important;
+                max-height: 320px !important;
             }
             
             .chart-container, .indicators-panel {
                 padding: 1rem;
+            }
+            
+            .chart-container {
+                min-height: 400px;
             }
         }
 
@@ -561,8 +580,9 @@
                 </div>
                 <div id="loading" class="loading">Click "Analyze" to load technical analysis...</div>
                 <div class="chart-wrapper">
-                    <canvas id="taChart" style="display: none;"></canvas>
+                    <canvas id="taChart"></canvas>
                 </div>
+                <div id="chartError" class="error" style="display: none;"></div>
             </div>
 
             <div class="indicators-panel">
@@ -618,10 +638,67 @@
     </footer>
 
     <script>
+        // Filter out browser extension errors from console
+        const originalError = console.error;
+        const originalWarn = console.warn;
+        
+        console.error = function(...args) {
+            const message = args.join(' ');
+            if (message.includes('runtime.lastError') || 
+                message.includes('message port closed') || 
+                message.includes('content script') ||
+                message.includes('Receiving end does not exist') ||
+                message.includes('message channel closed') ||
+                message.includes('listener indicated an asynchronous response')) {
+                return; // Ignore extension errors
+            }
+            originalError.apply(console, args);
+        };
+        
+        // Also filter console warnings for extension-related issues
+        console.warn = function(...args) {
+            const message = args.join(' ');
+            if (message.includes('runtime.lastError') || 
+                message.includes('extension')) {
+                return; // Ignore extension warnings
+            }
+            originalWarn.apply(console, args);
+        };
+
         // Worker URL - Update this to your deployed worker
         const WORKER_URL = 'https://crypto-mood-dashboard.smah0085.workers.dev';
         
         let chartInstance = null;
+        
+        // Backup function to force chart display if primary method fails
+        function forceChartDisplay() {
+            const canvas = document.getElementById('taChart');
+            if (canvas && chartInstance) {
+                console.log('Forcing chart display as backup...');
+                
+                // Remove any problematic styles
+                canvas.removeAttribute('style');
+                
+                // Apply essential styles directly
+                canvas.style.cssText = `
+                    display: block !important;
+                    visibility: visible !important;
+                    opacity: 1 !important;
+                    width: 100% !important;
+                    height: 430px !important;
+                    position: relative !important;
+                    z-index: 1 !important;
+                    background: transparent !important;
+                `;
+                
+                // Force Chart.js to re-render
+                chartInstance.resize();
+                chartInstance.render();
+                chartInstance.update('active');
+                
+                console.log('Backup chart display attempt completed');
+            }
+        }
 
         // Technical Analysis Functions
         function calculateSMA(data, period) {
@@ -808,6 +885,10 @@
             const canvas = document.getElementById('taChart');
             const ctx = canvas.getContext('2d');
             
+            // Reset canvas visibility
+            canvas.style.display = 'none';
+            canvas.classList.remove('visible');
+            
             // ✅ CHART FIX: Properly destroy existing chart to prevent memory leaks
             if (chartInstance) {
                 chartInstance.destroy();
@@ -885,11 +966,10 @@
                 type: 'line',
                 data: { datasets },
                 options: {
-                    // ✅ CHART FIX: Proper responsive behavior without stretching
                     responsive: true,
                     maintainAspectRatio: false,
-                    // ✅ CHART FIX: Prevent chart from triggering layout changes
                     resizeDelay: 0,
+                    devicePixelRatio: window.devicePixelRatio || 1,
                     interaction: {
                         intersect: false,
                         mode: 'index'
@@ -1023,18 +1103,38 @@
             });
 
             // ✅ CHART FIX: Show chart only after it's fully rendered
-            setTimeout(() => {
-                const canvas = document.getElementById('taChart');
-                canvas.style.display = 'block';
-                
-                // Force chart to update and render
-                if (chartInstance) {
-                    chartInstance.update('none'); // Update without animation for immediate display
-                    chartInstance.resize();
-                }
-                
-                console.log('Chart should now be visible');
-            }, 150);
+            requestAnimationFrame(() => {
+                setTimeout(() => {
+                    const canvas = document.getElementById('taChart');
+                    
+                    // Force canvas visibility with multiple approaches
+                    canvas.style.display = 'block';
+                    canvas.style.visibility = 'visible';
+                    canvas.style.opacity = '1';
+                    canvas.style.width = '100%';
+                    canvas.style.height = '430px';
+                    canvas.classList.add('visible');
+                    
+                    // Force chart to update and render
+                    if (chartInstance) {
+                        chartInstance.update('active');
+                        chartInstance.resize();
+                        
+                        // Double-check chart rendering
+                        setTimeout(() => {
+                            chartInstance.render();
+                        }, 100);
+                    }
+                    
+                    console.log('Chart forced visible with dimensions:', {
+                        width: canvas.clientWidth,
+                        height: canvas.clientHeight,
+                        display: canvas.style.display,
+                        visibility: canvas.style.visibility,
+                        opacity: canvas.style.opacity
+                    });
+                }, 200);
+            });
         }
 
         function displayIndicators(rsi, sma20, signals) {
@@ -1444,6 +1544,7 @@
             // Hide AI sections initially
             document.getElementById('aiAnalysisSection').style.display = 'none';
             document.getElementById('aiExplainBtn').style.display = 'none';
+            document.getElementById('chartError').style.display = 'none';
 
             try {
                 console.log(`Starting analysis for ${coinId} over ${timeframe} days`);
@@ -1472,6 +1573,31 @@
                 displayIndicators(rsi, sma20, signals);
                 displaySummary(overallSignal, signals.length, coinId.toUpperCase());
                 
+                // Force chart visibility after a short delay - final safety check
+                setTimeout(() => {
+                    const canvas = document.getElementById('taChart');
+                    if (canvas && chartInstance) {
+                        // Multiple visibility approaches for maximum compatibility
+                        canvas.style.display = 'block';
+                        canvas.style.visibility = 'visible';
+                        canvas.style.opacity = '1';
+                        canvas.style.position = 'relative';
+                        canvas.style.zIndex = '1';
+                        canvas.classList.add('visible');
+                        
+                        // Force chart to re-render completely
+                        chartInstance.resize();
+                        chartInstance.render();
+                        
+                        console.log('Chart forced to display - final safety check completed');
+                        
+                        // Last resort: log if chart still not visible
+                        if (canvas.clientWidth === 0 || canvas.clientHeight === 0) {
+                            console.warn('Chart canvas has zero dimensions - check CSS!');
+                        }
+                    }
+                }, 700);
+                
                 // 🤖 PERFORM AI ANALYSIS
                 console.log('🤖 Starting AI integration...');
                 await performAIAnalysis(priceData, rsi, sma20, bb, signals, coinId);
@@ -1479,11 +1605,24 @@
                 document.getElementById('loading').style.display = 'none';
                 console.log('Analysis complete!');
                 
+                // Final backup attempt to ensure chart is visible
+                setTimeout(() => {
+                    const canvas = document.getElementById('taChart');
+                    if (canvas && (canvas.clientWidth === 0 || canvas.clientHeight === 0 || canvas.style.display === 'none')) {
+                        console.log('Chart not visible, attempting backup display method...');
+                        forceChartDisplay();
+                    }
+                }, 1000);
+                
                 // ✅ SCROLL FIX: Restore scroll position to prevent unwanted scrolling
                 window.scrollTo(0, currentScrollPosition);
                 
             } catch (error) {
-                document.getElementById('loading').innerHTML = `<div class="error">Error: ${error.message}</div>`;
+                console.error('Analysis error:', error);
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('chartError').style.display = 'block';
+                document.getElementById('chartError').innerHTML = `<strong>⚠️ Analysis Failed:</strong> ${error.message}. Please try a longer timeframe or check your connection.`;
+                document.getElementById('indicators').innerHTML = '<div class="error">Analysis failed - please try again with a longer timeframe</div>';
                 // ✅ SCROLL FIX: Restore scroll position even on error
                 window.scrollTo(0, currentScrollPosition);
             }
