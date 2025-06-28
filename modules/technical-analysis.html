@@ -105,11 +105,18 @@
             height: 400px;
             position: relative;
             margin: 1rem 0;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            overflow: hidden;
         }
 
         #taChart {
+            width: 100% !important;
+            height: 100% !important;
             max-width: 100% !important;
-            max-height: 400px !important;
+            max-height: 100% !important;
+            display: block !important;
         }
 
         .indicators-panel {
@@ -781,7 +788,12 @@
         }
 
         function displayChart(price, sma20, bb) {
-            const ctx = document.getElementById('taChart').getContext('2d');
+            const canvas = document.getElementById('taChart');
+            const ctx = canvas.getContext('2d');
+            
+            // Clear any inline styles that might interfere
+            canvas.removeAttribute('style');
+            canvas.style.display = 'none';
             
             // ✅ CHART FIX: Properly destroy existing chart to prevent memory leaks
             if (chartInstance) {
@@ -791,10 +803,10 @@
 
             // Get theme-aware colors
             const isDark = document.body.classList.contains('dark-theme');
-            const priceColor = getComputedStyle(document.documentElement).getPropertyValue('--accent-color').trim();
-            const successColor = getComputedStyle(document.documentElement).getPropertyValue('--success-color').trim();
-            const dangerColor = getComputedStyle(document.documentElement).getPropertyValue('--danger-color').trim();
-            const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim();
+            const priceColor = getComputedStyle(document.documentElement).getPropertyValue('--accent-color').trim() || '#3B82F6';
+            const successColor = getComputedStyle(document.documentElement).getPropertyValue('--success-color').trim() || '#10B981';
+            const dangerColor = getComputedStyle(document.documentElement).getPropertyValue('--danger-color').trim() || '#EF4444';
+            const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || (isDark ? '#ffffff' : '#000000');
             const gridColor = isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
 
             // ✅ CHART FIX: Create new chart with theme-aware colors
@@ -809,18 +821,21 @@
                             backgroundColor: priceColor + '20',
                             borderWidth: 3,
                             fill: true,
-                            tension: 0.1
+                            tension: 0.1,
+                            pointRadius: 2,
+                            pointHoverRadius: 5
                         },
                         {
-                            label: 'SMA 20 (starts after 20 data points)',
+                            label: 'SMA 20',
                             data: sma20,
                             borderColor: successColor,
                             borderWidth: 2,
                             fill: false,
-                            pointRadius: 0
+                            pointRadius: 1,
+                            pointHoverRadius: 4
                         },
                         {
-                            label: 'BB Upper (requires SMA calculation)',
+                            label: 'BB Upper',
                             data: bb.upper,
                             borderColor: dangerColor,
                             borderWidth: 1,
@@ -829,7 +844,7 @@
                             pointRadius: 0
                         },
                         {
-                            label: 'BB Lower (requires SMA calculation)',
+                            label: 'BB Lower',
                             data: bb.lower,
                             borderColor: dangerColor,
                             borderWidth: 1,
@@ -840,7 +855,6 @@
                     ]
                 },
                 options: {
-                    // ✅ CHART FIX: Proper responsive behavior without stretching
                     responsive: true,
                     maintainAspectRatio: false,
                     // ✅ CHART FIX: Prevent chart from triggering layout changes
@@ -979,8 +993,16 @@
 
             // ✅ CHART FIX: Show chart only after it's fully rendered
             setTimeout(() => {
-                document.getElementById('taChart').style.display = 'block';
-            }, 100);
+                const canvas = document.getElementById('taChart');
+                canvas.style.display = 'block';
+                canvas.style.width = '100%';
+                canvas.style.height = '100%';
+                
+                // Force chart resize to container
+                if (chartInstance) {
+                    chartInstance.resize();
+                }
+            }, 200);
         }
 
         function displayIndicators(rsi, sma20, signals) {
@@ -1390,6 +1412,7 @@
             // Hide AI sections initially
             document.getElementById('aiAnalysisSection').style.display = 'none';
             document.getElementById('aiExplainBtn').style.display = 'none';
+            document.getElementById('chartError').style.display = 'none';
 
             try {
                 const priceData = await fetchPriceData(coinId, timeframe);
@@ -1418,7 +1441,11 @@
                 window.scrollTo(0, currentScrollPosition);
                 
             } catch (error) {
-                document.getElementById('loading').innerHTML = `<div class="error">Error: ${error.message}</div>`;
+                console.error('Analysis error:', error);
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('chartError').style.display = 'block';
+                document.getElementById('chartError').innerHTML = `<strong>⚠️ Analysis Failed:</strong> ${error.message}. Please check your connection and try again.`;
+                document.getElementById('indicators').innerHTML = '<div class="error">Analysis failed - please try again</div>';
                 // ✅ SCROLL FIX: Restore scroll position even on error
                 window.scrollTo(0, currentScrollPosition);
             }
