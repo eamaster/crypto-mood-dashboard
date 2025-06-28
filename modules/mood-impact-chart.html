@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Mood Impact Chart Demo</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sentiment@5.0.2/lib/index.min.js"></script>
     <style>
         body {
@@ -141,6 +142,8 @@
             const newsPreview = document.getElementById('newsPreview');
             
             try {
+                console.log('Starting fetchMoodImpactData for:', coinId);
+                
                 // Show loading, hide other elements
                 loadingDiv.style.display = 'block';
                 errorDiv.style.display = 'none';
@@ -153,11 +156,14 @@
                     chartInstance = null;
                 }
                 
+                console.log('Fetching price data and news...');
                 // Fetch price data and news in parallel
                 const [priceData, newsData] = await Promise.all([
                     fetchPriceData(coinId),
                     fetchNewsData(coinId)
                 ]);
+                console.log('Price data received:', priceData.length, 'points');
+                console.log('News data received:', newsData.length, 'headlines');
                 
                 // Analyze sentiment
                 const sentimentData = analyzeSentimentData(newsData);
