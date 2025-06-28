@@ -464,6 +464,358 @@ function analyzeSentimentWithKeywords(headlines) {
 }
 
 // =============================================================================
+// AI-POWERED TECHNICAL ANALYSIS HANDLERS
+// =============================================================================
+
+/**
+ * AI Market Mood Classification
+ * Uses Cohere v2/classify to analyze technical signals and determine market sentiment
+ */
+async function handleAIAnalysis(request, env) {
+  try {
+    if (request.method !== 'POST') {
+      return errorResponse('Method not allowed', 405);
+    }
+    
+    const body = await request.json();
+    const { rsi, smaSignal, bbSignal, priceData, coin } = body;
+    
+    if (!rsi || !smaSignal || !bbSignal || !priceData) {
+      return errorResponse('Missing required technical analysis data');
+    }
+    
+    // Try Cohere AI classification first, with fallback to rule-based analysis
+    try {
+      return await classifyMarketMoodWithCohere(rsi, smaSignal, bbSignal, priceData, coin, env);
+    } catch (error) {
+      console.log('Cohere AI classification failed, using fallback:', error.message);
+      return classifyMarketMoodFallback(rsi, smaSignal, bbSignal, priceData, coin);
+    }
+    
+  } catch (error) {
+    console.error('AI Analysis error:', error);
+    return errorResponse(`Failed to perform AI analysis: ${error.message}`);
+  }
+}
+
+/**
+ * AI Pattern Explanation 
+ * Uses Cohere v2/chat to provide natural language explanations of technical patterns
+ */
+async function handleAIExplain(request, env) {
+  try {
+    if (request.method !== 'POST') {
+      return errorResponse('Method not allowed', 405);
+    }
+    
+    const body = await request.json();
+    const { rsi, sma, bb, signals, coin, timeframe } = body;
+    
+    if (!rsi || !sma || !bb || !signals || !coin) {
+      return errorResponse('Missing required data for AI explanation');
+    }
+    
+    // Try Cohere AI explanation first, with fallback
+    try {
+      return await explainPatternWithCohere(rsi, sma, bb, signals, coin, timeframe, env);
+    } catch (error) {
+      console.log('Cohere AI explanation failed, using fallback:', error.message);
+      return explainPatternFallback(rsi, sma, bb, signals, coin, timeframe);
+    }
+    
+  } catch (error) {
+    console.error('AI Explanation error:', error);
+    return errorResponse(`Failed to generate AI explanation: ${error.message}`);
+  }
+}
+
+/**
+ * Classify market mood using Cohere's v2/classify endpoint
+ */
+async function classifyMarketMoodWithCohere(rsi, smaSignal, bbSignal, priceData, coin, env) {
+  // Prepare training examples for classification
+  const examples = [
+    {
+      text: "RSI: 85, SMA: SELL, BB: SELL, Price trend: declining sharply",
+      label: "bearish"
+    },
+    {
+      text: "RSI: 25, SMA: BUY, BB: BUY, Price trend: rising from oversold",
+      label: "bullish"
+    },
+    {
+      text: "RSI: 45, SMA: NEUTRAL, BB: NEUTRAL, Price trend: sideways movement",
+      label: "neutral"
+    },
+    {
+      text: "RSI: 75, SMA: BUY, BB: NEUTRAL, Price trend: strong upward momentum",
+      label: "bullish"
+    },
+    {
+      text: "RSI: 30, SMA: SELL, BB: SELL, Price trend: continued downtrend",
+      label: "bearish"
+    },
+    {
+      text: "RSI: 55, SMA: BUY, BB: BUY, Price trend: breaking resistance",
+      label: "bullish"
+    },
+    {
+      text: "RSI: 68, SMA: NEUTRAL, BB: SELL, Price trend: mixed signals",
+      label: "neutral"
+    },
+    {
+      text: "RSI: 20, SMA: BUY, BB: BUY, Price trend: potential reversal",
+      label: "bullish"
+    }
+  ];
+  
+  // Calculate price trend from recent data
+  const recentPrices = priceData.slice(-5);
+  const oldPrice = recentPrices[0]?.y || 0;
+  const newPrice = recentPrices[recentPrices.length - 1]?.y || 0;
+  const priceChange = ((newPrice - oldPrice) / oldPrice) * 100;
+  
+  let priceTrend = 'sideways movement';
+  if (priceChange > 2) priceTrend = 'rising strongly';
+  else if (priceChange > 0.5) priceTrend = 'rising gradually';
+  else if (priceChange < -2) priceTrend = 'declining sharply';
+  else if (priceChange < -0.5) priceTrend = 'declining gradually';
+  
+  // Create input text for classification
+  const inputText = `RSI: ${rsi.toFixed(0)}, SMA: ${smaSignal}, BB: ${bbSignal}, Price trend: ${priceTrend}`;
+  
+  console.log('Classifying market mood for:', inputText);
+  
+  // Make request to Cohere Classify API v2
+  const response = await fetch('https://api.cohere.com/v2/classify', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${env.COHERE_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'command-r',
+      inputs: [inputText],
+      examples: examples,
+      task_description: 'Classify cryptocurrency market sentiment based on technical analysis indicators. Use "bullish" for positive outlook, "bearish" for negative outlook, and "neutral" for mixed or unclear signals.'
+    }),
+  });
+  
+  if (!response.ok) {
+    const errorBody = await response.text();
+    console.log('Cohere Classify API error:', errorBody);
+    throw new Error(`Cohere Classify API error: ${response.status}`);
+  }
+  
+  const data = await response.json();
+  console.log('Cohere Classify API success:', data);
+  
+  // Extract classification result
+  const classification = data.classifications?.[0];
+  if (!classification) {
+    throw new Error('No classification result returned');
+  }
+  
+  const prediction = classification.prediction;
+  const confidence = classification.confidence || 0;
+  
+  // Map confidence to a more meaningful scale
+  const confidencePercentage = Math.round(confidence * 100);
+  
+  return jsonResponse({
+    mood: prediction,
+    confidence: confidencePercentage,
+    reasoning: `Based on RSI ${rsi.toFixed(1)}, SMA signal: ${smaSignal}, BB signal: ${bbSignal}, and price trend: ${priceTrend}`,
+    method: 'cohere-classify-api',
+    coin: coin,
+    timestamp: new Date().toISOString()
+  });
+}
+
+/**
+ * Fallback market mood classification using rule-based logic
+ */
+function classifyMarketMoodFallback(rsi, smaSignal, bbSignal, priceData, coin) {
+  let bullishScore = 0;
+  let bearishScore = 0;
+  
+  // RSI scoring
+  if (rsi < 30) bullishScore += 2; // Oversold
+  else if (rsi > 70) bearishScore += 2; // Overbought
+  else if (rsi >= 45 && rsi <= 55) bullishScore += 0.5; // Neutral momentum
+  
+  // SMA scoring
+  if (smaSignal === 'BUY') bullishScore += 1.5;
+  else if (smaSignal === 'SELL') bearishScore += 1.5;
+  
+  // Bollinger Bands scoring
+  if (bbSignal === 'BUY') bullishScore += 1;
+  else if (bbSignal === 'SELL') bearishScore += 1;
+  
+  // Calculate price trend
+  if (priceData.length >= 3) {
+    const recentPrices = priceData.slice(-3);
+    const trend = (recentPrices[2].y - recentPrices[0].y) / recentPrices[0].y;
+    if (trend > 0.01) bullishScore += 1;
+    else if (trend < -0.01) bearishScore += 1;
+  }
+  
+  // Determine mood
+  let mood, confidence;
+  if (bullishScore > bearishScore + 1) {
+    mood = 'bullish';
+    confidence = Math.min(90, 60 + (bullishScore - bearishScore) * 10);
+  } else if (bearishScore > bullishScore + 1) {
+    mood = 'bearish';
+    confidence = Math.min(90, 60 + (bearishScore - bullishScore) * 10);
+  } else {
+    mood = 'neutral';
+    confidence = 50 + Math.abs(bullishScore - bearishScore) * 5;
+  }
+  
+  return jsonResponse({
+    mood: mood,
+    confidence: Math.round(confidence),
+    reasoning: `Rule-based analysis: bullish signals ${bullishScore}, bearish signals ${bearishScore}`,
+    method: 'rule-based-fallback',
+    coin: coin,
+    timestamp: new Date().toISOString()
+  });
+}
+
+/**
+ * Generate natural language explanation using Cohere's v2/chat endpoint
+ */
+async function explainPatternWithCohere(rsi, sma, bb, signals, coin, timeframe, env) {
+  // Prepare context for the AI
+  const currentRSI = rsi[rsi.length - 1]?.y || 50;
+  const overallSignal = calculateOverallSignal(signals);
+  
+  const prompt = `As a professional crypto technical analyst, explain the current ${coin.toUpperCase()} chart pattern in simple terms for a beginner trader.
+
+Current Technical Analysis:
+- RSI (14): ${currentRSI.toFixed(1)}
+- Overall Signal: ${overallSignal.signal} (${overallSignal.confidence}% confidence)
+- Time Period: ${timeframe} days
+- Individual Signals: ${signals.map(s => `${s.type}: ${s.signal} (${s.strength})`).join(', ')}
+
+Please provide:
+1. A clear explanation of what the current pattern means
+2. What might happen next (potential scenarios)
+3. Key levels or signals to watch
+4. A simple summary for beginners
+
+Keep the explanation under 200 words, avoid jargon, and focus on educational value. Do NOT provide specific trading advice.`;
+
+  console.log('Generating AI explanation for:', coin);
+  
+  // Make request to Cohere Chat API v2
+  const response = await fetch('https://api.cohere.com/v2/chat', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${env.COHERE_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'command-r',
+      messages: [
+        {
+          role: 'user',
+          content: prompt
+        }
+      ],
+      temperature: 0.7,
+      max_tokens: 300
+    }),
+  });
+  
+  if (!response.ok) {
+    const errorBody = await response.text();
+    console.log('Cohere Chat API error:', errorBody);
+    throw new Error(`Cohere Chat API error: ${response.status}`);
+  }
+  
+  const data = await response.json();
+  console.log('Cohere Chat API success for explanation');
+  
+  // Extract explanation
+  const explanation = data.message?.content?.[0]?.text || '';
+  
+  if (!explanation) {
+    throw new Error('No explanation generated');
+  }
+  
+  return jsonResponse({
+    explanation: explanation.trim(),
+    method: 'cohere-chat-api',
+    coin: coin,
+    timeframe: timeframe,
+    timestamp: new Date().toISOString()
+  });
+}
+
+/**
+ * Fallback explanation generator
+ */
+function explainPatternFallback(rsi, sma, bb, signals, coin, timeframe) {
+  const currentRSI = rsi[rsi.length - 1]?.y || 50;
+  const overallSignal = calculateOverallSignal(signals);
+  
+  let explanation = `Current ${coin.toUpperCase()} Analysis (${timeframe} days):\n\n`;
+  
+  // RSI explanation
+  if (currentRSI < 30) {
+    explanation += "📉 RSI shows oversold conditions - the price may have fallen too much and could bounce back. ";
+  } else if (currentRSI > 70) {
+    explanation += "📈 RSI indicates overbought territory - the price may have risen too quickly and could pull back. ";
+  } else {
+    explanation += "⚖️ RSI is in normal range - no extreme buying or selling pressure detected. ";
+  }
+  
+  // Overall signal explanation
+  if (overallSignal.signal === 'BUY') {
+    explanation += "The technical indicators are showing mostly positive signals, suggesting potential upward movement. ";
+  } else if (overallSignal.signal === 'SELL') {
+    explanation += "The technical indicators are showing mostly negative signals, suggesting potential downward pressure. ";
+  } else {
+    explanation += "The technical indicators are mixed, suggesting a period of consolidation or uncertainty. ";
+  }
+  
+  explanation += "\n\n⚠️ Remember: Technical analysis helps identify patterns but markets can be unpredictable. Always do your own research!";
+  
+  return jsonResponse({
+    explanation: explanation,
+    method: 'rule-based-fallback',
+    coin: coin,
+    timeframe: timeframe,
+    timestamp: new Date().toISOString()
+  });
+}
+
+// Helper function for calculating overall signal (needed for AI analysis)
+function calculateOverallSignal(signals) {
+  let buyCount = 0;
+  let sellCount = 0;
+  let totalStrength = 0;
+
+  signals.forEach(signal => {
+    const strengthValue = signal.strength === 'Strong' ? 3 : signal.strength === 'Medium' ? 2 : 1;
+    totalStrength += strengthValue;
+
+    if (signal.signal === 'BUY') buyCount += strengthValue;
+    else if (signal.signal === 'SELL') sellCount += strengthValue;
+  });
+
+  const buyPercentage = (buyCount / totalStrength) * 100;
+  const sellPercentage = (sellCount / totalStrength) * 100;
+  const confidence = Math.max(buyPercentage, sellPercentage);
+
+  if (buyPercentage > 60) return { signal: 'BUY', confidence: confidence.toFixed(1) };
+  else if (sellPercentage > 60) return { signal: 'SELL', confidence: confidence.toFixed(1) };
+  else return { signal: 'HOLD', confidence: (100 - confidence).toFixed(1) };
+}
+
+// =============================================================================
 // MAIN HANDLER
 // =============================================================================
 
@@ -497,6 +849,12 @@ export default {
           
         case '/sentiment':
           return await handleSentiment(request, env);
+          
+        case '/ai-analysis':
+          return await handleAIAnalysis(request, env);
+          
+        case '/ai-explain':
+          return await handleAIExplain(request, env);
           
         default:
           return errorResponse('Not found', 404);

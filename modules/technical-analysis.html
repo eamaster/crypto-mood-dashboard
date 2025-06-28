@@ -358,6 +358,7 @@
             
             <div class="button-group">
                 <button onclick="analyzeTA()">🔍 Analyze</button>
+                <button id="aiExplainBtn" onclick="getAIExplanation()" style="display: none;">🤖 AI Explain This</button>
                 <button onclick="location.href='../index.html'">🏠 Back to Dashboard</button>
             </div>
         </div>
@@ -367,6 +368,7 @@
                 <h3>📈 Price Chart with Technical Indicators</h3>
                 <div style="background: #e7f3ff; padding: 10px; border-radius: 8px; margin: 10px 0; font-size: 0.85em; color: #1565c0; border-left: 4px solid #2196f3;">
                     <strong>ℹ️ Chart Information:</strong> Technical indicators (SMA, Bollinger Bands) start after collecting sufficient data points for accurate calculations. This delayed start is mathematically correct and ensures reliable signals.
+                    <br><strong>🤖 AI Enhancement:</strong> Advanced AI analysis will automatically classify market mood and provide pattern explanations below the chart.
                 </div>
                 <div id="loading" class="loading">Click "Analyze" to load technical analysis...</div>
                 <div class="chart-wrapper">
@@ -378,6 +380,43 @@
                 <h3>📊 Technical Indicators</h3>
                 <div id="indicators">
                     <div class="loading">Analysis results will appear here...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- AI-Powered Analysis Section -->
+        <div id="aiAnalysisSection" style="display: none;">
+            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 15px; margin-bottom: 20px;">
+                <h3 style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
+                    🤖 AI-Powered Market Analysis
+                    <span id="aiMethodBadge" style="background: rgba(255,255,255,0.3); padding: 4px 8px; border-radius: 12px; font-size: 0.7em;"></span>
+                </h3>
+                
+                <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 20px; align-items: center;">
+                    <div>
+                        <div style="text-align: center;">
+                            <div id="aiMoodIcon" style="font-size: 3em; margin-bottom: 10px;">🤖</div>
+                            <div id="aiMoodLabel" style="font-size: 1.5em; font-weight: 700; margin-bottom: 5px;">Analyzing...</div>
+                            <div id="aiConfidence" style="font-size: 0.9em; opacity: 0.9;">Confidence: --</div>
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <div id="aiReasoning" style="background: rgba(255,255,255,0.1); padding: 15px; border-radius: 10px; font-size: 0.9em; line-height: 1.4;">
+                            Generating AI analysis...
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- AI Explanation Section -->
+            <div id="aiExplanationSection" style="display: none; background: white; border-radius: 15px; padding: 20px; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1); border: 1px solid #e0e0e0; margin-bottom: 20px;">
+                <h3 style="color: #2c3e50; margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
+                    🧠 AI Pattern Explanation
+                    <span id="explainMethodBadge" style="background: #e3f2fd; color: #1565c0; padding: 4px 8px; border-radius: 12px; font-size: 0.7em;"></span>
+                </h3>
+                <div id="aiExplanationContent" style="background: #f8f9fa; padding: 15px; border-radius: 10px; border-left: 4px solid #667eea; line-height: 1.6;">
+                    Click "AI Explain This" to get a detailed explanation of the current market pattern.
                 </div>
             </div>
         </div>
@@ -749,13 +788,247 @@
                         Based on ${totalSignals} technical indicators
                     </div>
                     <div style="margin-top: 15px; font-size: 0.85em; opacity: 0.9; border-top: 1px solid rgba(255,255,255,0.3); padding-top: 15px;">
-                        <strong>⚠️ Remember:</strong> Technical analysis is not a crystal ball. It helps identify trends and patterns, but markets can be unpredictable. Technical indicators may start mid-timeframe due to calculation requirements (e.g., SMA needs 20 data points). This is educational content only, not investment advice. Always do your own research and never invest more than you can afford to lose.
+                        <strong>⚠️ Remember:</strong> Technical analysis and AI insights are educational tools, not crystal balls. They help identify trends and patterns, but markets can be unpredictable. Technical indicators may start mid-timeframe due to calculation requirements (e.g., SMA needs 20 data points). AI analysis enhances traditional indicators but should not be solely relied upon. This is educational content only, not investment advice. Always do your own research and never invest more than you can afford to lose.
                     </div>
                 </div>
             `;
             
             document.getElementById('taSummary').style.display = 'block';
         }
+
+        // =============================================================================
+        // AI-POWERED ANALYSIS FUNCTIONS
+        // =============================================================================
+
+        // Global variables to store analysis data for AI processing
+        let currentAnalysisData = null;
+
+        /**
+         * Perform AI-powered market mood analysis
+         * Uses Cohere v2/classify endpoint via worker
+         */
+        async function performAIAnalysis(priceData, rsi, sma20, bb, signals, coinId) {
+            try {
+                console.log('🤖 Starting AI analysis...');
+                
+                // Prepare data for AI analysis
+                const currentRSI = rsi.length > 0 ? rsi[rsi.length - 1].y : 50;
+                const smaSignal = signals.find(s => s.type === 'SMA')?.signal || 'NEUTRAL';
+                const bbSignal = signals.find(s => s.type === 'BB')?.signal || 'NEUTRAL';
+                
+                // Store data for potential AI explanation later
+                currentAnalysisData = {
+                    priceData, rsi, sma: sma20, bb, signals, coin: coinId, 
+                    timeframe: parseInt(document.getElementById('timeframe').value)
+                };
+                
+                // Call AI analysis endpoint
+                const response = await fetch(`${WORKER_URL}/ai-analysis`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        rsi: currentRSI,
+                        smaSignal: smaSignal,
+                        bbSignal: bbSignal,
+                        priceData: priceData,
+                        coin: coinId
+                    }),
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`AI Analysis API error: ${response.status}`);
+                }
+                
+                const aiResult = await response.json();
+                console.log('🤖 AI Analysis result:', aiResult);
+                
+                // Display AI analysis results
+                displayAIAnalysis(aiResult);
+                
+                // Show the AI Explain button
+                document.getElementById('aiExplainBtn').style.display = 'inline-flex';
+                
+            } catch (error) {
+                console.error('❌ AI Analysis failed:', error);
+                displayAIAnalysisError(error.message);
+            }
+        }
+
+        /**
+         * Display AI analysis results in the UI
+         */
+        function displayAIAnalysis(aiResult) {
+            // Show the AI analysis section
+            document.getElementById('aiAnalysisSection').style.display = 'block';
+            
+            // Update mood icon and label
+            const moodIcons = {
+                'bullish': '🚀',
+                'bearish': '🐻',
+                'neutral': '⚖️'
+            };
+            
+            const moodColors = {
+                'bullish': '#28a745',
+                'bearish': '#dc3545', 
+                'neutral': '#6c757d'
+            };
+            
+            document.getElementById('aiMoodIcon').textContent = moodIcons[aiResult.mood] || '🤖';
+            document.getElementById('aiMoodLabel').textContent = aiResult.mood.toUpperCase();
+            document.getElementById('aiMoodLabel').style.color = moodColors[aiResult.mood] || '#fff';
+            document.getElementById('aiConfidence').textContent = `Confidence: ${aiResult.confidence}%`;
+            
+            // Update reasoning
+            document.getElementById('aiReasoning').textContent = aiResult.reasoning;
+            
+            // Update method badge
+            const methodText = aiResult.method === 'cohere-classify-api' ? 'Cohere AI' : 'Rule-based';
+            document.getElementById('aiMethodBadge').textContent = methodText;
+        }
+
+        /**
+         * Display AI analysis error
+         */
+        function displayAIAnalysisError(errorMessage) {
+            document.getElementById('aiAnalysisSection').style.display = 'block';
+            document.getElementById('aiMoodIcon').textContent = '⚠️';
+            document.getElementById('aiMoodLabel').textContent = 'Analysis Failed';
+            document.getElementById('aiMoodLabel').style.color = '#dc3545';
+            document.getElementById('aiConfidence').textContent = 'Error occurred';
+            document.getElementById('aiReasoning').textContent = `AI analysis temporarily unavailable: ${errorMessage}. Using traditional indicators instead.`;
+            document.getElementById('aiMethodBadge').textContent = 'Fallback';
+        }
+
+        /**
+         * Get AI explanation of current pattern
+         * Uses Cohere v2/chat endpoint via worker
+         */
+        async function getAIExplanation() {
+            if (!currentAnalysisData) {
+                alert('Please run an analysis first!');
+                return;
+            }
+            
+            try {
+                console.log('🧠 Generating AI explanation...');
+                
+                // Show loading state
+                document.getElementById('aiExplanationSection').style.display = 'block';
+                document.getElementById('aiExplanationContent').innerHTML = `
+                    <div style="display: flex; align-items: center; gap: 10px; color: #666;">
+                        <div style="width: 20px; height: 20px; border: 2px solid #667eea; border-top: 2px solid transparent; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+                        Generating AI explanation...
+                    </div>
+                `;
+                
+                // Call AI explanation endpoint
+                const response = await fetch(`${WORKER_URL}/ai-explain`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(currentAnalysisData),
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`AI Explanation API error: ${response.status}`);
+                }
+                
+                const aiExplanation = await response.json();
+                console.log('🧠 AI Explanation result:', aiExplanation);
+                
+                // Display explanation
+                displayAIExplanation(aiExplanation);
+                
+            } catch (error) {
+                console.error('❌ AI Explanation failed:', error);
+                displayAIExplanationError(error.message);
+            }
+        }
+
+        /**
+         * Display AI explanation results
+         */
+        function displayAIExplanation(aiExplanation) {
+            // Format the explanation with proper line breaks
+            const formattedExplanation = aiExplanation.explanation
+                .replace(/\n\n/g, '</p><p>')
+                .replace(/\n/g, '<br>');
+            
+            document.getElementById('aiExplanationContent').innerHTML = `<p>${formattedExplanation}</p>`;
+            
+            // Update method badge
+            const methodText = aiExplanation.method === 'cohere-chat-api' ? 'Cohere AI' : 'Rule-based';
+            document.getElementById('explainMethodBadge').textContent = methodText;
+        }
+
+        /**
+         * Display AI explanation error
+         */
+        function displayAIExplanationError(errorMessage) {
+            document.getElementById('aiExplanationContent').innerHTML = `
+                <div style="color: #dc3545;">
+                    <strong>⚠️ AI Explanation Failed:</strong><br>
+                    ${errorMessage}<br><br>
+                    <em>Try again in a moment or refer to the technical indicators above for manual analysis.</em>
+                </div>
+            `;
+            document.getElementById('explainMethodBadge').textContent = 'Error';
+        }
+
+        // Add CSS animation for loading spinner
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes spin {
+                0% { transform: rotate(0deg); }
+                100% { transform: rotate(360deg); }
+            }
+            
+            @media (max-width: 768px) {
+                #aiAnalysisSection > div > div {
+                    grid-template-columns: 1fr !important;
+                }
+                
+                #aiExplainBtn {
+                    width: 100% !important;
+                }
+            }
+        `;
+        document.head.appendChild(style);
+
+        // =============================================================================
+        // ENHANCED ANALYSIS FUNCTION WITH AI INTEGRATION
+        // =============================================================================
+
+        // Update the existing analyzeTA function to include AI analysis
+        const originalAnalyzeTA = analyzeTA;
+        analyzeTA = async function() {
+            // Call the original analysis function
+            await originalAnalyzeTA();
+            
+            // If we have current analysis data, perform AI analysis
+            if (currentAnalysisData) {
+                const coinId = document.getElementById('coinSelect').value;
+                const timeframe = parseInt(document.getElementById('timeframe').value);
+                
+                // Get the data from the charts (this assumes the charts were successfully created)
+                try {
+                    const priceData = await fetchPriceData(coinId, timeframe);
+                    const sma20 = calculateSMA(priceData, 20);
+                    const rsi = calculateRSI(priceData);
+                    const bb = calculateBollingerBands(priceData);
+                    const signals = generateTradingSignals(priceData, rsi, sma20, bb);
+                    
+                    // Perform AI analysis
+                    await performAIAnalysis(priceData, rsi, sma20, bb, signals, coinId);
+                } catch (error) {
+                    console.error('Error during AI analysis integration:', error);
+                }
+            }
+        };
 
         // Initialize with Bitcoin analysis
         window.onload = function() {
