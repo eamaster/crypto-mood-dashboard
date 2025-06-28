@@ -691,21 +691,35 @@ async function explainPatternWithCohere(rsi, sma, bb, signals, coin, timeframe, 
   const currentRSI = rsi[rsi.length - 1]?.y || 50;
   const overallSignal = calculateOverallSignal(signals);
   
+  // Calculate key price levels from available data
+  const currentSMA = sma[sma.length - 1]?.y || 0;
+  const bbUpper = bb.upper[bb.upper.length - 1]?.y || 0;
+  const bbLower = bb.lower[bb.lower.length - 1]?.y || 0;
+  
+  // Estimate resistance and support from Bollinger Bands and SMA
+  const resistance = Math.max(bbUpper, currentSMA * 1.05);
+  const support = Math.min(bbLower, currentSMA * 0.95);
+  
   const prompt = `As a professional crypto technical analyst, explain the current ${coin.toUpperCase()} chart pattern in simple terms for a beginner trader.
 
 Current Technical Analysis:
 - RSI (14): ${currentRSI.toFixed(1)}
+- SMA (20): $${currentSMA.toLocaleString()}
+- Bollinger Band Upper: $${bbUpper.toLocaleString()}
+- Bollinger Band Lower: $${bbLower.toLocaleString()}
+- Key Resistance Level: $${resistance.toLocaleString()}
+- Key Support Level: $${support.toLocaleString()}
 - Overall Signal: ${overallSignal.signal} (${overallSignal.confidence}% confidence)
 - Time Period: ${timeframe} days
 - Individual Signals: ${signals.map(s => `${s.type}: ${s.signal} (${s.strength})`).join(', ')}
 
 Please provide:
 1. A clear explanation of what the current pattern means
-2. What might happen next (potential scenarios)
-3. Key levels or signals to watch
+2. What might happen next (potential scenarios)  
+3. Key resistance levels (around $${resistance.toLocaleString()}) and support levels (around $${support.toLocaleString()}) to watch
 4. A simple summary for beginners
 
-Keep the explanation under 200 words, avoid jargon, and focus on educational value. Do NOT provide specific trading advice.`;
+IMPORTANT: Always use the ACTUAL price values provided above (like $${resistance.toLocaleString()} for resistance and $${support.toLocaleString()} for support) instead of placeholders like $xxx or $XXX. Keep the explanation under 200 words, avoid jargon, and focus on educational value. Do NOT provide specific trading advice.`;
 
   console.log('Generating AI explanation for:', coin);
   
@@ -761,6 +775,15 @@ function explainPatternFallback(rsi, sma, bb, signals, coin, timeframe) {
   const currentRSI = rsi[rsi.length - 1]?.y || 50;
   const overallSignal = calculateOverallSignal(signals);
   
+  // Calculate key price levels from available data
+  const currentSMA = sma[sma.length - 1]?.y || 0;
+  const bbUpper = bb.upper[bb.upper.length - 1]?.y || 0;
+  const bbLower = bb.lower[bb.lower.length - 1]?.y || 0;
+  
+  // Estimate resistance and support from Bollinger Bands and SMA
+  const resistance = Math.max(bbUpper, currentSMA * 1.05);
+  const support = Math.min(bbLower, currentSMA * 0.95);
+  
   let explanation = `Current ${coin.toUpperCase()} Analysis (${timeframe} days):\n\n`;
   
   // RSI explanation
@@ -772,16 +795,22 @@ function explainPatternFallback(rsi, sma, bb, signals, coin, timeframe) {
     explanation += "⚖️ RSI is in normal range - no extreme buying or selling pressure detected. ";
   }
   
-  // Overall signal explanation
+  // Overall signal explanation with price levels
   if (overallSignal.signal === 'BUY') {
-    explanation += "The technical indicators are showing mostly positive signals, suggesting potential upward movement. ";
+    explanation += `The technical indicators are showing mostly positive signals, suggesting potential upward movement toward resistance at $${resistance.toLocaleString()}. `;
   } else if (overallSignal.signal === 'SELL') {
-    explanation += "The technical indicators are showing mostly negative signals, suggesting potential downward pressure. ";
+    explanation += `The technical indicators are showing mostly negative signals, suggesting potential downward pressure toward support at $${support.toLocaleString()}. `;
   } else {
-    explanation += "The technical indicators are mixed, suggesting a period of consolidation or uncertainty. ";
+    explanation += `The technical indicators are mixed, suggesting consolidation between support at $${support.toLocaleString()} and resistance at $${resistance.toLocaleString()}. `;
   }
   
-  explanation += "\n\n⚠️ Remember: Technical analysis helps identify patterns but markets can be unpredictable. Always do your own research!";
+  // Add key levels information
+  explanation += `\n\nKey Levels to Watch:\n`;
+  explanation += `• Resistance: $${resistance.toLocaleString()} (Bollinger Band Upper)\n`;
+  explanation += `• Support: $${support.toLocaleString()} (Bollinger Band Lower)\n`;
+  explanation += `• Moving Average: $${currentSMA.toLocaleString()} (SMA 20)\n`;
+  
+  explanation += "\n⚠️ Remember: Technical analysis helps identify patterns but markets can be unpredictable. Always do your own research!";
   
   return jsonResponse({
     explanation: explanation,
