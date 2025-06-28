@@ -580,50 +580,7 @@
             }
         }
 
-        async function analyzeTA() {
-            const coinId = document.getElementById('coinSelect').value;
-            const timeframe = parseInt(document.getElementById('timeframe').value);
-            
-            // ✅ SCROLL FIX: Prevent any automatic scrolling during analysis
-            const currentScrollPosition = window.pageYOffset;
-            
-            document.getElementById('loading').style.display = 'block';
-            document.getElementById('taChart').style.display = 'none';
-            document.getElementById('indicators').innerHTML = '<div class="loading">Calculating indicators...</div>';
-            document.getElementById('taSummary').style.display = 'none';
 
-            try {
-                const priceData = await fetchPriceData(coinId, timeframe);
-                
-                // Calculate indicators
-                const sma20 = calculateSMA(priceData, 20);
-                const rsi = calculateRSI(priceData);
-                const bb = calculateBollingerBands(priceData);
-                
-                // Generate signals
-                const signals = generateTradingSignals(priceData, rsi, sma20, bb);
-                const overallSignal = calculateOverallSignal(signals);
-                
-                // Display chart
-                displayChart(priceData, sma20, bb);
-                
-                // Display indicators
-                displayIndicators(rsi, sma20, signals);
-                
-                // Display summary
-                displaySummary(overallSignal, signals.length, coinId.toUpperCase());
-                
-                document.getElementById('loading').style.display = 'none';
-                
-                // ✅ SCROLL FIX: Restore scroll position to prevent unwanted scrolling
-                window.scrollTo(0, currentScrollPosition);
-                
-            } catch (error) {
-                document.getElementById('loading').innerHTML = `<div class="error">Error: ${error.message}</div>`;
-                // ✅ SCROLL FIX: Restore scroll position even on error
-                window.scrollTo(0, currentScrollPosition);
-            }
-        }
 
         function displayChart(price, sma20, bb) {
             const ctx = document.getElementById('taChart').getContext('2d');
@@ -1003,32 +960,54 @@
         // ENHANCED ANALYSIS FUNCTION WITH AI INTEGRATION
         // =============================================================================
 
-        // Update the existing analyzeTA function to include AI analysis
-        const originalAnalyzeTA = analyzeTA;
-        analyzeTA = async function() {
-            // Call the original analysis function
-            await originalAnalyzeTA();
+        // Enhanced analyzeTA function that includes AI analysis
+        async function analyzeTA() {
+            const coinId = document.getElementById('coinSelect').value;
+            const timeframe = parseInt(document.getElementById('timeframe').value);
             
-            // If we have current analysis data, perform AI analysis
-            if (currentAnalysisData) {
-                const coinId = document.getElementById('coinSelect').value;
-                const timeframe = parseInt(document.getElementById('timeframe').value);
+            // ✅ SCROLL FIX: Prevent any automatic scrolling during analysis
+            const currentScrollPosition = window.pageYOffset;
+            
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('taChart').style.display = 'none';
+            document.getElementById('indicators').innerHTML = '<div class="loading">Calculating indicators...</div>';
+            document.getElementById('taSummary').style.display = 'none';
+            // Hide AI sections initially
+            document.getElementById('aiAnalysisSection').style.display = 'none';
+            document.getElementById('aiExplainBtn').style.display = 'none';
+
+            try {
+                const priceData = await fetchPriceData(coinId, timeframe);
                 
-                // Get the data from the charts (this assumes the charts were successfully created)
-                try {
-                    const priceData = await fetchPriceData(coinId, timeframe);
-                    const sma20 = calculateSMA(priceData, 20);
-                    const rsi = calculateRSI(priceData);
-                    const bb = calculateBollingerBands(priceData);
-                    const signals = generateTradingSignals(priceData, rsi, sma20, bb);
-                    
-                    // Perform AI analysis
-                    await performAIAnalysis(priceData, rsi, sma20, bb, signals, coinId);
-                } catch (error) {
-                    console.error('Error during AI analysis integration:', error);
-                }
+                // Calculate indicators
+                const sma20 = calculateSMA(priceData, 20);
+                const rsi = calculateRSI(priceData);
+                const bb = calculateBollingerBands(priceData);
+                
+                // Generate signals
+                const signals = generateTradingSignals(priceData, rsi, sma20, bb);
+                const overallSignal = calculateOverallSignal(signals);
+                
+                // Display traditional analysis
+                displayChart(priceData, sma20, bb);
+                displayIndicators(rsi, sma20, signals);
+                displaySummary(overallSignal, signals.length, coinId.toUpperCase());
+                
+                // 🤖 PERFORM AI ANALYSIS
+                console.log('🤖 Starting AI integration...');
+                await performAIAnalysis(priceData, rsi, sma20, bb, signals, coinId);
+                
+                document.getElementById('loading').style.display = 'none';
+                
+                // ✅ SCROLL FIX: Restore scroll position to prevent unwanted scrolling
+                window.scrollTo(0, currentScrollPosition);
+                
+            } catch (error) {
+                document.getElementById('loading').innerHTML = `<div class="error">Error: ${error.message}</div>`;
+                // ✅ SCROLL FIX: Restore scroll position even on error
+                window.scrollTo(0, currentScrollPosition);
             }
-        };
+        }
 
         // Initialize with Bitcoin analysis
         window.onload = function() {
