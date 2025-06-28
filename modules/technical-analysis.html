@@ -105,9 +105,9 @@
             height: 400px;
             position: relative;
             margin: 1rem 0;
-            background: var(--bg-secondary);
+            background: var(--bg-secondary, #f8f9fa);
+            border: 1px solid var(--border-color, #e2e8f0);
             border-radius: 8px;
-            border: 1px solid var(--border-color);
             overflow: hidden;
         }
 
@@ -115,8 +115,8 @@
             width: 100% !important;
             height: 100% !important;
             max-width: 100% !important;
-            max-height: 100% !important;
-            display: block !important;
+            max-height: 400px !important;
+            display: block;
         }
 
         .indicators-panel {
@@ -773,14 +773,24 @@
 
         async function fetchPriceData(coinId, days) {
             try {
+                console.log(`Fetching price data for ${coinId} over ${days} days...`);
                 const response = await fetch(`${WORKER_URL}/history?coin=${coinId}&days=${days}`);
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 
                 const data = await response.json();
-                return data.prices.map(item => ({
+                console.log(`Received ${data.prices.length} price points`);
+                
+                const priceData = data.prices.map(item => ({
                     x: new Date(item.timestamp),
                     y: item.price
                 }));
+                
+                // Ensure we have enough data for technical analysis
+                if (priceData.length < 20) {
+                    throw new Error(`Insufficient data: only ${priceData.length} points available (need at least 20 for technical indicators)`);
+                }
+                
+                return priceData;
             } catch (error) {
                 console.error('Error fetching price data:', error);
                 throw error;
@@ -788,12 +798,15 @@
         }
 
         function displayChart(price, sma20, bb) {
+            console.log('Creating chart with data:', {
+                pricePoints: price.length,
+                smaPoints: sma20.length,
+                bbUpperPoints: bb.upper.length,
+                bbLowerPoints: bb.lower.length
+            });
+            
             const canvas = document.getElementById('taChart');
             const ctx = canvas.getContext('2d');
-            
-            // Clear any inline styles that might interfere
-            canvas.removeAttribute('style');
-            canvas.style.display = 'none';
             
             // ✅ CHART FIX: Properly destroy existing chart to prevent memory leaks
             if (chartInstance) {
@@ -801,7 +814,7 @@
                 chartInstance = null;
             }
 
-            // Get theme-aware colors
+            // Get theme-aware colors with fallbacks
             const isDark = document.body.classList.contains('dark-theme');
             const priceColor = getComputedStyle(document.documentElement).getPropertyValue('--accent-color').trim() || '#3B82F6';
             const successColor = getComputedStyle(document.documentElement).getPropertyValue('--success-color').trim() || '#10B981';
@@ -809,52 +822,70 @@
             const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || (isDark ? '#ffffff' : '#000000');
             const gridColor = isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
 
+            // Prepare datasets for chart
+            const datasets = [
+                {
+                    label: 'Price',
+                    data: price,
+                    borderColor: priceColor,
+                    backgroundColor: priceColor + '20',
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.1,
+                    pointRadius: 1,
+                    pointHoverRadius: 5,
+                    order: 1
+                }
+            ];
+
+            // Add SMA if available
+            if (sma20.length > 0) {
+                datasets.push({
+                    label: `SMA 20 (${sma20.length} points)`,
+                    data: sma20,
+                    borderColor: successColor,
+                    borderWidth: 2,
+                    fill: false,
+                    pointRadius: 0,
+                    pointHoverRadius: 3,
+                    order: 2
+                });
+            }
+
+            // Add Bollinger Bands if available
+            if (bb.upper.length > 0 && bb.lower.length > 0) {
+                datasets.push(
+                    {
+                        label: `BB Upper (${bb.upper.length} points)`,
+                        data: bb.upper,
+                        borderColor: dangerColor,
+                        borderWidth: 1,
+                        borderDash: [5, 5],
+                        fill: false,
+                        pointRadius: 0,
+                        order: 3
+                    },
+                    {
+                        label: `BB Lower (${bb.lower.length} points)`,
+                        data: bb.lower,
+                        borderColor: dangerColor,
+                        borderWidth: 1,
+                        borderDash: [5, 5],
+                        fill: false,
+                        pointRadius: 0,
+                        order: 4
+                    }
+                );
+            }
+
+            console.log('Chart datasets prepared:', datasets.map(d => ({ label: d.label, dataPoints: d.data.length })));
+
             // ✅ CHART FIX: Create new chart with theme-aware colors
             chartInstance = new Chart(ctx, {
                 type: 'line',
-                data: {
-                    datasets: [
-                        {
-                            label: 'Price',
-                            data: price,
-                            borderColor: priceColor,
-                            backgroundColor: priceColor + '20',
-                            borderWidth: 3,
-                            fill: true,
-                            tension: 0.1,
-                            pointRadius: 2,
-                            pointHoverRadius: 5
-                        },
-                        {
-                            label: 'SMA 20',
-                            data: sma20,
-                            borderColor: successColor,
-                            borderWidth: 2,
-                            fill: false,
-                            pointRadius: 1,
-                            pointHoverRadius: 4
-                        },
-                        {
-                            label: 'BB Upper',
-                            data: bb.upper,
-                            borderColor: dangerColor,
-                            borderWidth: 1,
-                            borderDash: [5, 5],
-                            fill: false,
-                            pointRadius: 0
-                        },
-                        {
-                            label: 'BB Lower',
-                            data: bb.lower,
-                            borderColor: dangerColor,
-                            borderWidth: 1,
-                            borderDash: [5, 5],
-                            fill: false,
-                            pointRadius: 0
-                        }
-                    ]
-                },
+                data: { datasets },
                 options: {
+                    // ✅ CHART FIX: Proper responsive behavior without stretching
                     responsive: true,
                     maintainAspectRatio: false,
                     // ✅ CHART FIX: Prevent chart from triggering layout changes
@@ -995,14 +1026,15 @@
             setTimeout(() => {
                 const canvas = document.getElementById('taChart');
                 canvas.style.display = 'block';
-                canvas.style.width = '100%';
-                canvas.style.height = '100%';
                 
-                // Force chart resize to container
+                // Force chart to update and render
                 if (chartInstance) {
+                    chartInstance.update('none'); // Update without animation for immediate display
                     chartInstance.resize();
                 }
-            }, 200);
+                
+                console.log('Chart should now be visible');
+            }, 150);
         }
 
         function displayIndicators(rsi, sma20, signals) {
@@ -1412,21 +1444,30 @@
             // Hide AI sections initially
             document.getElementById('aiAnalysisSection').style.display = 'none';
             document.getElementById('aiExplainBtn').style.display = 'none';
-            document.getElementById('chartError').style.display = 'none';
 
             try {
+                console.log(`Starting analysis for ${coinId} over ${timeframe} days`);
                 const priceData = await fetchPriceData(coinId, timeframe);
                 
                 // Calculate indicators
+                console.log('Calculating technical indicators...');
                 const sma20 = calculateSMA(priceData, 20);
                 const rsi = calculateRSI(priceData);
                 const bb = calculateBollingerBands(priceData);
+                
+                console.log('Indicators calculated:', {
+                    pricePoints: priceData.length,
+                    smaPoints: sma20.length,
+                    rsiPoints: rsi.length,
+                    bbPoints: bb.upper.length
+                });
                 
                 // Generate signals
                 const signals = generateTradingSignals(priceData, rsi, sma20, bb);
                 const overallSignal = calculateOverallSignal(signals);
                 
                 // Display traditional analysis
+                console.log('Creating chart...');
                 displayChart(priceData, sma20, bb);
                 displayIndicators(rsi, sma20, signals);
                 displaySummary(overallSignal, signals.length, coinId.toUpperCase());
@@ -1436,16 +1477,13 @@
                 await performAIAnalysis(priceData, rsi, sma20, bb, signals, coinId);
                 
                 document.getElementById('loading').style.display = 'none';
+                console.log('Analysis complete!');
                 
                 // ✅ SCROLL FIX: Restore scroll position to prevent unwanted scrolling
                 window.scrollTo(0, currentScrollPosition);
                 
             } catch (error) {
-                console.error('Analysis error:', error);
-                document.getElementById('loading').style.display = 'none';
-                document.getElementById('chartError').style.display = 'block';
-                document.getElementById('chartError').innerHTML = `<strong>⚠️ Analysis Failed:</strong> ${error.message}. Please check your connection and try again.`;
-                document.getElementById('indicators').innerHTML = '<div class="error">Analysis failed - please try again</div>';
+                document.getElementById('loading').innerHTML = `<div class="error">Error: ${error.message}</div>`;
                 // ✅ SCROLL FIX: Restore scroll position even on error
                 window.scrollTo(0, currentScrollPosition);
             }
