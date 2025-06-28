@@ -202,11 +202,23 @@ async function handleNews(request, env) {
     // Fetch news from @https://newsapi.org/ using the Everything endpoint
     const searchQuery = `${coinName} cryptocurrency OR ${coinName} crypto`;
     const response = await fetch(
-      `https://newsapi.org/v2/everything?q=${encodeURIComponent(searchQuery)}&language=en&sortBy=publishedAt&pageSize=10&apiKey=${env.NEWSAPI_KEY}`
+      `https://newsapi.org/v2/everything?q=${encodeURIComponent(searchQuery)}&language=en&sortBy=publishedAt&pageSize=10&apiKey=${env.NEWSAPI_KEY}`,
+      {
+        headers: {
+          'User-Agent': 'Crypto-Mood-Dashboard/1.0 (https://hesam.me/crypto-mood-dashboard)'
+        }
+      }
     );
     
     if (!response.ok) {
-      throw new Error(`@https://newsapi.org/ API error: ${response.status}`);
+      let errorDetails = '';
+      try {
+        const errorBody = await response.json();
+        errorDetails = errorBody.message ? ` - ${errorBody.message}` : '';
+      } catch (e) {
+        // Ignore JSON parse errors
+      }
+      throw new Error(`@https://newsapi.org/ API error: ${response.status}${errorDetails}`);
     }
     
     const data = await response.json();
