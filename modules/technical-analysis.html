@@ -267,12 +267,28 @@
             }
         }
 
-        /* Additional technical analysis specific styles */
+        /* Educational Notes with theme support */
+        .educational-notes {
+            margin-top: 1.5rem;
+            padding: 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            font-size: 0.9em;
+            border-left: 4px solid var(--accent-color);
+            color: var(--text-primary);
+        }
+
+        .educational-notes strong {
+            color: var(--text-primary);
+        }
+
+        /* AI Analysis Section Styles */
         #aiAnalysisSection {
             margin-top: 2rem;
         }
         
-        #aiAnalysisSection > div {
+        .ai-analysis-card {
             background: linear-gradient(135deg, var(--accent-color), var(--accent-hover));
             color: white;
             padding: 2rem;
@@ -281,41 +297,194 @@
             box-shadow: var(--shadow);
         }
         
-        #aiExplanationSection {
+        .ai-analysis-header {
+            margin-bottom: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+            color: white;
+            font-size: 1.3rem;
+            font-weight: 600;
+        }
+        
+        .ai-method-badge {
+            background: rgba(255,255,255,0.25);
+            padding: 0.5rem 0.75rem;
+            border-radius: 12px;
+            font-size: 0.7em;
+            color: white;
+            font-weight: 600;
+        }
+        
+        .ai-analysis-grid {
+            display: grid;
+            grid-template-columns: 1fr 2fr;
+            gap: 2rem;
+            align-items: center;
+        }
+        
+        .ai-mood-display {
+            text-align: center;
+        }
+        
+        .ai-mood-icon {
+            font-size: 3em;
+            margin-bottom: 1rem;
+        }
+        
+        .ai-mood-label {
+            font-size: 1.5em;
+            font-weight: 800;
+            margin-bottom: 0.5rem;
+            color: white;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.6);
+        }
+        
+        .ai-mood-label.neutral {
+            background: rgba(255,255,255,0.25);
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            border: 2px solid rgba(255,255,255,0.4);
+            display: inline-block;
+        }
+        
+        .ai-mood-label.bullish {
+            color: #4ade80;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+        }
+        
+        .ai-mood-label.bearish {
+            color: #f87171;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+        }
+        
+        .ai-confidence {
+            font-size: 0.9em;
+            opacity: 0.9;
+            color: white;
+            font-weight: 600;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.6);
+        }
+        
+        .ai-reasoning-container {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .ai-reasoning {
+            background: rgba(255,255,255,0.15);
+            padding: 1.5rem;
+            border-radius: 12px;
+            font-size: 0.9em;
+            line-height: 1.5;
+            color: white;
+            border-left: 4px solid rgba(255,255,255,0.3);
+        }
+        
+        /* AI Explanation Section */
+        .ai-explanation-card {
             background: var(--bg-primary);
             border-radius: 16px;
             box-shadow: var(--shadow);
             margin-top: 1rem;
             padding: 2rem;
+            border: 1px solid var(--border-color);
         }
         
-        #aiMoodLabel {
-            color: #ffffff !important;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.6);
-            font-weight: 800 !important;
+        .ai-explanation-header {
+            color: var(--text-primary);
+            margin-bottom: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+            font-size: 1.2rem;
+            font-weight: 600;
         }
         
-        #aiMoodLabel.neutral {
-            background: rgba(255,255,255,0.25) !important;
-            padding: 8px 16px;
+        .ai-explain-badge {
+            background: var(--bg-tertiary);
+            color: var(--accent-color);
+            padding: 0.5rem 0.75rem;
+            border-radius: 12px;
+            font-size: 0.7em;
+            font-weight: 600;
+        }
+        
+        .ai-explanation-content {
+            background: var(--bg-secondary);
+            padding: 1.5rem;
+            border-radius: 12px;
+            border-left: 4px solid var(--accent-color);
+            line-height: 1.6;
+            color: var(--text-primary);
+        }
+        
+        /* Chart theme improvements */
+        .chart-info-box {
+            background: var(--bg-secondary);
+            padding: 1rem;
             border-radius: 8px;
-            border: 2px solid rgba(255,255,255,0.4);
+            margin: 1rem 0;
+            font-size: 0.85em;
+            color: var(--text-primary);
+            border-left: 4px solid var(--accent-color);
         }
-        
-        #aiMoodLabel.bullish {
-            color: #4ade80 !important;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+
+        /* Enhanced mobile responsiveness */
+        @media (max-width: 768px) {
+            .ai-analysis-grid {
+                grid-template-columns: 1fr;
+                gap: 1.5rem;
+                text-align: center;
+            }
+            
+            .ai-analysis-header {
+                flex-direction: column;
+                gap: 0.75rem;
+                text-align: center;
+            }
+            
+            .ai-explanation-header {
+                flex-direction: column;
+                gap: 0.75rem;
+                text-align: center;
+            }
+            
+            .chart-container, .indicators-panel {
+                padding: 1rem;
+            }
+            
+            .ta-container {
+                padding: 0 1rem;
+            }
+            
+            .controls {
+                padding: 1rem;
+            }
+            
+            .ai-analysis-card, .ai-explanation-card {
+                padding: 1.5rem;
+            }
         }
-        
-        #aiMoodLabel.bearish {
-            color: #f87171 !important;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
-        }
-        
-        #aiConfidence {
-            color: #ffffff !important;
-            font-weight: 600 !important;
-            text-shadow: 1px 1px 2px rgba(0,0,0,0.6);
+
+        @media (max-width: 480px) {
+            .ai-mood-icon {
+                font-size: 2.5em;
+            }
+            
+            .ai-mood-label {
+                font-size: 1.3em;
+            }
+            
+            .ai-analysis-card, .ai-explanation-card {
+                padding: 1rem;
+            }
+            
+            .ta-container {
+                padding: 0 0.5rem;
+            }
         }
     </style>
 </head>
@@ -343,8 +512,20 @@
                 <select id="coinSelect">
                     <option value="bitcoin">Bitcoin (BTC)</option>
                     <option value="ethereum">Ethereum (ETH)</option>
-                    <option value="litecoin">Litecoin (LTC)</option>
                     <option value="dogecoin">Dogecoin (DOGE)</option>
+                    <option value="cardano">Cardano (ADA)</option>
+                    <option value="solana">Solana (SOL)</option>
+                    <option value="litecoin">Litecoin (LTC)</option>
+                    <option value="bitcoin-cash">Bitcoin Cash (BCH)</option>
+                    <option value="ripple">Ripple (XRP)</option>
+                    <option value="polkadot">Polkadot (DOT)</option>
+                    <option value="chainlink">Chainlink (LINK)</option>
+                    <option value="stellar">Stellar (XLM)</option>
+                    <option value="monero">Monero (XMR)</option>
+                    <option value="tezos">Tezos (XTZ)</option>
+                    <option value="eos">EOS (EOS)</option>
+                    <option value="zcash">Zcash (ZEC)</option>
+                    <option value="dash">Dash (DASH)</option>
                 </select>
             </div>
             
@@ -367,7 +548,7 @@
         <div class="grid">
             <div class="chart-container">
                 <h3>📈 Price Chart with Technical Indicators</h3>
-                <div style="background: var(--bg-secondary); padding: 1rem; border-radius: 8px; margin: 1rem 0; font-size: 0.85em; color: var(--accent-color); border-left: 4px solid var(--accent-color);">
+                <div class="chart-info-box">
                     <strong>ℹ️ Chart Information:</strong> Technical indicators (SMA, Bollinger Bands) start after collecting sufficient data points for accurate calculations. This delayed start is mathematically correct and ensures reliable signals.
                     <br><strong>🤖 AI Enhancement:</strong> Advanced AI analysis will automatically classify market mood and provide pattern explanations below the chart.
                 </div>
@@ -387,23 +568,21 @@
 
         <!-- AI-Powered Analysis Section -->
         <div id="aiAnalysisSection" style="display: none;">
-            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 15px; margin-bottom: 20px;">
-                <h3 style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
+            <div class="ai-analysis-card">
+                <h3 class="ai-analysis-header">
                     🤖 AI-Powered Market Analysis
-                    <span id="aiMethodBadge" style="background: rgba(255,255,255,0.3); padding: 4px 8px; border-radius: 12px; font-size: 0.7em;"></span>
+                    <span id="aiMethodBadge" class="ai-method-badge"></span>
                 </h3>
                 
-                <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 20px; align-items: center;">
-                    <div>
-                        <div style="text-align: center;">
-                            <div id="aiMoodIcon" style="font-size: 3em; margin-bottom: 10px;">🤖</div>
-                            <div id="aiMoodLabel" style="font-size: 1.5em; font-weight: 700; margin-bottom: 5px;">Analyzing...</div>
-                            <div id="aiConfidence" style="font-size: 0.9em; opacity: 0.9;">Confidence: --</div>
-                        </div>
+                <div class="ai-analysis-grid">
+                    <div class="ai-mood-display">
+                        <div id="aiMoodIcon" class="ai-mood-icon">🤖</div>
+                        <div id="aiMoodLabel" class="ai-mood-label">Analyzing...</div>
+                        <div id="aiConfidence" class="ai-confidence">Confidence: --</div>
                     </div>
                     
-                    <div>
-                        <div id="aiReasoning" style="background: rgba(255,255,255,0.1); padding: 15px; border-radius: 10px; font-size: 0.9em; line-height: 1.4;">
+                    <div class="ai-reasoning-container">
+                        <div id="aiReasoning" class="ai-reasoning">
                             Generating AI analysis...
                         </div>
                     </div>
@@ -411,12 +590,12 @@
             </div>
             
             <!-- AI Explanation Section -->
-            <div id="aiExplanationSection" style="display: none; background: white; border-radius: 15px; padding: 20px; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1); border: 1px solid #e0e0e0; margin-bottom: 20px;">
-                <h3 style="color: #2c3e50; margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
+            <div id="aiExplanationSection" style="display: none;" class="ai-explanation-card">
+                <h3 class="ai-explanation-header">
                     🧠 AI Pattern Explanation
-                    <span id="explainMethodBadge" style="background: #e3f2fd; color: #1565c0; padding: 4px 8px; border-radius: 12px; font-size: 0.7em;"></span>
+                    <span id="explainMethodBadge" class="ai-explain-badge"></span>
                 </h3>
-                <div id="aiExplanationContent" style="background: #f8f9fa; padding: 15px; border-radius: 10px; border-left: 4px solid #667eea; line-height: 1.6;">
+                <div id="aiExplanationContent" class="ai-explanation-content">
                     Click "AI Explain This" to get a detailed explanation of the current market pattern.
                 </div>
             </div>
@@ -610,7 +789,15 @@
                 chartInstance = null;
             }
 
-            // ✅ CHART FIX: Create new chart with proper sizing constraints
+            // Get theme-aware colors
+            const isDark = document.body.classList.contains('dark-theme');
+            const priceColor = getComputedStyle(document.documentElement).getPropertyValue('--accent-color').trim();
+            const successColor = getComputedStyle(document.documentElement).getPropertyValue('--success-color').trim();
+            const dangerColor = getComputedStyle(document.documentElement).getPropertyValue('--danger-color').trim();
+            const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim();
+            const gridColor = isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
+
+            // ✅ CHART FIX: Create new chart with theme-aware colors
             chartInstance = new Chart(ctx, {
                 type: 'line',
                 data: {
@@ -618,16 +805,16 @@
                         {
                             label: 'Price',
                             data: price,
-                            borderColor: '#667eea',
-                            backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                            borderColor: priceColor,
+                            backgroundColor: priceColor + '20',
                             borderWidth: 3,
-                            fill: false,
+                            fill: true,
                             tension: 0.1
                         },
                         {
                             label: 'SMA 20 (starts after 20 data points)',
                             data: sma20,
-                            borderColor: '#28a745',
+                            borderColor: successColor,
                             borderWidth: 2,
                             fill: false,
                             pointRadius: 0
@@ -635,7 +822,7 @@
                         {
                             label: 'BB Upper (requires SMA calculation)',
                             data: bb.upper,
-                            borderColor: '#dc3545',
+                            borderColor: dangerColor,
                             borderWidth: 1,
                             borderDash: [5, 5],
                             fill: false,
@@ -644,7 +831,7 @@
                         {
                             label: 'BB Lower (requires SMA calculation)',
                             data: bb.lower,
-                            borderColor: '#dc3545',
+                            borderColor: dangerColor,
                             borderWidth: 1,
                             borderDash: [5, 5],
                             fill: false,
@@ -672,6 +859,18 @@
                                 maxTicksLimit: window.innerWidth < 768 ? 4 : 7, // Fewer ticks on mobile
                                 font: {
                                     size: window.innerWidth < 768 ? 10 : 12
+                                },
+                                color: textColor
+                            },
+                            grid: {
+                                color: gridColor
+                            },
+                            title: {
+                                display: true,
+                                text: 'Date',
+                                color: textColor,
+                                font: {
+                                    size: window.innerWidth < 768 ? 12 : 14
                                 }
                             }
                         },
@@ -683,6 +882,18 @@
                                 },
                                 font: {
                                     size: window.innerWidth < 768 ? 10 : 12
+                                },
+                                color: textColor
+                            },
+                            grid: {
+                                color: gridColor
+                            },
+                            title: {
+                                display: true,
+                                text: 'Price (USD)',
+                                color: textColor,
+                                font: {
+                                    size: window.innerWidth < 768 ? 12 : 14
                                 }
                             }
                         }
@@ -694,7 +905,8 @@
                             font: { 
                                 size: window.innerWidth < 768 ? 14 : 16,
                                 weight: 'bold'
-                            }
+                            },
+                            color: textColor
                         },
                         legend: {
                             display: true,
@@ -705,18 +917,23 @@
                                 },
                                 padding: window.innerWidth < 768 ? 10 : 20,
                                 usePointStyle: true,
-                                boxWidth: window.innerWidth < 768 ? 8 : 12
+                                boxWidth: window.innerWidth < 768 ? 8 : 12,
+                                color: textColor
                             }
                         },
                         subtitle: {
                             display: window.innerWidth >= 768, // Hide subtitle on mobile to save space
                             text: '📝 Note: Technical indicators start after sufficient data points are collected for accurate calculation',
                             font: { size: 12 },
-                            color: '#666',
+                            color: textColor,
                             padding: { bottom: 20 }
                         },
                         tooltip: {
-                            backgroundColor: 'rgba(0,0,0,0.8)',
+                            backgroundColor: isDark ? 'rgba(40, 40, 40, 0.95)' : 'rgba(0,0,0,0.8)',
+                            titleColor: '#ffffff',
+                            bodyColor: '#ffffff',
+                            borderColor: textColor,
+                            borderWidth: 1,
                             titleFont: { size: window.innerWidth < 768 ? 12 : 14 },
                             bodyFont: { size: window.innerWidth < 768 ? 10 : 12 },
                             callbacks: {
@@ -784,7 +1001,7 @@
                     <div class="signal ${rsiSignal.signal.toLowerCase()}">${rsiSignal.signal}</div>
                     <div class="signal-strength">${rsiSignal.strength} Signal</div>
                     <div class="explanation">${rsiSignal.reason}</div>
-                    ${currentRSI === null ? `<div style="font-size: 0.8em; color: #ff6b6b; margin-top: 5px;">⚠️ ${rsiStatus}</div>` : ''}
+                    ${currentRSI === null ? `<div style="font-size: 0.8em; color: var(--warning-color); margin-top: 5px;">⚠️ ${rsiStatus}</div>` : ''}
                 </div>
 
                 <div class="indicator">
@@ -801,7 +1018,7 @@
                     <div class="explanation">${bbSignal.reason}</div>
                 </div>
 
-                <div style="margin-top: 20px; padding: 15px; background: #f0f8ff; border-radius: 10px; font-size: 0.9em;">
+                <div class="educational-notes">
                     <strong>📚 Educational Notes:</strong><br>
                     • <strong>Why indicators start mid-chart:</strong> SMA(20) requires 20 data points, BB bands require SMA calculation<br>
                     • <strong>RSI interpretation:</strong> < 30 potentially oversold, > 70 potentially overbought<br>
@@ -972,7 +1189,7 @@
             document.getElementById('aiAnalysisSection').style.display = 'block';
             document.getElementById('aiMoodIcon').textContent = '⚠️';
             document.getElementById('aiMoodLabel').textContent = 'Analysis Failed';
-            document.getElementById('aiMoodLabel').style.color = '#dc3545';
+            document.getElementById('aiMoodLabel').style.color = 'var(--danger-color)';
             document.getElementById('aiConfidence').textContent = 'Error occurred';
             document.getElementById('aiReasoning').textContent = `AI analysis temporarily unavailable: ${errorMessage}. Using traditional indicators instead.`;
             document.getElementById('aiMethodBadge').textContent = 'Fallback';
@@ -994,8 +1211,8 @@
                 // Show loading state
                 document.getElementById('aiExplanationSection').style.display = 'block';
                 document.getElementById('aiExplanationContent').innerHTML = `
-                    <div style="display: flex; align-items: center; gap: 10px; color: #666;">
-                        <div style="width: 20px; height: 20px; border: 2px solid #667eea; border-top: 2px solid transparent; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+                    <div style="display: flex; align-items: center; gap: 10px; color: var(--text-secondary);">
+                        <div class="loading-spinner"></div>
                         Generating AI explanation...
                     </div>
                 `;
@@ -1080,7 +1297,7 @@
          */
         function displayAIExplanationError(errorMessage) {
             document.getElementById('aiExplanationContent').innerHTML = `
-                <div style="color: #dc3545;">
+                <div style="color: var(--danger-color);">
                     <strong>⚠️ AI Explanation Failed:</strong><br>
                     ${errorMessage}<br><br>
                     <em>Try again in a moment or refer to the technical indicators above for manual analysis.</em>
@@ -1100,6 +1317,15 @@
             @keyframes fadeIn {
                 0% { opacity: 0; transform: translateY(10px); }
                 100% { opacity: 1; transform: translateY(0); }
+            }
+            
+            .loading-spinner {
+                width: 20px;
+                height: 20px;
+                border: 2px solid var(--border-color);
+                border-top: 2px solid var(--accent-color);
+                border-radius: 50%;
+                animation: spin 1s linear infinite;
             }
             
             /* Mobile-specific AI section improvements */
@@ -1133,6 +1359,9 @@
             
             /* Accessibility improvements */
             @media (prefers-reduced-motion: reduce) {
+                .loading-spinner {
+                    animation: none !important;
+                }
                 * {
                     animation-duration: 0.01ms !important;
                     animation-iteration-count: 1 !important;
