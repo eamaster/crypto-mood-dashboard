@@ -116,15 +116,17 @@ main {
 .controls-row {
     display: flex;
     justify-content: space-between;
-    align-items: flex-start;
+    align-items: center;
     gap: 2rem;
     flex-wrap: wrap;
+    min-height: 80px;
 }
 
 .controls-left {
     display: flex;
-    flex-direction: column;
-    gap: 1rem;
+    flex-direction: row;
+    align-items: center;
+    gap: 2rem;
     flex: 1;
     min-width: 0;
 }
@@ -139,14 +141,14 @@ main {
     display: flex;
     align-items: center;
     gap: 1rem;
-    flex-wrap: wrap;
+    flex-shrink: 0;
 }
 
 .button-group {
     display: flex;
     gap: 0.75rem;
     align-items: center;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
 }
 
 .coin-selector label {
@@ -162,6 +164,8 @@ main {
     gap: 0.5rem;
     align-items: flex-end;
     text-align: right;
+    justify-content: center;
+    min-width: 200px;
 }
 
 .last-updated {
@@ -578,8 +582,7 @@ select, button {
 }
 
 select {
-    min-width: 180px;
-    flex: 1;
+    min-width: 200px;
     max-width: 250px;
 }
 
@@ -753,5 +756,29 @@ button.loading::after {
     
     .real-time-status .statusIcon {
         animation: none !important;
+    }
+}
+
+/* Additional layout refinements for perfect alignment */
+/* Ensure consistent button heights */
+button, select {
+    height: 44px;
+}
+
+/* Enhanced responsive layout */
+@media (max-width: 1024px) {
+    .controls-left {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 1rem;
+    }
+    
+    .coin-selector {
+        justify-content: center;
+    }
+    
+    .button-group {
+        justify-content: center;
+        flex-wrap: wrap;
     }
 } 
