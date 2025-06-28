@@ -21,7 +21,8 @@ type = "cors"
 
 # Example environment variables (set via wrangler secret put)
 # BLOCKCHAIR_KEY = "G___S4J16vrkR7eK5wn5ykSAhQiExJNB"
-# NEWSDATA_KEY = "pub_0a6ac26df9e94ac1aa0eda7f80b2f44f"
+# NEWSDATA_KEY = "pub_0a6ac26df9e94ac1aa0eda7f80b2f44f"  # Old NewsData.io key
+# NEWSAPI_KEY = "1a0067fcf14c4333888e0771d3addae4"  # New @https://newsapi.org/ key
 # COHERE_KEY = "8v2ZrEf2NHbhqfKtHKmKmTbh695Nlnhsq6cdHnwH"
 
 # Rate limiting configuration

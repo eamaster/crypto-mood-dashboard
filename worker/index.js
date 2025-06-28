@@ -1,6 +1,6 @@
 // =============================================================================
 // Crypto Mood Dashboard - Cloudflare Worker
-// Handles API calls to Blockchair, NewsData.io, and Cohere AI
+// Handles API calls to Blockchair, @https://newsapi.org/, and Cohere AI
 // =============================================================================
 
 // CORS headers for frontend requests
@@ -199,19 +199,23 @@ async function handleNews(request, env) {
     const url = new URL(request.url);
     const coinName = url.searchParams.get('coin') || 'bitcoin';
     
-    // Fetch news from NewsData.io
-    const searchQuery = `${coinName} cryptocurrency`;
+    // Fetch news from @https://newsapi.org/ using the Everything endpoint
+    const searchQuery = `${coinName} cryptocurrency OR ${coinName} crypto`;
     const response = await fetch(
-      `https://newsdata.io/api/1/news?apikey=${env.NEWSDATA_API_KEY}&q=${encodeURIComponent(searchQuery)}&language=en&size=10`
+      `https://newsapi.org/v2/everything?q=${encodeURIComponent(searchQuery)}&language=en&sortBy=publishedAt&pageSize=10&apiKey=${env.NEWSAPI_KEY}`
     );
     
     if (!response.ok) {
-      throw new Error(`NewsData.io API error: ${response.status}`);
+      throw new Error(`@https://newsapi.org/ API error: ${response.status}`);
     }
     
     const data = await response.json();
     
-    if (!data.results || !Array.isArray(data.results)) {
+    if (data.status === 'error') {
+      throw new Error(`@https://newsapi.org/ error: ${data.message}`);
+    }
+    
+    if (!data.articles || !Array.isArray(data.articles)) {
       return jsonResponse({
         coin: coinName,
         headlines: [],
@@ -219,19 +223,21 @@ async function handleNews(request, env) {
       });
     }
     
-    // Transform news data
-    const headlines = data.results.map(article => ({
+    // Transform news data to match existing format
+    const headlines = data.articles.map(article => ({
       title: article.title,
       description: article.description,
-      url: article.link,
-      source: article.source_id,
-      published: article.pubDate,
+      url: article.url,
+      source: article.source?.name || 'Unknown',
+      published: article.publishedAt,
+      author: article.author,
+      urlToImage: article.urlToImage,
     }));
     
     return jsonResponse({
       coin: coinName,
       headlines: headlines,
-      total: headlines.length,
+      total: data.totalResults || headlines.length,
     });
     
   } catch (error) {

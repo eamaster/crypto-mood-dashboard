@@ -78,7 +78,7 @@
 <body>
     <div class="container">
         <h1>📰 Coin News Demo</h1>
-        <p>Enter a coin name to fetch top headlines from its Reddit community:</p>
+        <p>Enter a coin name to fetch the latest cryptocurrency news articles from @https://newsapi.org/:</p>
         
         <div>
             <input type="text" id="coinName" placeholder="bitcoin" value="bitcoin">
@@ -147,7 +147,7 @@
             const sourceInfo = document.createElement('div');
             sourceInfo.className = 'subreddit-info';
             sourceInfo.innerHTML = `
-                📡 Fetched from <strong>NewsData.io</strong> • 
+                📡 Fetched from <strong>@https://newsapi.org/</strong> • 
                 ${articles.length} articles found • 
                 Search: "${coinName} cryptocurrency"
             `;
@@ -171,6 +171,7 @@
                     </div>
                     <div class="news-meta">
                         📰 ${article.source || 'Unknown'} • 
+                        ${article.author ? `✍️ ${escapeHtml(article.author)} • ` : ''}
                         ⏰ ${timeAgo} • 
                         <a href="${article.url}" target="_blank" rel="noopener">
                             Read Article
@@ -179,6 +180,11 @@
                     ${article.description ? `
                         <div style="margin-top: 8px; font-size: 13px; color: #666;">
                             ${escapeHtml(article.description.substring(0, 200))}${article.description.length > 200 ? '...' : ''}
+                        </div>
+                    ` : ''}
+                    ${article.urlToImage ? `
+                        <div style="margin-top: 8px;">
+                            <img src="${article.urlToImage}" alt="Article image" style="max-width: 100%; height: auto; border-radius: 5px; max-height: 150px; object-fit: cover;" onerror="this.style.display='none'">
                         </div>
                     ` : ''}
                 `;
