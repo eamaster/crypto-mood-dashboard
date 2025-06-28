@@ -408,6 +408,19 @@
         }
     }
     
+    // Add sentiment debugging function
+    function logSentimentDebug(sentimentData, headlines) {
+        console.log('📊 Sentiment Analysis Debug:');
+        console.log('  Headlines analyzed:', headlines.length);
+        console.log('  Sentiment score:', sentimentData.score);
+        console.log('  Category:', sentimentData.category);
+        console.log('  Confidence:', sentimentData.confidence);
+        console.log('  Method:', sentimentData.method);
+        if (sentimentData.breakdown) {
+            console.log('  Breakdown:', sentimentData.breakdown);
+        }
+    }
+    
     // =============================================================================
     // UI UPDATE FUNCTIONS
     // =============================================================================
@@ -448,8 +461,21 @@
         moodBadgeEl.textContent = `${sentimentData.emoji} ${sentimentData.category.charAt(0).toUpperCase() + sentimentData.category.slice(1)}`;
         moodBadgeEl.className = `mood-badge ${sentimentData.category}`;
         
-        moodScoreEl.textContent = `Score: ${sentimentData.score.toFixed(2)}`;
-        moodSourceEl.textContent = `Based on ${sentimentData.count} headlines`;
+        // Enhanced score display with breakdown
+        let scoreText = `Score: ${sentimentData.score.toFixed(2)}`;
+        if (sentimentData.breakdown) {
+            scoreText += ` (${sentimentData.breakdown.positive}+ ${sentimentData.breakdown.negative}- ${sentimentData.breakdown.neutral}=)`;
+        }
+        moodScoreEl.textContent = scoreText;
+        
+        let sourceText = `Based on ${sentimentData.count} headlines`;
+        if (sentimentData.method) {
+            sourceText += ` • ${sentimentData.method === 'cohere-chat-api' ? 'AI Analysis' : 'Keyword Analysis'}`;
+        }
+        if (sentimentData.confidence) {
+            sourceText += ` • ${(sentimentData.confidence * 100).toFixed(0)}% confidence`;
+        }
+        moodSourceEl.textContent = sourceText;
         
         // Update news container
         if (headlines && headlines.length > 0) {
@@ -674,6 +700,7 @@
             
             // Analyze sentiment
             const sentimentData = await analyzeSentiment(headlines);
+            logSentimentDebug(sentimentData, headlines);
             
             // Update UI components
             if (priceData) {
@@ -767,6 +794,33 @@
     // =============================================================================
     // START APPLICATION
     // =============================================================================
+    
+    // Add global error handler to prevent extension errors from polluting console
+    window.addEventListener('error', function(event) {
+        // Filter out extension-related errors
+        if (event.message && (
+            event.message.includes('Extension context invalidated') ||
+            event.message.includes('message channel closed') ||
+            event.message.includes('Receiving end does not exist')
+        )) {
+            event.preventDefault();
+            return false;
+        }
+    });
+    
+    // Add unhandled promise rejection handler
+    window.addEventListener('unhandledrejection', function(event) {
+        // Filter out extension-related promise rejections
+        if (event.reason && event.reason.message && (
+            event.reason.message.includes('Extension context invalidated') ||
+            event.reason.message.includes('message channel closed') ||
+            event.reason.message.includes('Receiving end does not exist')
+        )) {
+            event.preventDefault();
+            return false;
+        }
+        console.warn('Unhandled promise rejection:', event.reason);
+    });
     
     // Wait for DOM and external libraries to load
     if (document.readyState === 'loading') {
