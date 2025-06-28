@@ -165,7 +165,9 @@
                 console.log('News data received:', newsData.length, 'headlines');
                 
                 // Analyze sentiment
-                const sentimentData = analyzeSentimentData(newsData);
+                console.log('Analyzing sentiment...');
+                const sentimentData = await analyzeSentimentData(newsData);
+                console.log('Sentiment analysis result:', sentimentData);
                 
                 // Create combined chart
                 createMoodImpactChart(priceData, sentimentData, coinId);
@@ -306,14 +308,15 @@
             const lastDate = priceData[priceData.length - 1].x;
             const sentimentBarData = [{
                 x: lastDate,
-                y: sentimentData.score
+                y: sentimentData.score || 0
             }];
             
-            // Determine sentiment bar color
+            // Determine sentiment bar color with defensive programming
+            const category = sentimentData.category || 'neutral';
             let sentimentColor;
-            if (sentimentData.category === 'bullish') {
+            if (category === 'bullish') {
                 sentimentColor = 'rgba(40, 167, 69, 0.8)';
-            } else if (sentimentData.category === 'bearish') {
+            } else if (category === 'bearish') {
                 sentimentColor = 'rgba(220, 53, 69, 0.8)';
             } else {
                 sentimentColor = 'rgba(108, 117, 125, 0.8)';
@@ -422,7 +425,7 @@
                                             currency: 'USD'
                                         })}`;
                                     } else {
-                                        return `Sentiment: ${context.parsed.y.toFixed(2)} (${sentimentData.category})`;
+                                        return `Sentiment: ${context.parsed.y.toFixed(2)} (${sentimentData.category || 'neutral'})`;
                                     }
                                 }
                             }
@@ -437,11 +440,17 @@
             const headlineCount = document.getElementById('headlineCount');
             const averageScore = document.getElementById('averageScore');
             
-            badge.textContent = `${sentimentData.emoji} ${sentimentData.category.charAt(0).toUpperCase() + sentimentData.category.slice(1)}`;
-            badge.className = `sentiment-badge sentiment-${sentimentData.category}`;
+            // Defensive programming - ensure all required properties exist
+            const emoji = sentimentData.emoji || '😐';
+            const category = sentimentData.category || 'neutral';
+            const count = sentimentData.count || 0;
+            const score = sentimentData.score || 0;
             
-            headlineCount.textContent = sentimentData.count;
-            averageScore.textContent = sentimentData.score.toFixed(2);
+            badge.textContent = `${emoji} ${category.charAt(0).toUpperCase() + category.slice(1)}`;
+            badge.className = `sentiment-badge sentiment-${category}`;
+            
+            headlineCount.textContent = count;
+            averageScore.textContent = score.toFixed(2);
         }
         
         function updateNewsPreview(headlines) {
