@@ -268,20 +268,33 @@
         }
 
         @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+            
+            .container {
+                padding: 15px;
+                border-radius: 15px;
+            }
+            
             .grid {
                 grid-template-columns: 1fr;
+                gap: 15px;
             }
             
             .controls {
                 flex-direction: column;
                 align-items: stretch;
                 gap: 15px;
+                padding: 15px;
             }
             
             .button-group {
                 margin-left: 0;
                 justify-content: center;
                 width: 100%;
+                flex-direction: column;
+                gap: 10px;
             }
             
             .control-group {
@@ -290,37 +303,205 @@
             
             select {
                 width: 100%;
+                font-size: 16px; /* Prevent zoom on iOS */
             }
             
             button {
                 width: 100%;
-                max-width: 200px;
+                max-width: none;
+                min-height: 48px; /* Touch-friendly */
+                font-size: 16px; /* Prevent zoom on iOS */
             }
             
             .header h1 {
-                font-size: 2em;
+                font-size: 1.8em;
             }
             
             .chart-wrapper {
-                height: 300px;
+                height: 350px; /* Increased for better mobile visibility */
             }
             
             #taChart {
-                max-height: 300px !important;
+                max-height: 350px !important;
+            }
+            
+            /* Mobile-specific chart container improvements */
+            .chart-container {
+                padding: 15px;
+                overflow-x: auto;
+            }
+            
+            .indicators-panel {
+                padding: 15px;
+            }
+            
+            /* AI Analysis mobile improvements */
+            #aiAnalysisSection > div {
+                padding: 15px;
+            }
+            
+            #aiAnalysisSection > div > div {
+                grid-template-columns: 1fr !important;
+                gap: 15px;
+                text-align: center;
+            }
+            
+            /* Fix AI mood label contrast and readability */
+            #aiMoodLabel {
+                color: #ffffff !important;
+                text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+                font-weight: 800 !important;
+                background: rgba(0,0,0,0.2);
+                padding: 8px 16px;
+                border-radius: 8px;
+                border: 2px solid rgba(255,255,255,0.3);
+            }
+            
+            #aiConfidence {
+                color: #ffffff !important;
+                font-weight: 600;
+                text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+            }
+            
+            #aiReasoning {
+                margin-top: 15px;
+                font-size: 0.85em;
             }
         }
 
         @media (max-width: 480px) {
             .container {
-                padding: 15px;
+                padding: 10px;
+                margin: 10px;
+            }
+            
+            .chart-wrapper {
+                height: 280px;
+            }
+            
+            #taChart {
+                max-height: 280px !important;
+            }
+            
+            .chart-container, .indicators-panel {
+                padding: 10px;
+            }
+            
+            .indicator {
+                margin-bottom: 15px;
+                padding: 12px;
+            }
+            
+            .header h1 {
+                font-size: 1.5em;
+            }
+            
+            .disclaimer {
+                font-size: 0.85em;
+                padding: 12px;
+            }
+            
+            /* Very small screen AI improvements */
+            #aiMoodIcon {
+                font-size: 2.5em !important;
+            }
+            
+            #aiMoodLabel {
+                font-size: 1.3em !important;
+            }
+        }
+        
+        /* Enhanced AI Analysis styling for better contrast */
+        #aiMoodLabel {
+            color: #ffffff !important;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.6);
+            font-weight: 800 !important;
+        }
+        
+        #aiMoodLabel.neutral {
+            background: rgba(255,255,255,0.25) !important;
+            padding: 8px 16px;
+            border-radius: 8px;
+            border: 2px solid rgba(255,255,255,0.4);
+        }
+        
+        #aiMoodLabel.bullish {
+            color: #4ade80 !important;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+        }
+        
+        #aiMoodLabel.bearish {
+            color: #f87171 !important;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+        }
+        
+        #aiConfidence {
+            color: #ffffff !important;
+            font-weight: 600 !important;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.6);
+        }
+        
+        /* Better chart legend positioning on mobile */
+        @media (max-width: 768px) {
+            .chart-wrapper canvas {
+                font-size: 12px;
+            }
+            
+            /* Improve touch scrolling for mobile */
+            .chart-container {
+                -webkit-overflow-scrolling: touch;
+            }
+            
+            /* Better button spacing on mobile */
+            .button-group button {
+                margin-bottom: 8px;
+            }
+            
+            /* Improved indicator cards on mobile */
+            .indicator h3 {
+                font-size: 1em;
+            }
+            
+            .indicator-value {
+                font-size: 1.1em;
+            }
+            
+            /* Mobile-optimized AI explanation section */
+            #aiExplanationContent {
+                font-size: 0.9em;
+                line-height: 1.5;
+            }
+        }
+        
+        /* Enhanced touch interactions */
+        @media (pointer: coarse) {
+            button, select {
+                min-height: 48px;
+                touch-action: manipulation;
+            }
+            
+            .chart-wrapper {
+                touch-action: pan-x pan-y;
+            }
+        }
+        
+        /* Prevent horizontal scroll on very small screens */
+        @media (max-width: 320px) {
+            .container {
+                padding: 8px;
+                margin: 5px;
             }
             
             .chart-wrapper {
                 height: 250px;
             }
             
-            #taChart {
-                max-height: 250px !important;
+            .header h1 {
+                font-size: 1.3em;
+            }
+            
+            .disclaimer {
+                font-size: 0.8em;
             }
         }
     </style>
@@ -594,8 +775,6 @@
             }
         }
 
-
-
         function displayChart(price, sma20, bb) {
             const ctx = document.getElementById('taChart').getContext('2d');
             
@@ -653,47 +832,103 @@
                     maintainAspectRatio: false,
                     // ✅ CHART FIX: Prevent chart from triggering layout changes
                     resizeDelay: 0,
+                    interaction: {
+                        intersect: false,
+                        mode: 'index'
+                    },
                     scales: {
                         x: {
                             type: 'time',
                             time: {
                                 unit: 'day'
+                            },
+                            ticks: {
+                                maxTicksLimit: window.innerWidth < 768 ? 4 : 7, // Fewer ticks on mobile
+                                font: {
+                                    size: window.innerWidth < 768 ? 10 : 12
+                                }
                             }
                         },
                         y: {
-                            beginAtZero: false
+                            beginAtZero: false,
+                            ticks: {
+                                callback: function(value) {
+                                    return '$' + value.toLocaleString();
+                                },
+                                font: {
+                                    size: window.innerWidth < 768 ? 10 : 12
+                                }
+                            }
                         }
                     },
                     plugins: {
                         title: {
                             display: true,
                             text: 'Technical Analysis Chart',
-                            font: { size: 16 }
+                            font: { 
+                                size: window.innerWidth < 768 ? 14 : 16,
+                                weight: 'bold'
+                            }
                         },
                         legend: {
                             display: true,
-                            position: 'top'
+                            position: window.innerWidth < 768 ? 'bottom' : 'top',
+                            labels: {
+                                font: {
+                                    size: window.innerWidth < 768 ? 10 : 12
+                                },
+                                padding: window.innerWidth < 768 ? 10 : 20,
+                                usePointStyle: true,
+                                boxWidth: window.innerWidth < 768 ? 8 : 12
+                            }
                         },
                         subtitle: {
-                            display: true,
+                            display: window.innerWidth >= 768, // Hide subtitle on mobile to save space
                             text: '📝 Note: Technical indicators start after sufficient data points are collected for accurate calculation',
                             font: { size: 12 },
                             color: '#666',
                             padding: { bottom: 20 }
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(0,0,0,0.8)',
+                            titleFont: { size: window.innerWidth < 768 ? 12 : 14 },
+                            bodyFont: { size: window.innerWidth < 768 ? 10 : 12 },
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.dataset.label || '';
+                                    if (label) {
+                                        label += ': ';
+                                    }
+                                    if (context.parsed.y !== null) {
+                                        label += '$' + context.parsed.y.toLocaleString();
+                                    }
+                                    return label;
+                                }
+                            }
                         }
                     },
-                    // Chart animations
+                    // Chart animations (reduced on mobile for performance)
                     animation: {
-                        duration: 400,
+                        duration: window.innerWidth < 768 ? 200 : 400,
                         easing: 'easeInOutQuart'
                     },
                     // ✅ CHART FIX: Ensure chart stays within bounds
                     layout: {
                         padding: {
-                            top: 10,
-                            bottom: 10,
-                            left: 10,
-                            right: 10
+                            top: window.innerWidth < 768 ? 5 : 10,
+                            bottom: window.innerWidth < 768 ? 5 : 10,
+                            left: window.innerWidth < 768 ? 5 : 10,
+                            right: window.innerWidth < 768 ? 5 : 10
+                        }
+                    },
+                    // Mobile-specific optimizations
+                    elements: {
+                        point: {
+                            radius: window.innerWidth < 768 ? 2 : 3,
+                            hoverRadius: window.innerWidth < 768 ? 4 : 6
+                        },
+                        line: {
+                            tension: 0.1
                         }
                     }
                 }
@@ -858,16 +1093,43 @@
                 'neutral': '⚖️'
             };
             
-            const moodColors = {
-                'bullish': '#28a745',
-                'bearish': '#dc3545', 
-                'neutral': '#6c757d'
-            };
+            const aiMoodLabel = document.getElementById('aiMoodLabel');
+            const aiMoodIcon = document.getElementById('aiMoodIcon');
             
-            document.getElementById('aiMoodIcon').textContent = moodIcons[aiResult.mood] || '🤖';
-            document.getElementById('aiMoodLabel').textContent = aiResult.mood.toUpperCase();
-            document.getElementById('aiMoodLabel').style.color = moodColors[aiResult.mood] || '#fff';
-            document.getElementById('aiConfidence').textContent = `Confidence: ${aiResult.confidence}%`;
+            // Set icon and text
+            aiMoodIcon.textContent = moodIcons[aiResult.mood] || '🤖';
+            aiMoodLabel.textContent = aiResult.mood.toUpperCase();
+            
+            // ✅ FIX: Apply proper styling classes for better contrast
+            aiMoodLabel.className = ''; // Clear existing classes
+            aiMoodLabel.classList.add(aiResult.mood); // Add mood-specific class
+            
+            // Enhanced contrast for different moods
+            if (aiResult.mood === 'neutral') {
+                // White text with dark background for better contrast on purple
+                aiMoodLabel.style.color = '#ffffff';
+                aiMoodLabel.style.background = 'rgba(255,255,255,0.25)';
+                aiMoodLabel.style.border = '2px solid rgba(255,255,255,0.4)';
+                aiMoodLabel.style.padding = '8px 16px';
+                aiMoodLabel.style.borderRadius = '8px';
+                aiMoodLabel.style.textShadow = '2px 2px 4px rgba(0,0,0,0.8)';
+                aiMoodLabel.style.fontWeight = '800';
+            } else if (aiResult.mood === 'bullish') {
+                aiMoodLabel.style.color = '#4ade80';
+                aiMoodLabel.style.textShadow = '2px 2px 4px rgba(0,0,0,0.8)';
+                aiMoodLabel.style.fontWeight = '800';
+            } else if (aiResult.mood === 'bearish') {
+                aiMoodLabel.style.color = '#f87171';
+                aiMoodLabel.style.textShadow = '2px 2px 4px rgba(0,0,0,0.8)';
+                aiMoodLabel.style.fontWeight = '800';
+            }
+            
+            // Enhanced confidence styling
+            const aiConfidence = document.getElementById('aiConfidence');
+            aiConfidence.textContent = `Confidence: ${aiResult.confidence}%`;
+            aiConfidence.style.color = '#ffffff';
+            aiConfidence.style.fontWeight = '600';
+            aiConfidence.style.textShadow = '1px 1px 2px rgba(0,0,0,0.6)';
             
             // Update reasoning
             document.getElementById('aiReasoning').textContent = aiResult.reasoning;
@@ -1001,7 +1263,7 @@
             document.getElementById('explainMethodBadge').textContent = 'Error';
         }
 
-        // Add CSS animation for loading spinner
+        // Add CSS animation for loading spinner and mobile optimizations
         const style = document.createElement('style');
         style.textContent = `
             @keyframes spin {
@@ -1009,6 +1271,12 @@
                 100% { transform: rotate(360deg); }
             }
             
+            @keyframes fadeIn {
+                0% { opacity: 0; transform: translateY(10px); }
+                100% { opacity: 1; transform: translateY(0); }
+            }
+            
+            /* Mobile-specific AI section improvements */
             @media (max-width: 768px) {
                 #aiAnalysisSection > div > div {
                     grid-template-columns: 1fr !important;
@@ -1017,6 +1285,32 @@
                 #aiExplainBtn {
                     width: 100% !important;
                     margin-bottom: 5px;
+                }
+                
+                /* Smooth animations for mobile */
+                .indicator {
+                    animation: fadeIn 0.3s ease-out;
+                }
+                
+                /* Better chart container on mobile */
+                .chart-container h3 {
+                    font-size: 1.1em;
+                    margin-bottom: 10px;
+                }
+                
+                /* Improved loading state */
+                .loading {
+                    padding: 20px;
+                    font-size: 0.9em;
+                }
+            }
+            
+            /* Accessibility improvements */
+            @media (prefers-reduced-motion: reduce) {
+                * {
+                    animation-duration: 0.01ms !important;
+                    animation-iteration-count: 1 !important;
+                    transition-duration: 0.01ms !important;
                 }
             }
         `;
