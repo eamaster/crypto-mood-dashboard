@@ -24,10 +24,16 @@
                     <option value="bitcoin">Loading coins...</option>
                 </select>
                 <button id="refreshBtn">🔄 Refresh</button>
+                <button id="realTimeBtn">📡 Start Real-Time</button>
                 <button onclick="location.href='modules/technical-analysis.html'" class="ta-button">🔍 Technical Analysis</button>
             </div>
-            <div class="last-updated">
-                Last updated: <span id="lastUpdated">Never</span>
+            <div class="dashboard-status">
+                <div class="last-updated">
+                    Last updated: <span id="lastUpdated">Never</span>
+                </div>
+                <div id="realTimeStatus" style="display: none;" class="real-time-status">
+                    <span id="statusIcon">🔴</span> <span id="statusText">Real-time updates stopped</span>
+                </div>
             </div>
         </section>
 

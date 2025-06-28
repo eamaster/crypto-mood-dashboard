@@ -20,7 +20,15 @@
             news: 0
         },
         coins: [],
-        chartInstance: null
+        chartInstance: null,
+        realTime: {
+            isActive: false,
+            intervalId: null,
+            updateFrequency: 30000, // 30 seconds
+            lastUpdateTime: null,
+            consecutiveErrors: 0,
+            maxErrors: 3
+        }
     };
     
     // Rate limiting - max 1 request per endpoint per 10 seconds
@@ -37,8 +45,14 @@
     const elements = {
         coinSelect: document.getElementById('coinSelect'),
         refreshBtn: document.getElementById('refreshBtn'),
+        realTimeBtn: document.getElementById('realTimeBtn'),
         themeToggle: document.getElementById('themeToggle'),
         lastUpdated: document.getElementById('lastUpdated'),
+        
+        // Real-time status
+        realTimeStatus: document.getElementById('realTimeStatus'),
+        statusIcon: document.getElementById('statusIcon'),
+        statusText: document.getElementById('statusText'),
         
         // Price widget
         priceWidget: document.getElementById('priceWidget'),
@@ -59,6 +73,11 @@
     // =============================================================================
     
     function isRateLimited(endpoint) {
+        // Skip rate limiting during real-time updates for better responsiveness
+        if (state.realTime.isActive) {
+            return false;
+        }
+        
         const now = Date.now();
         const lastFetch = state.lastFetchTimes[endpoint] || 0;
         return (now - lastFetch) < RATE_LIMIT_MS;
@@ -95,6 +114,111 @@
     function hideError(element) {
         element.style.display = 'none';
     }
+    
+    // =============================================================================
+    // REAL-TIME UPDATE FUNCTIONS
+    // =============================================================================
+    
+    function toggleRealTime() {
+        if (state.realTime.isActive) {
+            stopRealTimeUpdates();
+        } else {
+            startRealTimeUpdates();
+        }
+    }
+    
+    function startRealTimeUpdates() {
+        console.log('🔴 Starting real-time dashboard updates...');
+        
+        state.realTime.isActive = true;
+        state.realTime.consecutiveErrors = 0;
+        
+        // Update UI
+        elements.realTimeBtn.textContent = '⏸️ Stop Real-Time';
+        elements.realTimeBtn.setAttribute('data-active', 'true');
+        elements.realTimeStatus.style.display = 'block';
+        updateRealTimeStatus('🟢', 'Real-time updates active');
+        
+        // Perform initial update
+        performRealTimeUpdate();
+        
+        // Set up interval for continuous updates
+        state.realTime.intervalId = setInterval(() => {
+            performRealTimeUpdate();
+        }, state.realTime.updateFrequency);
+    }
+    
+    function stopRealTimeUpdates() {
+        console.log('⏸️ Stopping real-time dashboard updates...');
+        
+        state.realTime.isActive = false;
+        
+        // Clear interval
+        if (state.realTime.intervalId) {
+            clearInterval(state.realTime.intervalId);
+            state.realTime.intervalId = null;
+        }
+        
+        // Update UI
+        elements.realTimeBtn.textContent = '📡 Start Real-Time';
+        elements.realTimeBtn.setAttribute('data-active', 'false');
+        updateRealTimeStatus('🔴', 'Real-time updates stopped');
+    }
+    
+    async function performRealTimeUpdate() {
+        if (!state.realTime.isActive) return;
+        
+        try {
+            console.log('📡 Performing real-time dashboard update...');
+            
+            updateRealTimeStatus('🟡', 'Updating dashboard...');
+            
+            // Update the dashboard with current coin
+            await updateDashboard(state.selectedCoin);
+            
+            // Update timestamp
+            state.realTime.lastUpdateTime = new Date();
+            state.realTime.consecutiveErrors = 0;
+            
+            updateRealTimeStatus('🟢', 'Real-time updates active');
+            
+        } catch (error) {
+            console.error('❌ Real-time update failed:', error);
+            
+            state.realTime.consecutiveErrors++;
+            
+            if (state.realTime.consecutiveErrors >= state.realTime.maxErrors) {
+                console.log('⚠️ Too many consecutive errors, stopping real-time updates');
+                stopRealTimeUpdates();
+                updateRealTimeStatus('🔴', 'Real-time stopped (errors)');
+            } else {
+                updateRealTimeStatus('🟠', `Update failed, retrying... (${state.realTime.consecutiveErrors}/${state.realTime.maxErrors})`);
+            }
+        }
+    }
+    
+    function updateRealTimeStatus(icon, text) {
+        if (elements.statusIcon && elements.statusText && elements.realTimeStatus) {
+            elements.statusIcon.textContent = icon;
+            elements.statusText.textContent = text;
+            
+            // Update CSS data attributes for styling
+            if (icon === '🟢') {
+                elements.realTimeStatus.setAttribute('data-status', 'active');
+            } else if (icon === '🟡') {
+                elements.realTimeStatus.setAttribute('data-status', 'updating');
+            } else if (icon === '🟠' || icon === '🔴') {
+                elements.realTimeStatus.setAttribute('data-status', 'error');
+            }
+        }
+    }
+    
+    // Clean up real-time updates when page unloads
+    window.addEventListener('beforeunload', function() {
+        if (state.realTime.isActive) {
+            stopRealTimeUpdates();
+        }
+    });
     
     // =============================================================================
     // API FUNCTIONS
@@ -624,6 +748,7 @@
             // Set up event listeners
             elements.coinSelect.addEventListener('change', handleCoinChange);
             elements.refreshBtn.addEventListener('click', handleRefresh);
+            elements.realTimeBtn.addEventListener('click', toggleRealTime);
             elements.themeToggle.addEventListener('click', handleThemeToggle);
             
             // Populate coin selector

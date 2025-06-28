@@ -358,14 +358,8 @@
             
             <div class="button-group">
                 <button onclick="analyzeTA()">🔍 Analyze</button>
-                <button id="realTimeBtn" onclick="toggleRealTime()">📡 Start Real-Time</button>
                 <button id="aiExplainBtn" onclick="getAIExplanation()" style="display: none;">🤖 AI Explain This</button>
                 <button onclick="location.href='../index.html'">🏠 Back to Dashboard</button>
-            </div>
-            
-            <div id="realTimeStatus" style="display: none; background: #e8f5e8; padding: 8px 12px; border-radius: 6px; margin-top: 10px; font-size: 0.85em; color: #2d5a2d; border-left: 4px solid #28a745;">
-                <span id="statusIcon">🔴</span> <span id="statusText">Real-time updates stopped</span>
-                <span id="lastUpdate" style="margin-left: 10px; opacity: 0.8;"></span>
             </div>
         </div>
 
@@ -375,7 +369,6 @@
                 <div style="background: #e7f3ff; padding: 10px; border-radius: 8px; margin: 10px 0; font-size: 0.85em; color: #1565c0; border-left: 4px solid #2196f3;">
                     <strong>ℹ️ Chart Information:</strong> Technical indicators (SMA, Bollinger Bands) start after collecting sufficient data points for accurate calculations. This delayed start is mathematically correct and ensures reliable signals.
                     <br><strong>🤖 AI Enhancement:</strong> Advanced AI analysis will automatically classify market mood and provide pattern explanations below the chart.
-                    <br><strong>📡 Real-Time Mode:</strong> Enable real-time updates to see live price movements and dynamic technical analysis every 30 seconds.
                 </div>
                 <div id="loading" class="loading">Click "Analyze" to load technical analysis...</div>
                 <div class="chart-wrapper">
@@ -436,19 +429,6 @@
         const WORKER_URL = 'https://crypto-mood-dashboard.smah0085.workers.dev';
         
         let chartInstance = null;
-        
-        // =============================================================================
-        // REAL-TIME UPDATE SYSTEM
-        // =============================================================================
-        
-        let realTimeState = {
-            isActive: false,
-            intervalId: null,
-            updateFrequency: 30000, // 30 seconds
-            lastUpdateTime: null,
-            consecutiveErrors: 0,
-            maxErrors: 3
-        };
 
         // Technical Analysis Functions
         function calculateSMA(data, period) {
@@ -702,19 +682,10 @@
                             padding: { bottom: 20 }
                         }
                     },
-                    // ✅ CHART FIX: Enhanced animations for real-time updates
+                    // Chart animations
                     animation: {
-                        duration: realTimeState.isActive ? 800 : 400,
+                        duration: 400,
                         easing: 'easeInOutQuart'
-                    },
-                    // Real-time animation configurations
-                    transitions: {
-                        active: {
-                            animation: {
-                                duration: 1000,
-                                easing: 'easeInOutQuart'
-                            }
-                        }
                     },
                     // ✅ CHART FIX: Ensure chart stays within bounds
                     layout: {
@@ -1015,7 +986,7 @@
             document.getElementById('explainMethodBadge').textContent = 'Error';
         }
 
-        // Add CSS animation for loading spinner and real-time effects
+        // Add CSS animation for loading spinner
         const style = document.createElement('style');
         style.textContent = `
             @keyframes spin {
@@ -1023,276 +994,18 @@
                 100% { transform: rotate(360deg); }
             }
             
-            @keyframes pulse {
-                0% { opacity: 1; }
-                50% { opacity: 0.6; }
-                100% { opacity: 1; }
-            }
-            
-            @keyframes slideIn {
-                from { transform: translateY(-10px); opacity: 0; }
-                to { transform: translateY(0); opacity: 1; }
-            }
-            
-            /* Real-time status animations */
-            #realTimeStatus {
-                animation: slideIn 0.3s ease-out;
-            }
-            
-            #realTimeStatus[data-status="active"] #statusIcon {
-                animation: pulse 2s infinite;
-            }
-            
-            #realTimeStatus[data-status="updating"] {
-                background: #fff3cd !important;
-                color: #856404 !important;
-                border-left-color: #ffc107 !important;
-            }
-            
-            #realTimeStatus[data-status="error"] {
-                background: #f8d7da !important;
-                color: #721c24 !important;
-                border-left-color: #dc3545 !important;
-            }
-            
-            /* Real-time button states */
-            #realTimeBtn[data-active="true"] {
-                background: linear-gradient(135deg, #dc3545 0%, #fd7e14 100%) !important;
-                box-shadow: 0 0 15px rgba(220, 53, 69, 0.4);
-            }
-            
-            #realTimeBtn[data-active="true"]::after {
-                content: " ⏸️";
-            }
-            
-            /* Chart real-time indicator */
-            .chart-container[data-realtime="true"]::before {
-                content: "🔴 LIVE";
-                position: absolute;
-                top: 10px;
-                right: 15px;
-                background: #dc3545;
-                color: white;
-                padding: 4px 8px;
-                border-radius: 12px;
-                font-size: 0.7em;
-                font-weight: bold;
-                z-index: 1000;
-                animation: pulse 2s infinite;
-            }
-            
             @media (max-width: 768px) {
                 #aiAnalysisSection > div > div {
                     grid-template-columns: 1fr !important;
                 }
                 
-                #aiExplainBtn, #realTimeBtn {
+                #aiExplainBtn {
                     width: 100% !important;
                     margin-bottom: 5px;
-                }
-                
-                #realTimeStatus {
-                    font-size: 0.8em;
-                    padding: 6px 10px;
                 }
             }
         `;
         document.head.appendChild(style);
-
-        // =============================================================================
-        // REAL-TIME UPDATE FUNCTIONS
-        // =============================================================================
-
-        /**
-         * Toggle real-time updates on/off
-         */
-        function toggleRealTime() {
-            if (realTimeState.isActive) {
-                stopRealTimeUpdates();
-            } else {
-                startRealTimeUpdates();
-            }
-        }
-
-        /**
-         * Start real-time updates
-         */
-        function startRealTimeUpdates() {
-            console.log('🔴 Starting real-time updates...');
-            
-            realTimeState.isActive = true;
-            realTimeState.consecutiveErrors = 0;
-            
-            // Update UI
-            document.getElementById('realTimeBtn').textContent = '⏸️ Stop Real-Time';
-            document.getElementById('realTimeBtn').style.background = 'linear-gradient(135deg, #dc3545 0%, #fd7e14 100%)';
-            document.getElementById('realTimeStatus').style.display = 'block';
-            updateRealTimeStatus('🟢', 'Real-time updates active', 'Starting...');
-            
-            // Perform initial analysis
-            performRealTimeUpdate();
-            
-            // Set up interval for continuous updates
-            realTimeState.intervalId = setInterval(() => {
-                performRealTimeUpdate();
-            }, realTimeState.updateFrequency);
-        }
-
-        /**
-         * Stop real-time updates
-         */
-        function stopRealTimeUpdates() {
-            console.log('⏸️ Stopping real-time updates...');
-            
-            realTimeState.isActive = false;
-            
-            // Clear interval
-            if (realTimeState.intervalId) {
-                clearInterval(realTimeState.intervalId);
-                realTimeState.intervalId = null;
-            }
-            
-            // Update UI
-            document.getElementById('realTimeBtn').textContent = '📡 Start Real-Time';
-            document.getElementById('realTimeBtn').style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
-            updateRealTimeStatus('🔴', 'Real-time updates stopped', formatLastUpdateTime());
-        }
-
-        /**
-         * Perform a real-time update
-         */
-        async function performRealTimeUpdate() {
-            if (!realTimeState.isActive) return;
-            
-            try {
-                console.log('📡 Performing real-time update...');
-                
-                updateRealTimeStatus('🟡', 'Updating...', 'Fetching latest data...');
-                
-                // Get current selections
-                const coinId = document.getElementById('coinSelect').value;
-                const timeframe = parseInt(document.getElementById('timeframe').value);
-                
-                // Fetch new data
-                const priceData = await fetchPriceData(coinId, timeframe);
-                
-                // Calculate indicators with new data
-                const sma20 = calculateSMA(priceData, 20);
-                const rsi = calculateRSI(priceData);
-                const bb = calculateBollingerBands(priceData);
-                
-                // Generate signals
-                const signals = generateTradingSignals(priceData, rsi, sma20, bb);
-                const overallSignal = calculateOverallSignal(signals);
-                
-                // Update chart with animation
-                updateChartRealTime(priceData, sma20, bb);
-                
-                // Update indicators
-                displayIndicators(rsi, sma20, signals);
-                
-                // Update summary
-                displaySummary(overallSignal, signals.length, coinId.toUpperCase());
-                
-                // Update AI analysis if available
-                if (currentAnalysisData) {
-                    console.log('🤖 Updating AI analysis...');
-                    await performAIAnalysis(priceData, rsi, sma20, bb, signals, coinId);
-                }
-                
-                // Update timestamp
-                realTimeState.lastUpdateTime = new Date();
-                realTimeState.consecutiveErrors = 0;
-                
-                updateRealTimeStatus('🟢', 'Real-time updates active', formatLastUpdateTime());
-                
-            } catch (error) {
-                console.error('❌ Real-time update failed:', error);
-                
-                realTimeState.consecutiveErrors++;
-                
-                if (realTimeState.consecutiveErrors >= realTimeState.maxErrors) {
-                    console.log('⚠️ Too many consecutive errors, stopping real-time updates');
-                    stopRealTimeUpdates();
-                    updateRealTimeStatus('🔴', 'Real-time stopped (errors)', 'Multiple failures detected');
-                } else {
-                    updateRealTimeStatus('🟠', 'Update failed, retrying...', `Error ${realTimeState.consecutiveErrors}/${realTimeState.maxErrors}`);
-                }
-            }
-        }
-
-        /**
-         * Update chart with real-time data and smooth animations
-         */
-        function updateChartRealTime(price, sma20, bb) {
-            if (!chartInstance) {
-                // If no chart exists, create it normally
-                displayChart(price, sma20, bb);
-                return;
-            }
-            
-            console.log('📊 Updating chart with real-time data...');
-            
-            // Update chart data with smooth animation
-            chartInstance.data.datasets[0].data = price; // Price data
-            chartInstance.data.datasets[1].data = sma20; // SMA data
-            chartInstance.data.datasets[2].data = bb.upper; // BB Upper
-            chartInstance.data.datasets[3].data = bb.lower; // BB Lower
-            
-            // Update chart with animation
-            chartInstance.update('active');
-        }
-
-        /**
-         * Update real-time status display
-         */
-        function updateRealTimeStatus(icon, text, detail) {
-            const statusElement = document.getElementById('realTimeStatus');
-            const statusIcon = document.getElementById('statusIcon');
-            const statusText = document.getElementById('statusText');
-            const lastUpdate = document.getElementById('lastUpdate');
-            
-            statusIcon.textContent = icon;
-            statusText.textContent = text;
-            lastUpdate.textContent = detail;
-            
-            // Update CSS data attributes for styling
-            if (icon === '🟢') {
-                statusElement.setAttribute('data-status', 'active');
-                document.querySelector('.chart-container').setAttribute('data-realtime', 'true');
-            } else if (icon === '🟡') {
-                statusElement.setAttribute('data-status', 'updating');
-            } else if (icon === '🟠' || icon === '🔴') {
-                statusElement.setAttribute('data-status', 'error');
-                document.querySelector('.chart-container').removeAttribute('data-realtime');
-            }
-            
-            // Update button state
-            document.getElementById('realTimeBtn').setAttribute('data-active', realTimeState.isActive.toString());
-        }
-
-        /**
-         * Format last update time for display
-         */
-        function formatLastUpdateTime() {
-            if (!realTimeState.lastUpdateTime) return 'Never updated';
-            
-            const now = new Date();
-            const diff = Math.floor((now - realTimeState.lastUpdateTime) / 1000);
-            
-            if (diff < 60) return `Updated ${diff}s ago`;
-            else if (diff < 3600) return `Updated ${Math.floor(diff / 60)}m ago`;
-            else return `Updated ${Math.floor(diff / 3600)}h ago`;
-        }
-
-        /**
-         * Clean up real-time updates when page unloads
-         */
-        window.addEventListener('beforeunload', function() {
-            if (realTimeState.isActive) {
-                stopRealTimeUpdates();
-            }
-        });
 
         // =============================================================================
         // ENHANCED ANALYSIS FUNCTION WITH AI INTEGRATION
