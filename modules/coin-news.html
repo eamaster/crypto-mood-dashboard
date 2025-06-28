@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Coin News Demo</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📰</text></svg>">
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -77,8 +78,8 @@
 </head>
 <body>
     <div class="container">
-        <h1>📰 Coin News Demo</h1>
-        <p>Enter a coin name to fetch the latest cryptocurrency news articles from @https://newsapi.org/:</p>
+        <h1>📰 Cryptocurrency News</h1>
+        <p>Get the latest cryptocurrency news articles powered by <a href="https://newsapi.org/" target="_blank" rel="noopener">NewsAPI.org</a>. Enter any cryptocurrency name to see recent headlines and insights.</p>
         
         <div>
             <input type="text" id="coinName" placeholder="bitcoin" value="bitcoin">
@@ -147,7 +148,7 @@
             const sourceInfo = document.createElement('div');
             sourceInfo.className = 'subreddit-info';
             sourceInfo.innerHTML = `
-                📡 Fetched from <strong>@https://newsapi.org/</strong> • 
+                📡 Powered by <strong><a href="https://newsapi.org/" target="_blank" rel="noopener">NewsAPI.org</a></strong> • 
                 ${articles.length} articles found • 
                 Search: "${coinName} cryptocurrency"
             `;
