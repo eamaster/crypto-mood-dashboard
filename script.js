@@ -24,7 +24,7 @@
         realTime: {
             isActive: false,
             intervalId: null,
-            updateFrequency: 30000, // 30 seconds
+            updateFrequency: 300000, // 5 minutes
             lastUpdateTime: null,
             consecutiveErrors: 0,
             maxErrors: 3
@@ -128,7 +128,7 @@
     }
     
     function startRealTimeUpdates() {
-        console.log('🔴 Starting real-time dashboard updates...');
+        console.log('🔴 Starting real-time dashboard updates (5-minute intervals)...');
         
         state.realTime.isActive = true;
         state.realTime.consecutiveErrors = 0;
@@ -137,7 +137,7 @@
         elements.realTimeBtn.textContent = '⏸️ Stop Real-Time';
         elements.realTimeBtn.setAttribute('data-active', 'true');
         elements.realTimeStatus.style.display = 'block';
-        updateRealTimeStatus('🟢', 'Real-time updates active');
+        updateRealTimeStatus('🟢', 'Real-time updates active (every 5 min)');
         
         // Perform initial update
         performRealTimeUpdate();
@@ -160,7 +160,7 @@
         }
         
         // Update UI
-        elements.realTimeBtn.textContent = '📡 Start Real-Time';
+        elements.realTimeBtn.textContent = '📡 Start Real-Time (5min)';
         elements.realTimeBtn.setAttribute('data-active', 'false');
         updateRealTimeStatus('🔴', 'Real-time updates stopped');
     }
@@ -169,18 +169,26 @@
         if (!state.realTime.isActive) return;
         
         try {
-            console.log('📡 Performing real-time dashboard update...');
+            console.log('📡 Performing real-time dashboard update (5-minute cycle)...');
             
-            updateRealTimeStatus('🟡', 'Updating dashboard...');
+            updateRealTimeStatus('🟡', 'Updating all data (price, chart, sentiment)...');
             
-            // Update the dashboard with current coin
+            // Force reset rate limiting to ensure fresh data on real-time updates
+            state.lastFetchTimes = {
+                coinsList: 0,
+                price: 0,
+                chart: 0,
+                news: 0
+            };
+            
+            // Update the dashboard with current coin - this ensures all components update consistently
             await updateDashboard(state.selectedCoin);
             
             // Update timestamp
             state.realTime.lastUpdateTime = new Date();
             state.realTime.consecutiveErrors = 0;
             
-            updateRealTimeStatus('🟢', 'Real-time updates active');
+            updateRealTimeStatus('🟢', 'Real-time updates active (every 5 min)');
             
         } catch (error) {
             console.error('❌ Real-time update failed:', error);
@@ -653,8 +661,8 @@
             // Clear and populate dropdown
             elements.coinSelect.innerHTML = '';
             
-            // Add popular coins first
-            const popularCoins = ['bitcoin', 'ethereum', 'dogecoin', 'cardano', 'solana'];
+            // Add popular coins first - ensuring all user-specified coins are prioritized
+            const popularCoins = ['bitcoin', 'ethereum', 'dogecoin', 'cardano', 'solana', 'litecoin', 'bitcoin-cash', 'ripple', 'polkadot', 'chainlink', 'stellar', 'monero', 'tezos', 'eos', 'zcash', 'dash'];
             
             coins.forEach(coin => {
                 const option = document.createElement('option');
@@ -679,16 +687,18 @@
     }
     
     async function updateDashboard(coinId = state.selectedCoin) {
-        console.log(`Updating dashboard for ${coinId}`);
+        console.log(`🔄 Updating complete dashboard for ${coinId}`);
         
         try {
-            // Fetch all data in parallel where possible
+            // Fetch all data in parallel for consistent snapshot
             const [priceData, priceHistory, headlines] = await Promise.all([
                 fetchCurrentPrice(coinId).catch(err => {
+                    console.error('Price fetch error:', err);
                     showError(elements.priceError, err.message);
                     return null;
                 }),
                 fetchPriceHistory(coinId).catch(err => {
+                    console.error('Chart data fetch error:', err);
                     showError(elements.chartError, err.message);
                     return null;
                 }),
@@ -698,25 +708,31 @@
                 })
             ]);
             
-            // Analyze sentiment
+            // Analyze sentiment from headlines
             const sentimentData = await analyzeSentiment(headlines);
             logSentimentDebug(sentimentData, headlines);
             
-            // Update UI components
+            // Update all UI components in sequence to ensure consistency
+            console.log('📊 Updating all dashboard components...');
+            
             if (priceData) {
                 updatePriceWidget(priceData, coinId);
+                console.log(`💰 Price updated: ${formatCurrency(priceData.price)} (${formatPercentage(priceData.change24h)})`);
             }
             
             updateMoodWidget(sentimentData, headlines);
+            console.log(`🧠 Sentiment updated: ${sentimentData.category} (${sentimentData.score.toFixed(2)})`);
             
-            if (priceHistory) {
+            if (priceHistory && priceData) {
                 updateChart(priceHistory, sentimentData, coinId);
+                console.log(`📈 Chart updated with ${priceHistory.length} price points`);
             }
             
             updateTimestamp();
+            console.log('✅ Dashboard update complete - all components synchronized');
             
         } catch (error) {
-            console.error('Error updating dashboard:', error);
+            console.error('❌ Error updating dashboard:', error);
         }
     }
     
