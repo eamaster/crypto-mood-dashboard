@@ -202,7 +202,7 @@ async function handleNews(request, env) {
     // Fetch news from @https://newsapi.org/ using the Everything endpoint
     const searchQuery = `${coinName} cryptocurrency OR ${coinName} crypto`;
     const response = await fetch(
-      `https://newsapi.org/v2/everything?q=${encodeURIComponent(searchQuery)}&language=en&sortBy=publishedAt&pageSize=10&apiKey=${env.NEWSAPI_KEY}`,
+      `https://newsapi.org/v2/everything?q=${encodeURIComponent(searchQuery)}&language=en&sortBy=publishedAt&pageSize=20&apiKey=${env.NEWSAPI_KEY}`,
       {
         headers: {
           'User-Agent': 'Crypto-Mood-Dashboard/1.0 (https://hesam.me/crypto-mood-dashboard)'
@@ -291,8 +291,8 @@ async function handleSentiment(request, env) {
 }
 
 async function analyzeSentimentWithCohere(headlines, env) {
-  // Limit to 5 headlines for API limits
-  const textsToAnalyze = headlines.map(h => h.title || h).slice(0, 5);
+  // Limit to 10 headlines for better statistical significance
+  const textsToAnalyze = headlines.map(h => h.title || h).slice(0, 10);
   
   console.log('Cohere API Key available:', !!env.COHERE_API_KEY);
   console.log('Texts to analyze:', textsToAnalyze);
@@ -618,7 +618,7 @@ async function classifyMarketMoodWithCohere(rsi, smaSignal, bbSignal, priceData,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'command-r',
+      model: 'embed-english-v3.0',
       inputs: [inputText],
       examples: examples,
       task_description: 'Classify cryptocurrency market sentiment based on technical analysis indicators. Use "bullish" for positive outlook, "bearish" for negative outlook, and "neutral" for mixed or unclear signals.'
