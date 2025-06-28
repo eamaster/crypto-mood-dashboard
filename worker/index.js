@@ -154,18 +154,25 @@ async function handleHistory(request, env) {
       const timestamp = now - (i * millisecondsPerDay);
       const date = new Date(timestamp);
       
-      // Create deterministic seed based on coin and date
-      const coinSeed = coinId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-      const dayNumber = Math.floor(timestamp / millisecondsPerDay);
-      const seed = (dateSeed + coinSeed + dayNumber) % 100000;
+      let price;
       
-      // Generate consistent price variation (±8% from current price)
-      const randomValue = seededRandom(seed);
-      const variation = (randomValue - 0.5) * 0.16; // ±8% variation
-      
-      // Add some trend simulation (slight downward trend for older data)
-      const trendFactor = 1 - (i * 0.005); // Slight downward trend
-      const price = currentPrice * (1 + variation) * trendFactor;
+      // For today (i = 0), use the exact current price to match /price endpoint
+      if (i === 0) {
+        price = currentPrice;
+      } else {
+        // For historical days, generate simulated data
+        const coinSeed = coinId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+        const dayNumber = Math.floor(timestamp / millisecondsPerDay);
+        const seed = (dateSeed + coinSeed + dayNumber) % 100000;
+        
+        // Generate consistent price variation (±8% from current price)
+        const randomValue = seededRandom(seed);
+        const variation = (randomValue - 0.5) * 0.16; // ±8% variation
+        
+        // Add some trend simulation (slight downward trend for older data)
+        const trendFactor = 1 - (i * 0.005); // Slight downward trend
+        price = currentPrice * (1 + variation) * trendFactor;
+      }
       
       prices.push({
         timestamp: new Date(timestamp).toISOString(),
