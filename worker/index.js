@@ -730,7 +730,8 @@ async function explainPatternWithCohere(rsi, sma, bb, signals, coin, timeframe, 
   
   const prompt = `As a professional crypto technical analyst, explain the current ${coin.toUpperCase()} chart pattern in simple terms for a beginner trader.
 
-Current Technical Analysis:
+LIVE Current Technical Analysis (MUST use these exact values):
+- Current Price: $${(priceContext?.currentPrice || safeSMA).toLocaleString()}
 - RSI (14): ${currentRSI.toFixed(1)}
 - SMA (20): $${safeSMA.toLocaleString()}
 - Bollinger Band Upper: $${safeBBUpper.toLocaleString()}
@@ -741,13 +742,13 @@ Current Technical Analysis:
 - Time Period: ${timeframe} days
 - Individual Signals: ${signals.map(s => `${s.type}: ${s.signal} (${s.strength})`).join(', ')}
 
-Please provide:
-1. A clear explanation of what the current pattern means
-2. What might happen next (potential scenarios)  
-3. Key resistance levels (around $${resistance.toLocaleString()}) and support levels (around $${support.toLocaleString()}) to watch
-4. A simple summary for beginners
+Please provide a market analysis using EXACTLY these price levels:
+1. Explain what the current pattern means for ${coin.toUpperCase()} at $${(priceContext?.currentPrice || safeSMA).toLocaleString()}
+2. What might happen next (scenarios with resistance at $${resistance.toLocaleString()} and support at $${support.toLocaleString()})
+3. Key levels to watch: resistance $${resistance.toLocaleString()} and support $${support.toLocaleString()}
+4. Simple summary for beginners
 
-IMPORTANT: Always use the ACTUAL price values provided above (like $${resistance.toLocaleString()} for resistance and $${support.toLocaleString()} for support) instead of placeholders like $xxx or $XXX. Keep the explanation under 200 words, avoid jargon, and focus on educational value. Do NOT provide specific trading advice.`;
+CRITICAL: You MUST use the exact price values listed above ($${resistance.toLocaleString()}, $${support.toLocaleString()}, $${(priceContext?.currentPrice || safeSMA).toLocaleString()}, etc.) - NO placeholders, NO generic numbers, NO $50,000 or $XXX examples. Use the LIVE data provided. Keep under 200 words, educational focus, no trading advice.`;
 
   console.log('Generating AI explanation for:', coin);
   
@@ -834,33 +835,36 @@ function explainPatternFallback(rsi, sma, bb, signals, coin, timeframe, priceCon
     console.log(`⚠️ Fallback using calculations for ${coin}: SMA=${safeSMA}, BB=[${safeBBLower}-${safeBBUpper}]`);
   }
   
-  let explanation = `Current ${coin.toUpperCase()} Analysis (${timeframe} days):\n\n`;
+  const currentPriceDisplay = priceContext?.currentPrice || safeSMA;
   
-  // RSI explanation
+  let explanation = `LIVE ${coin.toUpperCase()} Analysis (${timeframe} days) - Current Price: $${currentPriceDisplay.toLocaleString()}:\n\n`;
+  
+  // RSI explanation with actual price context
   if (currentRSI < 30) {
-    explanation += "📉 RSI shows oversold conditions - the price may have fallen too much and could bounce back. ";
+    explanation += `📉 RSI at ${currentRSI.toFixed(1)} shows oversold conditions - ${coin.toUpperCase()} at $${currentPriceDisplay.toLocaleString()} may have fallen too much and could bounce toward resistance at $${resistance.toLocaleString()}. `;
   } else if (currentRSI > 70) {
-    explanation += "📈 RSI indicates overbought territory - the price may have risen too quickly and could pull back. ";
+    explanation += `📈 RSI at ${currentRSI.toFixed(1)} indicates overbought territory - ${coin.toUpperCase()} at $${currentPriceDisplay.toLocaleString()} may have risen too quickly and could pull back toward support at $${support.toLocaleString()}. `;
   } else {
-    explanation += "⚖️ RSI is in normal range - no extreme buying or selling pressure detected. ";
+    explanation += `⚖️ RSI at ${currentRSI.toFixed(1)} is in normal range - ${coin.toUpperCase()} at $${currentPriceDisplay.toLocaleString()} shows no extreme pressure between support $${support.toLocaleString()} and resistance $${resistance.toLocaleString()}. `;
   }
   
-  // Overall signal explanation with price levels
+  // Overall signal explanation with specific price levels
   if (overallSignal.signal === 'BUY') {
-    explanation += `The technical indicators are showing mostly positive signals, suggesting potential upward movement toward resistance at $${resistance.toLocaleString()}. `;
+    explanation += `Technical indicators suggest ${coin.toUpperCase()} could move from current $${currentPriceDisplay.toLocaleString()} toward resistance at $${resistance.toLocaleString()}. `;
   } else if (overallSignal.signal === 'SELL') {
-    explanation += `The technical indicators are showing mostly negative signals, suggesting potential downward pressure toward support at $${support.toLocaleString()}. `;
+    explanation += `Technical indicators suggest ${coin.toUpperCase()} could decline from current $${currentPriceDisplay.toLocaleString()} toward support at $${support.toLocaleString()}. `;
   } else {
-    explanation += `The technical indicators are mixed, suggesting consolidation between support at $${support.toLocaleString()} and resistance at $${resistance.toLocaleString()}. `;
+    explanation += `Technical indicators are mixed - ${coin.toUpperCase()} likely to consolidate between support $${support.toLocaleString()} and resistance $${resistance.toLocaleString()}. `;
   }
   
-  // Add key levels information
-  explanation += `\n\nKey Levels to Watch:\n`;
-  explanation += `• Resistance: $${resistance.toLocaleString()} (Bollinger Band Upper)\n`;
-  explanation += `• Support: $${support.toLocaleString()} (Bollinger Band Lower)\n`;
-  explanation += `• Moving Average: $${safeSMA.toLocaleString()} (SMA 20)\n`;
+  // Add specific price level scenarios
+  explanation += `\n\nPrice Scenarios:\n`;
+  explanation += `• Bullish breakout: Above $${resistance.toLocaleString()} could target higher levels\n`;
+  explanation += `• Bearish breakdown: Below $${support.toLocaleString()} could see further decline\n`;
+  explanation += `• Consolidation: Between $${support.toLocaleString()}-$${resistance.toLocaleString()} for sideways movement\n`;
+  explanation += `• Key moving average: $${safeSMA.toLocaleString()} (SMA 20)\n`;
   
-  explanation += "\n⚠️ Remember: Technical analysis helps identify patterns but markets can be unpredictable. Always do your own research!";
+  explanation += `\n⚠️ Current ${coin.toUpperCase()} at $${currentPriceDisplay.toLocaleString()} - Remember: Technical analysis helps identify patterns but markets can be unpredictable. Always do your own research!`;
   
   return jsonResponse({
     explanation: explanation,

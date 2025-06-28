@@ -787,37 +787,37 @@
             try {
                 console.log('🤖 Starting AI analysis...');
                 
-                // ✅ FIX: Extract actual current price and indicator values
-                const currentPrice = priceData[priceData.length - 1].y;
-                const currentRSI = rsi.length > 0 ? rsi[rsi.length - 1].y : 50;
-                const currentSMA = sma20.length > 0 ? sma20[sma20.length - 1].y : currentPrice;
-                const currentBBUpper = bb.upper.length > 0 ? bb.upper[bb.upper.length - 1].y : currentPrice * 1.05;
-                const currentBBLower = bb.lower.length > 0 ? bb.lower[bb.lower.length - 1].y : currentPrice * 0.95;
+                // ✅ FIX: Extract LIVE current price and indicator values from actual chart data
+                const liveCurrentPrice = priceData[priceData.length - 1].y;
+                const liveCurrentRSI = rsi.length > 0 ? rsi[rsi.length - 1].y : 50;
+                const liveCurrentSMA = sma20.length > 0 ? sma20[sma20.length - 1].y : liveCurrentPrice;
+                const liveCurrentBBUpper = bb.upper.length > 0 ? bb.upper[bb.upper.length - 1].y : liveCurrentPrice * 1.05;
+                const liveCurrentBBLower = bb.lower.length > 0 ? bb.lower[bb.lower.length - 1].y : liveCurrentPrice * 0.95;
                 
                 const smaSignal = signals.find(s => s.type === 'SMA')?.signal || 'NEUTRAL';
                 const bbSignal = signals.find(s => s.type === 'BB')?.signal || 'NEUTRAL';
                 
-                console.log(`📊 Current Analysis Context: Price=${currentPrice}, RSI=${currentRSI}, SMA=${currentSMA}, BB=[${currentBBLower}-${currentBBUpper}]`);
+                console.log(`📊 LIVE Analysis Context: Price=$${liveCurrentPrice.toLocaleString()}, RSI=${liveCurrentRSI.toFixed(1)}, SMA=$${liveCurrentSMA.toLocaleString()}, BB=[$${liveCurrentBBLower.toLocaleString()}-$${liveCurrentBBUpper.toLocaleString()}]`);
                 
-                // Store data for potential AI explanation later with actual price context
+                // Store LIVE data for potential AI explanation later with actual price context
                 currentAnalysisData = {
                     priceData, rsi, sma: sma20, bb, signals, coin: coinId, 
                     timeframe: parseInt(document.getElementById('timeframe').value),
-                    currentPrice: currentPrice,
-                    currentRSI: currentRSI,
-                    currentSMA: currentSMA,
-                    currentBBUpper: currentBBUpper,
-                    currentBBLower: currentBBLower
+                    currentPrice: liveCurrentPrice,
+                    currentRSI: liveCurrentRSI,
+                    currentSMA: liveCurrentSMA,
+                    currentBBUpper: liveCurrentBBUpper,
+                    currentBBLower: liveCurrentBBLower
                 };
                 
-                // Call AI analysis endpoint
+                // Call AI analysis endpoint with LIVE values
                 const response = await fetch(`${WORKER_URL}/ai-analysis`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        rsi: currentRSI,
+                        rsi: liveCurrentRSI,
                         smaSignal: smaSignal,
                         bbSignal: bbSignal,
                         priceData: priceData,
@@ -912,7 +912,22 @@
                     </div>
                 `;
                 
-                // ✅ FIX: Include actual price context for accurate AI explanations
+                // ✅ FIX: Extract LIVE values from current chart data for most accurate AI explanation
+                const latestPriceData = currentAnalysisData.priceData;
+                const latestRSIData = currentAnalysisData.rsi;
+                const latestSMAData = currentAnalysisData.sma;
+                const latestBBData = currentAnalysisData.bb;
+                
+                // Get the actual LATEST values from the arrays (what's shown on chart)
+                const liveCurrentPrice = latestPriceData[latestPriceData.length - 1].y;
+                const liveCurrentRSI = latestRSIData.length > 0 ? latestRSIData[latestRSIData.length - 1].y : 50;
+                const liveCurrentSMA = latestSMAData.length > 0 ? latestSMAData[latestSMAData.length - 1].y : liveCurrentPrice;
+                const liveCurrentBBUpper = latestBBData.upper.length > 0 ? latestBBData.upper[latestBBData.upper.length - 1].y : liveCurrentPrice * 1.05;
+                const liveCurrentBBLower = latestBBData.lower.length > 0 ? latestBBData.lower[latestBBData.lower.length - 1].y : liveCurrentPrice * 0.95;
+                
+                console.log(`📊 LIVE Chart Values - Price: $${liveCurrentPrice.toLocaleString()}, RSI: ${liveCurrentRSI.toFixed(1)}, SMA: $${liveCurrentSMA.toLocaleString()}, BB: [$${liveCurrentBBLower.toLocaleString()}-$${liveCurrentBBUpper.toLocaleString()}]`);
+                
+                // ✅ FIX: Use LIVE chart values for AI explanation instead of potentially stale stored values
                 const explanationData = {
                     rsi: currentAnalysisData.rsi,
                     sma: currentAnalysisData.sma,
@@ -921,15 +936,15 @@
                     coin: currentAnalysisData.coin,
                     timeframe: currentAnalysisData.timeframe,
                     priceData: currentAnalysisData.priceData,
-                    // Include actual price context to fix the $0 bug
-                    currentPrice: currentAnalysisData.currentPrice,
-                    currentRSI: currentAnalysisData.currentRSI,
-                    currentSMA: currentAnalysisData.currentSMA,
-                    currentBBUpper: currentAnalysisData.currentBBUpper,
-                    currentBBLower: currentAnalysisData.currentBBLower
+                    // Include LIVE price context for accurate AI explanations
+                    currentPrice: liveCurrentPrice,
+                    currentRSI: liveCurrentRSI,
+                    currentSMA: liveCurrentSMA,
+                    currentBBUpper: liveCurrentBBUpper,
+                    currentBBLower: liveCurrentBBLower
                 };
                 
-                console.log('📊 Sending AI explanation data with price context:', explanationData);
+                console.log('📊 Sending LIVE AI explanation data:', explanationData);
                 
                 // Call AI explanation endpoint
                 const response = await fetch(`${WORKER_URL}/ai-explain`, {
