@@ -108,29 +108,38 @@ main {
 }
 
 .controls-layout {
-    position: relative;
     display: flex;
     flex-direction: column;
     gap: 1rem;
 }
 
 .controls-row {
-    position: relative;
-    background: var(--bg-primary);
-    border-radius: 8px;
     display: flex;
     justify-content: space-between;
-    align-items: center;
-    gap: 1rem;
+    align-items: flex-start;
+    gap: 2rem;
     flex-wrap: wrap;
+}
+
+.controls-left {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    flex: 1;
+    min-width: 0;
+}
+
+.controls-right {
+    display: flex;
+    align-items: flex-end;
+    flex-shrink: 0;
 }
 
 .coin-selector {
     display: flex;
     align-items: center;
     gap: 1rem;
-    flex: 1;
-    min-width: 0; /* Allow shrinking */
+    flex-wrap: wrap;
 }
 
 .button-group {
@@ -144,6 +153,7 @@ main {
     font-weight: 600;
     color: var(--text-secondary);
     white-space: nowrap;
+    min-width: max-content;
 }
 
 .dashboard-status {
@@ -413,7 +423,18 @@ footer a:hover {
     .controls-row {
         flex-direction: column;
         align-items: stretch;
+        gap: 1.5rem;
+    }
+    
+    .controls-left {
         gap: 1rem;
+        width: 100%;
+    }
+    
+    .controls-right {
+        align-items: center;
+        justify-content: center;
+        width: 100%;
     }
     
     .coin-selector {
@@ -426,12 +447,14 @@ footer a:hover {
     .coin-selector label {
         text-align: center;
         font-size: 1rem;
+        min-width: auto;
     }
     
     .button-group {
         justify-content: center;
         flex-wrap: wrap;
         gap: 0.5rem;
+        width: 100%;
     }
     
     .button-group button {
@@ -444,7 +467,6 @@ footer a:hover {
         align-items: center;
         text-align: center;
         width: 100%;
-        order: -1; /* Move to top on mobile */
     }
     
     select {
@@ -490,8 +512,19 @@ footer a:hover {
         padding: 0.75rem;
     }
     
+    .controls-row {
+        gap: 1rem;
+    }
+    
+    .button-group {
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+    
     .button-group button {
         min-width: 100px;
+        width: 100%;
+        max-width: none;
         padding: 0.6rem 0.8rem;
         font-size: 0.85rem;
     }
