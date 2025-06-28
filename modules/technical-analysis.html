@@ -365,6 +365,9 @@
         <div class="grid">
             <div class="chart-container">
                 <h3>📈 Price Chart with Technical Indicators</h3>
+                <div style="background: #e7f3ff; padding: 10px; border-radius: 8px; margin: 10px 0; font-size: 0.85em; color: #1565c0; border-left: 4px solid #2196f3;">
+                    <strong>ℹ️ Chart Information:</strong> Technical indicators (SMA, Bollinger Bands) start after collecting sufficient data points for accurate calculations. This delayed start is mathematically correct and ensures reliable signals.
+                </div>
                 <div id="loading" class="loading">Click "Analyze" to load technical analysis...</div>
                 <div class="chart-wrapper">
                     <canvas id="taChart" style="display: none;"></canvas>
@@ -607,7 +610,7 @@
                             tension: 0.1
                         },
                         {
-                            label: 'SMA 20',
+                            label: 'SMA 20 (starts after 20 data points)',
                             data: sma20,
                             borderColor: '#28a745',
                             borderWidth: 2,
@@ -615,7 +618,7 @@
                             pointRadius: 0
                         },
                         {
-                            label: 'BB Upper',
+                            label: 'BB Upper (requires SMA calculation)',
                             data: bb.upper,
                             borderColor: '#dc3545',
                             borderWidth: 1,
@@ -624,7 +627,7 @@
                             pointRadius: 0
                         },
                         {
-                            label: 'BB Lower',
+                            label: 'BB Lower (requires SMA calculation)',
                             data: bb.lower,
                             borderColor: '#dc3545',
                             borderWidth: 1,
@@ -660,6 +663,13 @@
                         legend: {
                             display: true,
                             position: 'top'
+                        },
+                        subtitle: {
+                            display: true,
+                            text: '📝 Note: Technical indicators start after sufficient data points are collected for accurate calculation',
+                            font: { size: 12 },
+                            color: '#666',
+                            padding: { bottom: 20 }
                         }
                     },
                     // ✅ CHART FIX: Disable animations that might cause scrolling
@@ -717,10 +727,11 @@
 
                 <div style="margin-top: 20px; padding: 15px; background: #f0f8ff; border-radius: 10px; font-size: 0.9em;">
                     <strong>📚 Educational Notes:</strong><br>
-                    • RSI < 30: Potentially oversold<br>
-                    • RSI > 70: Potentially overbought<br>
-                    • Price above SMA: Potential uptrend<br>
-                    • BB squeeze: Low volatility period
+                    • <strong>Why indicators start mid-chart:</strong> SMA(20) requires 20 data points, BB bands require SMA calculation<br>
+                    • <strong>RSI interpretation:</strong> < 30 potentially oversold, > 70 potentially overbought<br>
+                    • <strong>SMA signals:</strong> Price above SMA suggests potential uptrend<br>
+                    • <strong>Bollinger Bands:</strong> Price touching bands may indicate reversal opportunities<br>
+                    • <strong>Technical accuracy:</strong> Delayed indicator start ensures mathematical correctness
                 </div>
             `;
         }
@@ -738,7 +749,7 @@
                         Based on ${totalSignals} technical indicators
                     </div>
                     <div style="margin-top: 15px; font-size: 0.85em; opacity: 0.9; border-top: 1px solid rgba(255,255,255,0.3); padding-top: 15px;">
-                        <strong>⚠️ Remember:</strong> Technical analysis is not a crystal ball. It helps identify trends and patterns, but markets can be unpredictable. This is educational content only, not investment advice. Always do your own research and never invest more than you can afford to lose.
+                        <strong>⚠️ Remember:</strong> Technical analysis is not a crystal ball. It helps identify trends and patterns, but markets can be unpredictable. Technical indicators may start mid-timeframe due to calculation requirements (e.g., SMA needs 20 data points). This is educational content only, not investment advice. Always do your own research and never invest more than you can afford to lose.
                     </div>
                 </div>
             `;
