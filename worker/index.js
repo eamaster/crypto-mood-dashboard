@@ -509,18 +509,24 @@ async function handleAIExplain(request, env) {
     }
     
     const body = await request.json();
-    const { rsi, sma, bb, signals, coin, timeframe } = body;
+    const { rsi, sma, bb, signals, coin, timeframe, currentPrice, currentRSI, currentSMA, currentBBUpper, currentBBLower } = body;
     
     if (!rsi || !sma || !bb || !signals || !coin) {
       return errorResponse('Missing required data for AI explanation');
     }
     
+    console.log(`🔍 Received AI explanation request with actual prices: Current=${currentPrice}, SMA=${currentSMA}, BB=[${currentBBLower}-${currentBBUpper}]`);
+    
     // Try Cohere AI explanation first, with fallback
     try {
-      return await explainPatternWithCohere(rsi, sma, bb, signals, coin, timeframe, env);
+      return await explainPatternWithCohere(rsi, sma, bb, signals, coin, timeframe, env, {
+        currentPrice, currentRSI, currentSMA, currentBBUpper, currentBBLower
+      });
     } catch (error) {
       console.log('Cohere AI explanation failed, using fallback:', error.message);
-      return explainPatternFallback(rsi, sma, bb, signals, coin, timeframe);
+      return explainPatternFallback(rsi, sma, bb, signals, coin, timeframe, {
+        currentPrice, currentRSI, currentSMA, currentBBUpper, currentBBLower
+      });
     }
     
   } catch (error) {
@@ -686,31 +692,41 @@ function classifyMarketMoodFallback(rsi, smaSignal, bbSignal, priceData, coin) {
 /**
  * Generate natural language explanation using Cohere's v2/chat endpoint
  */
-async function explainPatternWithCohere(rsi, sma, bb, signals, coin, timeframe, env) {
+async function explainPatternWithCohere(rsi, sma, bb, signals, coin, timeframe, env, priceContext = null) {
   // Prepare context for the AI
-  const currentRSI = rsi[rsi.length - 1]?.y || 50;
   const overallSignal = calculateOverallSignal(signals);
   
-  // Calculate key price levels from available data with robust fallbacks
-  const currentSMA = sma[sma.length - 1]?.y || sma[sma.length - 1] || 0;
-  const bbUpper = bb.upper?.[bb.upper.length - 1]?.y || bb.upper?.[bb.upper.length - 1] || 0;
-  const bbLower = bb.lower?.[bb.lower.length - 1]?.y || bb.lower?.[bb.lower.length - 1] || 0;
+  // ✅ FIX: Use actual price data from frontend if available, otherwise fallback to calculation
+  let currentRSI, safeSMA, safeBBUpper, safeBBLower, resistance, support;
   
-  // Get actual current price from price data as additional fallback
-  // Use a reasonable fallback price for the specific coin if no data is available
-  const defaultPrices = { bitcoin: 50000, ethereum: 3000, litecoin: 100, dogecoin: 0.08 };
-  const defaultPrice = defaultPrices[coin.toLowerCase()] || 50000;
-  
-  // Use calculated values if available, otherwise use reasonable estimates
-  const safeSMA = currentSMA > 0 ? currentSMA : defaultPrice;
-  const safeBBUpper = bbUpper > 0 ? bbUpper : safeSMA * 1.05;
-  const safeBBLower = bbLower > 0 ? bbLower : safeSMA * 0.95;
-  
-  // Estimate resistance and support from Bollinger Bands and SMA
-  const resistance = Math.max(safeBBUpper, safeSMA * 1.05);
-  const support = Math.min(safeBBLower, safeSMA * 0.95);
-  
-  console.log(`🔍 Price levels for ${coin}: SMA=${safeSMA}, BB Upper=${safeBBUpper}, BB Lower=${safeBBLower}, Resistance=${resistance}, Support=${support}`);
+  if (priceContext && priceContext.currentPrice) {
+    // Use actual price data from frontend
+    currentRSI = priceContext.currentRSI || 50;
+    safeSMA = priceContext.currentSMA || priceContext.currentPrice;
+    safeBBUpper = priceContext.currentBBUpper || priceContext.currentPrice * 1.05;
+    safeBBLower = priceContext.currentBBLower || priceContext.currentPrice * 0.95;
+    resistance = Math.max(safeBBUpper, safeSMA * 1.05);
+    support = Math.min(safeBBLower, safeSMA * 0.95);
+    
+    console.log(`✅ Using actual price data from frontend: Current=${priceContext.currentPrice}, SMA=${safeSMA}, BB=[${safeBBLower}-${safeBBUpper}]`);
+  } else {
+    // Fallback to worker calculations (old behavior)
+    currentRSI = rsi[rsi.length - 1]?.y || 50;
+    const currentSMA = sma[sma.length - 1]?.y || sma[sma.length - 1] || 0;
+    const bbUpper = bb.upper?.[bb.upper.length - 1]?.y || bb.upper?.[bb.upper.length - 1] || 0;
+    const bbLower = bb.lower?.[bb.lower.length - 1]?.y || bb.lower?.[bb.lower.length - 1] || 0;
+    
+    const defaultPrices = { bitcoin: 50000, ethereum: 3000, litecoin: 100, dogecoin: 0.08 };
+    const defaultPrice = defaultPrices[coin.toLowerCase()] || 50000;
+    
+    safeSMA = currentSMA > 0 ? currentSMA : defaultPrice;
+    safeBBUpper = bbUpper > 0 ? bbUpper : safeSMA * 1.05;
+    safeBBLower = bbLower > 0 ? bbLower : safeSMA * 0.95;
+    resistance = Math.max(safeBBUpper, safeSMA * 1.05);
+    support = Math.min(safeBBLower, safeSMA * 0.95);
+    
+    console.log(`⚠️ Using fallback calculations for ${coin}: SMA=${safeSMA}, BB=[${safeBBLower}-${safeBBUpper}]`);
+  }
   
   const prompt = `As a professional crypto technical analyst, explain the current ${coin.toUpperCase()} chart pattern in simple terms for a beginner trader.
 
@@ -783,27 +799,40 @@ IMPORTANT: Always use the ACTUAL price values provided above (like $${resistance
 /**
  * Fallback explanation generator
  */
-function explainPatternFallback(rsi, sma, bb, signals, coin, timeframe) {
-  const currentRSI = rsi[rsi.length - 1]?.y || 50;
+function explainPatternFallback(rsi, sma, bb, signals, coin, timeframe, priceContext = null) {
   const overallSignal = calculateOverallSignal(signals);
   
-  // Calculate key price levels from available data with robust fallbacks
-  const currentSMA = sma[sma.length - 1]?.y || sma[sma.length - 1] || 0;
-  const bbUpper = bb.upper?.[bb.upper.length - 1]?.y || bb.upper?.[bb.upper.length - 1] || 0;
-  const bbLower = bb.lower?.[bb.lower.length - 1]?.y || bb.lower?.[bb.lower.length - 1] || 0;
+  // ✅ FIX: Use actual price data from frontend if available, otherwise fallback to calculation
+  let currentRSI, safeSMA, safeBBUpper, safeBBLower, resistance, support;
   
-  // Get reasonable fallback prices for specific coins
-  const defaultPrices = { bitcoin: 50000, ethereum: 3000, litecoin: 100, dogecoin: 0.08 };
-  const defaultPrice = defaultPrices[coin.toLowerCase()] || 50000;
-  
-  // Use calculated values if available, otherwise use reasonable estimates
-  const safeSMA = currentSMA > 0 ? currentSMA : defaultPrice;
-  const safeBBUpper = bbUpper > 0 ? bbUpper : safeSMA * 1.05;
-  const safeBBLower = bbLower > 0 ? bbLower : safeSMA * 0.95;
-  
-  // Estimate resistance and support from Bollinger Bands and SMA
-  const resistance = Math.max(safeBBUpper, safeSMA * 1.05);
-  const support = Math.min(safeBBLower, safeSMA * 0.95);
+  if (priceContext && priceContext.currentPrice) {
+    // Use actual price data from frontend
+    currentRSI = priceContext.currentRSI || 50;
+    safeSMA = priceContext.currentSMA || priceContext.currentPrice;
+    safeBBUpper = priceContext.currentBBUpper || priceContext.currentPrice * 1.05;
+    safeBBLower = priceContext.currentBBLower || priceContext.currentPrice * 0.95;
+    resistance = Math.max(safeBBUpper, safeSMA * 1.05);
+    support = Math.min(safeBBLower, safeSMA * 0.95);
+    
+    console.log(`✅ Fallback using actual price data: Current=${priceContext.currentPrice}, SMA=${safeSMA}, BB=[${safeBBLower}-${safeBBUpper}]`);
+  } else {
+    // Fallback to worker calculations (old behavior)
+    currentRSI = rsi[rsi.length - 1]?.y || 50;
+    const currentSMA = sma[sma.length - 1]?.y || sma[sma.length - 1] || 0;
+    const bbUpper = bb.upper?.[bb.upper.length - 1]?.y || bb.upper?.[bb.upper.length - 1] || 0;
+    const bbLower = bb.lower?.[bb.lower.length - 1]?.y || bb.lower?.[bb.lower.length - 1] || 0;
+    
+    const defaultPrices = { bitcoin: 50000, ethereum: 3000, litecoin: 100, dogecoin: 0.08 };
+    const defaultPrice = defaultPrices[coin.toLowerCase()] || 50000;
+    
+    safeSMA = currentSMA > 0 ? currentSMA : defaultPrice;
+    safeBBUpper = bbUpper > 0 ? bbUpper : safeSMA * 1.05;
+    safeBBLower = bbLower > 0 ? bbLower : safeSMA * 0.95;
+    resistance = Math.max(safeBBUpper, safeSMA * 1.05);
+    support = Math.min(safeBBLower, safeSMA * 0.95);
+    
+    console.log(`⚠️ Fallback using calculations for ${coin}: SMA=${safeSMA}, BB=[${safeBBLower}-${safeBBUpper}]`);
+  }
   
   let explanation = `Current ${coin.toUpperCase()} Analysis (${timeframe} days):\n\n`;
   

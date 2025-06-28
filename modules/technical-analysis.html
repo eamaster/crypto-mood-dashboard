@@ -527,36 +527,50 @@
         function generateTradingSignals(price, rsi, sma, bb) {
             const signals = [];
             const currentPrice = price[price.length - 1].y;
-            const currentRSI = rsi.length > 0 ? rsi[rsi.length - 1].y : 50;
-            const currentSMA = sma.length > 0 ? sma[sma.length - 1].y : currentPrice;
-            const currentBBUpper = bb.upper.length > 0 ? bb.upper[bb.upper.length - 1].y : currentPrice;
-            const currentBBLower = bb.lower.length > 0 ? bb.lower[bb.lower.length - 1].y : currentPrice;
+            
+            // ✅ FIX: Robust indicator value extraction with null checks
+            const currentRSI = rsi.length > 0 ? rsi[rsi.length - 1].y : null;
+            const currentSMA = sma.length > 0 ? sma[sma.length - 1].y : null;
+            const currentBBUpper = bb.upper.length > 0 ? bb.upper[bb.upper.length - 1].y : null;
+            const currentBBLower = bb.lower.length > 0 ? bb.lower[bb.lower.length - 1].y : null;
 
-            // RSI Signals
-            if (currentRSI < 30) {
-                signals.push({ type: 'RSI', signal: 'BUY', strength: 'Strong', reason: 'Oversold condition (RSI < 30)' });
-            } else if (currentRSI > 70) {
-                signals.push({ type: 'RSI', signal: 'SELL', strength: 'Strong', reason: 'Overbought condition (RSI > 70)' });
+            // RSI Signals - only generate if RSI is available
+            if (currentRSI !== null) {
+                if (currentRSI < 30) {
+                    signals.push({ type: 'RSI', signal: 'BUY', strength: 'Strong', reason: `Oversold condition (RSI ${currentRSI.toFixed(1)} < 30)` });
+                } else if (currentRSI > 70) {
+                    signals.push({ type: 'RSI', signal: 'SELL', strength: 'Strong', reason: `Overbought condition (RSI ${currentRSI.toFixed(1)} > 70)` });
+                } else {
+                    signals.push({ type: 'RSI', signal: 'NEUTRAL', strength: 'Weak', reason: `RSI ${currentRSI.toFixed(1)} in normal range (30-70)` });
+                }
             } else {
-                signals.push({ type: 'RSI', signal: 'NEUTRAL', strength: 'Weak', reason: 'RSI in normal range (30-70)' });
+                signals.push({ type: 'RSI', signal: 'NEUTRAL', strength: 'Weak', reason: 'RSI calculation pending (need 15+ data points)' });
             }
 
-            // Moving Average Signals
-            if (currentPrice > currentSMA * 1.02) {
-                signals.push({ type: 'SMA', signal: 'BUY', strength: 'Medium', reason: 'Price above SMA with momentum' });
-            } else if (currentPrice < currentSMA * 0.98) {
-                signals.push({ type: 'SMA', signal: 'SELL', strength: 'Medium', reason: 'Price below SMA with momentum' });
+            // Moving Average Signals - only generate if SMA is available
+            if (currentSMA !== null) {
+                if (currentPrice > currentSMA * 1.02) {
+                    signals.push({ type: 'SMA', signal: 'BUY', strength: 'Medium', reason: `Price $${currentPrice.toLocaleString()} above SMA $${currentSMA.toLocaleString()}` });
+                } else if (currentPrice < currentSMA * 0.98) {
+                    signals.push({ type: 'SMA', signal: 'SELL', strength: 'Medium', reason: `Price $${currentPrice.toLocaleString()} below SMA $${currentSMA.toLocaleString()}` });
+                } else {
+                    signals.push({ type: 'SMA', signal: 'NEUTRAL', strength: 'Weak', reason: `Price $${currentPrice.toLocaleString()} near SMA $${currentSMA.toLocaleString()}` });
+                }
             } else {
-                signals.push({ type: 'SMA', signal: 'NEUTRAL', strength: 'Weak', reason: 'Price near SMA' });
+                signals.push({ type: 'SMA', signal: 'NEUTRAL', strength: 'Weak', reason: 'SMA calculation pending (need 20+ data points)' });
             }
 
-            // Bollinger Bands Signals
-            if (currentPrice < currentBBLower) {
-                signals.push({ type: 'BB', signal: 'BUY', strength: 'Medium', reason: 'Price below lower Bollinger Band' });
-            } else if (currentPrice > currentBBUpper) {
-                signals.push({ type: 'BB', signal: 'SELL', strength: 'Medium', reason: 'Price above upper Bollinger Band' });
+            // Bollinger Bands Signals - only generate if BB is available
+            if (currentBBUpper !== null && currentBBLower !== null) {
+                if (currentPrice < currentBBLower) {
+                    signals.push({ type: 'BB', signal: 'BUY', strength: 'Medium', reason: `Price $${currentPrice.toLocaleString()} below lower band $${currentBBLower.toLocaleString()}` });
+                } else if (currentPrice > currentBBUpper) {
+                    signals.push({ type: 'BB', signal: 'SELL', strength: 'Medium', reason: `Price $${currentPrice.toLocaleString()} above upper band $${currentBBUpper.toLocaleString()}` });
+                } else {
+                    signals.push({ type: 'BB', signal: 'NEUTRAL', strength: 'Weak', reason: `Price $${currentPrice.toLocaleString()} within bands $${currentBBLower.toLocaleString()}-$${currentBBUpper.toLocaleString()}` });
+                }
             } else {
-                signals.push({ type: 'BB', signal: 'NEUTRAL', strength: 'Weak', reason: 'Price within Bollinger Bands' });
+                signals.push({ type: 'BB', signal: 'NEUTRAL', strength: 'Weak', reason: 'Bollinger Bands calculation pending (need 20+ data points)' });
             }
 
             return signals;
@@ -721,19 +735,24 @@
         }
 
         function displayIndicators(rsi, sma20, signals) {
-            const currentRSI = rsi.length > 0 ? rsi[rsi.length - 1].y : 0;
+            // ✅ FIX: Robust RSI value extraction with proper fallbacks
+            const currentRSI = rsi.length > 0 ? rsi[rsi.length - 1].y : null;
+            const rsiDisplay = currentRSI !== null ? currentRSI.toFixed(2) : 'N/A';
+            const rsiStatus = currentRSI !== null ? 'Available' : 'Insufficient data (needs 15+ points)';
 
             const rsiSignal = signals.find(s => s.type === 'RSI');
             const smaSignal = signals.find(s => s.type === 'SMA');
             const bbSignal = signals.find(s => s.type === 'BB');
 
+            // ✅ FIX: Enhanced display with data validation
             document.getElementById('indicators').innerHTML = `
                 <div class="indicator">
                     <h3>📈 RSI (14)</h3>
-                    <div class="indicator-value">${currentRSI.toFixed(2)}</div>
+                    <div class="indicator-value">${rsiDisplay}</div>
                     <div class="signal ${rsiSignal.signal.toLowerCase()}">${rsiSignal.signal}</div>
                     <div class="signal-strength">${rsiSignal.strength} Signal</div>
                     <div class="explanation">${rsiSignal.reason}</div>
+                    ${currentRSI === null ? `<div style="font-size: 0.8em; color: #ff6b6b; margin-top: 5px;">⚠️ ${rsiStatus}</div>` : ''}
                 </div>
 
                 <div class="indicator">
@@ -797,15 +816,27 @@
             try {
                 console.log('🤖 Starting AI analysis...');
                 
-                // Prepare data for AI analysis
+                // ✅ FIX: Extract actual current price and indicator values
+                const currentPrice = priceData[priceData.length - 1].y;
                 const currentRSI = rsi.length > 0 ? rsi[rsi.length - 1].y : 50;
+                const currentSMA = sma20.length > 0 ? sma20[sma20.length - 1].y : currentPrice;
+                const currentBBUpper = bb.upper.length > 0 ? bb.upper[bb.upper.length - 1].y : currentPrice * 1.05;
+                const currentBBLower = bb.lower.length > 0 ? bb.lower[bb.lower.length - 1].y : currentPrice * 0.95;
+                
                 const smaSignal = signals.find(s => s.type === 'SMA')?.signal || 'NEUTRAL';
                 const bbSignal = signals.find(s => s.type === 'BB')?.signal || 'NEUTRAL';
                 
-                // Store data for potential AI explanation later
+                console.log(`📊 Current Analysis Context: Price=${currentPrice}, RSI=${currentRSI}, SMA=${currentSMA}, BB=[${currentBBLower}-${currentBBUpper}]`);
+                
+                // Store data for potential AI explanation later with actual price context
                 currentAnalysisData = {
                     priceData, rsi, sma: sma20, bb, signals, coin: coinId, 
-                    timeframe: parseInt(document.getElementById('timeframe').value)
+                    timeframe: parseInt(document.getElementById('timeframe').value),
+                    currentPrice: currentPrice,
+                    currentRSI: currentRSI,
+                    currentSMA: currentSMA,
+                    currentBBUpper: currentBBUpper,
+                    currentBBLower: currentBBLower
                 };
                 
                 // Call AI analysis endpoint
@@ -910,7 +941,7 @@
                     </div>
                 `;
                 
-                // Prepare properly formatted data for AI explanation
+                // ✅ FIX: Include actual price context for accurate AI explanations
                 const explanationData = {
                     rsi: currentAnalysisData.rsi,
                     sma: currentAnalysisData.sma,
@@ -918,10 +949,16 @@
                     signals: currentAnalysisData.signals,
                     coin: currentAnalysisData.coin,
                     timeframe: currentAnalysisData.timeframe,
-                    priceData: currentAnalysisData.priceData
+                    priceData: currentAnalysisData.priceData,
+                    // Include actual price context to fix the $0 bug
+                    currentPrice: currentAnalysisData.currentPrice,
+                    currentRSI: currentAnalysisData.currentRSI,
+                    currentSMA: currentAnalysisData.currentSMA,
+                    currentBBUpper: currentAnalysisData.currentBBUpper,
+                    currentBBLower: currentAnalysisData.currentBBLower
                 };
                 
-                console.log('📊 Sending AI explanation data:', explanationData);
+                console.log('📊 Sending AI explanation data with price context:', explanationData);
                 
                 // Call AI explanation endpoint
                 const response = await fetch(`${WORKER_URL}/ai-explain`, {
