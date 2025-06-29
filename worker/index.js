@@ -810,6 +810,162 @@ async function classifyMarketMoodWithCohereEnhanced(rsi, smaSignal, bbSignal, pr
 }
 
 /**
+ * Explain trading patterns using Cohere Chat API v2
+ */
+async function explainPatternWithCohere(rsi, sma, bb, signals, coin, timeframe, env, liveValues) {
+  const { currentPrice, currentRSI, currentSMA, currentBBUpper, currentBBLower } = liveValues;
+  
+  // Prepare comprehensive technical analysis context
+  const rsiValue = rsi.length > 0 ? rsi[rsi.length - 1].y : currentRSI;
+  const smaValue = sma.length > 0 ? sma[sma.length - 1].y : currentSMA;
+  
+  // Create detailed prompt for AI explanation
+  const prompt = `You are a professional cryptocurrency technical analyst. Provide a comprehensive explanation of the current market pattern for ${coin.toUpperCase()}.
+
+**Current Technical Analysis Data:**
+- Current Price: $${currentPrice.toLocaleString()}
+- RSI (14): ${rsiValue.toFixed(2)}
+- SMA (20): $${smaValue.toLocaleString()}
+- Bollinger Band Upper: $${currentBBUpper.toLocaleString()}
+- Bollinger Band Lower: $${currentBBLower.toLocaleString()}
+- Timeframe: ${timeframe} days
+- Analysis Signals: ${signals.map(s => `${s.type}: ${s.signal} (${s.strength})`).join(', ')}
+
+**Instructions:**
+1. Explain what these technical indicators are telling us about ${coin.toUpperCase()}'s current market condition
+2. Analyze the relationship between price and moving averages
+3. Interpret the RSI level and what it suggests about momentum
+4. Explain the Bollinger Bands positioning and market volatility
+5. Provide trading insights based on the combined signals
+6. Include risk management considerations
+7. Keep the explanation educational and professional
+
+**Important:** This is educational content only, not financial advice. Focus on explaining the technical patterns and what they typically indicate in market analysis.
+
+Provide a detailed, well-structured explanation in plain English that helps users understand the current market pattern.`;
+
+  console.log('🤖 Sending comprehensive explanation request to Cohere...');
+
+  // Make request to Cohere Chat API v2
+  const response = await fetch('https://api.cohere.com/v2/chat', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${env.COHERE_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'command-r',
+      messages: [
+        {
+          role: 'user',
+          content: prompt
+        }
+      ],
+      temperature: 0.4,
+      max_tokens: 1500
+    }),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    console.log('Cohere Chat API explanation error:', errorBody);
+    throw new Error(`Cohere Chat API error: ${response.status}`);
+  }
+
+  const data = await response.json();
+  console.log('🤖 Cohere explanation API success');
+
+  // Extract the explanation
+  const explanation = data.message?.content?.[0]?.text || 'No explanation generated';
+
+  return jsonResponse({
+    explanation: explanation,
+    method: 'cohere-chat-api',
+    coin: coin,
+    timestamp: new Date().toISOString(),
+    technicalContext: {
+      currentPrice,
+      currentRSI: rsiValue,
+      currentSMA: smaValue,
+      timeframe
+    }
+  });
+}
+
+/**
+ * Fallback explanation when Cohere AI is not available
+ */
+function explainPatternFallback(rsi, sma, bb, signals, coin, timeframe, liveValues) {
+  const { currentPrice, currentRSI, currentSMA, currentBBUpper, currentBBLower } = liveValues;
+  
+  const rsiValue = rsi.length > 0 ? rsi[rsi.length - 1].y : currentRSI;
+  const smaValue = sma.length > 0 ? sma[sma.length - 1].y : currentSMA;
+  
+  let explanation = `**Technical Analysis Explanation for ${coin.toUpperCase()}**\n\n`;
+  
+  explanation += `**Current Market Snapshot:**\n`;
+  explanation += `• Price: $${currentPrice.toLocaleString()}\n`;
+  explanation += `• Timeframe: ${timeframe} days\n\n`;
+  
+  explanation += `**RSI Analysis (${rsiValue.toFixed(2)}):**\n`;
+  if (rsiValue < 30) {
+    explanation += `• The RSI is in oversold territory, suggesting the asset may be undervalued and due for a potential price recovery.\n`;
+  } else if (rsiValue > 70) {
+    explanation += `• The RSI is in overbought territory, indicating the asset may be overvalued and could face selling pressure.\n`;
+  } else {
+    explanation += `• The RSI is in a neutral range, suggesting balanced buying and selling pressure.\n`;
+  }
+  
+  explanation += `\n**Moving Average Analysis:**\n`;
+  const priceVsSMA = ((currentPrice - smaValue) / smaValue) * 100;
+  explanation += `• Current price is ${priceVsSMA >= 0 ? 'above' : 'below'} the 20-day moving average by ${Math.abs(priceVsSMA).toFixed(2)}%\n`;
+  if (currentPrice > smaValue * 1.02) {
+    explanation += `• This suggests an upward trend with bullish momentum.\n`;
+  } else if (currentPrice < smaValue * 0.98) {
+    explanation += `• This indicates a downward trend with bearish pressure.\n`;
+  } else {
+    explanation += `• Price is consolidating around the moving average.\n`;
+  }
+  
+  explanation += `\n**Bollinger Bands Analysis:**\n`;
+  explanation += `• Upper Band: $${currentBBUpper.toLocaleString()}\n`;
+  explanation += `• Lower Band: $${currentBBLower.toLocaleString()}\n`;
+  if (currentPrice > currentBBUpper) {
+    explanation += `• Price is above the upper band, suggesting potential overbought conditions.\n`;
+  } else if (currentPrice < currentBBLower) {
+    explanation += `• Price is below the lower band, suggesting potential oversold conditions.\n`;
+  } else {
+    explanation += `• Price is within the bands, indicating normal volatility levels.\n`;
+  }
+  
+  explanation += `\n**Signal Summary:**\n`;
+  const buySignals = signals.filter(s => s.signal === 'BUY').length;
+  const sellSignals = signals.filter(s => s.signal === 'SELL').length;
+  explanation += `• ${buySignals} bullish signals detected\n`;
+  explanation += `• ${sellSignals} bearish signals detected\n`;
+  
+  explanation += `\n**Risk Management Notes:**\n`;
+  explanation += `• Always use proper position sizing and stop-loss orders\n`;
+  explanation += `• Technical analysis should be combined with fundamental analysis\n`;
+  explanation += `• Past performance does not guarantee future results\n\n`;
+  
+  explanation += `**Disclaimer:** This analysis is for educational purposes only and should not be considered financial advice.`;
+  
+  return jsonResponse({
+    explanation: explanation,
+    method: 'rule-based',
+    coin: coin,
+    timestamp: new Date().toISOString(),
+    technicalContext: {
+      currentPrice,
+      currentRSI: rsiValue,
+      currentSMA: smaValue,
+      timeframe
+    }
+  });
+}
+
+/**
  * Enhanced fallback with pattern analysis
  */
 function classifyMarketMoodEnhancedFallback(rsi, smaSignal, bbSignal, priceData, candlePatterns, coin) {
