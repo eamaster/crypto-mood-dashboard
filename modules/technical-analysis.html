@@ -458,82 +458,6 @@
                         timestamp: candle.x
                     });
                 }
-
-                // 7. Advanced shadow analysis
-                if (totalRange > significantMove) {
-                    const upperShadowRatio = upperShadow / totalRange;
-                    const lowerShadowRatio = lowerShadow / totalRange;
-                    
-                    if (upperShadowRatio > 0.6) {
-                        patterns.push({
-                            type: 'Upper Shadow Dominance',
-                            signal: 'SELL',
-                            strength: 'Medium',
-                            reason: `Strong upper shadow (${(upperShadowRatio*100).toFixed(1)}% of range) indicates selling pressure at highs`,
-                            timestamp: candle.x
-                        });
-                    }
-                    
-                    if (lowerShadowRatio > 0.6) {
-                        patterns.push({
-                            type: 'Lower Shadow Dominance',
-                            signal: 'BUY',
-                            strength: 'Medium',
-                            reason: `Strong lower shadow (${(lowerShadowRatio*100).toFixed(1)}% of range) indicates buying support at lows`,
-                            timestamp: candle.x
-                        });
-                    }
-                }
-
-                // 8. Body size analysis
-                if (totalRange > 0) {
-                    const bodyRatio = body / totalRange;
-                    
-                    if (bodyRatio > 0.8) {
-                        patterns.push({
-                            type: 'Large Body Candle',
-                            signal: isBullish ? 'BUY' : 'SELL',
-                            strength: 'Strong',
-                            reason: `Large body (${(bodyRatio*100).toFixed(1)}% of range) shows strong ${isBullish ? 'bullish' : 'bearish'} conviction`,
-                            timestamp: candle.x
-                        });
-                    } else if (bodyRatio < 0.2) {
-                        patterns.push({
-                            type: 'Small Body Pattern',
-                            signal: 'NEUTRAL',
-                            strength: 'Medium',
-                            reason: `Small body (${(bodyRatio*100).toFixed(1)}% of range) indicates market uncertainty`,
-                            timestamp: candle.x
-                        });
-                    }
-                }
-
-                // 9. Price level analysis
-                if (i >= 2) {
-                    const prevPrevCandle = ohlcData[i - 2];
-                    const highestHigh = Math.max(candle.h, prevCandle.h, prevPrevCandle.h);
-                    const lowestLow = Math.min(candle.l, prevCandle.l, prevPrevCandle.l);
-                    
-                    if (candle.h === highestHigh && candle.h > candle.c) {
-                        patterns.push({
-                            type: 'New High Rejection',
-                            signal: 'SELL',
-                            strength: 'Medium',
-                            reason: 'Price reached new high but closed lower, indicating potential resistance',
-                            timestamp: candle.x
-                        });
-                    }
-                    
-                    if (candle.l === lowestLow && candle.l < candle.c) {
-                        patterns.push({
-                            type: 'New Low Recovery',
-                            signal: 'BUY',
-                            strength: 'Medium',
-                            reason: 'Price reached new low but recovered, indicating potential support',
-                            timestamp: candle.x
-                        });
-                    }
-                }
             }
             
             console.log(`🔍 Found ${patterns.length} candlestick patterns:`, patterns.map(p => p.type));
@@ -681,136 +605,6 @@
                     reason: `${negativeCount} out of ${recentMovements.length} recent movements are negative`,
                     timestamp: movements[movements.length - 1].x
                 });
-            }
-
-            // Additional comprehensive pattern analysis
-            // Volatility analysis
-            const volatility = movements.map(m => Math.abs(m.percentChange));
-            const avgVolatility = volatility.reduce((sum, v) => sum + v, 0) / volatility.length;
-            
-            if (avgVolatility > 3) {
-                patterns.push({
-                    type: 'High Volatility Period',
-                    signal: 'NEUTRAL',
-                    strength: 'Medium',
-                    reason: `High volatility detected (avg: ${avgVolatility.toFixed(2)}%), indicating increased uncertainty`,
-                    timestamp: movements[movements.length - 1].x
-                });
-            } else if (avgVolatility < 0.5) {
-                patterns.push({
-                    type: 'Low Volatility Period',
-                    signal: 'NEUTRAL',
-                    strength: 'Medium',
-                    reason: `Low volatility detected (avg: ${avgVolatility.toFixed(2)}%), indicating market stability`,
-                    timestamp: movements[movements.length - 1].x
-                });
-            }
-
-            // Momentum patterns
-            for (let i = 2; i < movements.length; i++) {
-                const current = movements[i];
-                const prev = movements[i - 1];
-                const prevPrev = movements[i - 2];
-
-                // Accelerating momentum
-                if (current.isPositive && prev.isPositive && prevPrev.isPositive &&
-                    Math.abs(current.percentChange) > Math.abs(prev.percentChange) &&
-                    Math.abs(prev.percentChange) > Math.abs(prevPrev.percentChange)) {
-                    patterns.push({
-                        type: 'Accelerating Bullish Momentum',
-                        signal: 'BUY',
-                        strength: 'Strong',
-                        reason: 'Increasing positive price movements show accelerating bullish momentum',
-                        timestamp: current.x
-                    });
-                }
-
-                if (!current.isPositive && !prev.isPositive && !prevPrev.isPositive &&
-                    Math.abs(current.percentChange) > Math.abs(prev.percentChange) &&
-                    Math.abs(prev.percentChange) > Math.abs(prevPrev.percentChange)) {
-                    patterns.push({
-                        type: 'Accelerating Bearish Momentum',
-                        signal: 'SELL',
-                        strength: 'Strong',
-                        reason: 'Increasing negative price movements show accelerating bearish momentum',
-                        timestamp: current.x
-                    });
-                }
-
-                // Momentum exhaustion
-                if (current.isPositive && prev.isPositive && prevPrev.isPositive &&
-                    Math.abs(current.percentChange) < Math.abs(prev.percentChange) &&
-                    Math.abs(prev.percentChange) < Math.abs(prevPrev.percentChange)) {
-                    patterns.push({
-                        type: 'Bullish Momentum Exhaustion',
-                        signal: 'SELL',
-                        strength: 'Medium',
-                        reason: 'Decreasing positive price movements suggest momentum exhaustion',
-                        timestamp: current.x
-                    });
-                }
-
-                if (!current.isPositive && !prev.isPositive && !prevPrev.isPositive &&
-                    Math.abs(current.percentChange) < Math.abs(prev.percentChange) &&
-                    Math.abs(prev.percentChange) < Math.abs(prevPrev.percentChange)) {
-                    patterns.push({
-                        type: 'Bearish Momentum Exhaustion',
-                        signal: 'BUY',
-                        strength: 'Medium',
-                        reason: 'Decreasing negative price movements suggest momentum exhaustion',
-                        timestamp: current.x
-                    });
-                }
-            }
-
-            // Gap analysis
-            for (let i = 1; i < movements.length; i++) {
-                const current = movements[i];
-                const prev = movements[i - 1];
-
-                if (Math.abs(current.percentChange) > 1.5 && Math.abs(prev.percentChange) < 0.5) {
-                    patterns.push({
-                        type: current.isPositive ? 'Bullish Price Gap' : 'Bearish Price Gap',
-                        signal: current.isPositive ? 'BUY' : 'SELL',
-                        strength: 'Medium',
-                        reason: `${Math.abs(current.percentChange).toFixed(2)}% move after stable period indicates ${current.isPositive ? 'bullish' : 'bearish'} breakout`,
-                        timestamp: current.x
-                    });
-                }
-            }
-
-            // Support and resistance levels
-            const recentHighs = movements.slice(-10).filter(m => m.percentChange > 1).map(m => m.price);
-            const recentLows = movements.slice(-10).filter(m => m.percentChange < -1).map(m => m.price);
-            
-            if (recentHighs.length >= 2) {
-                const avgHigh = recentHighs.reduce((sum, price) => sum + price, 0) / recentHighs.length;
-                const currentPrice = movements[movements.length - 1].price;
-                
-                if (currentPrice > avgHigh * 0.98) {
-                    patterns.push({
-                        type: 'Approaching Resistance Level',
-                        signal: 'SELL',
-                        strength: 'Medium',
-                        reason: `Price near recent resistance level around $${avgHigh.toLocaleString()}`,
-                        timestamp: movements[movements.length - 1].x
-                    });
-                }
-            }
-
-            if (recentLows.length >= 2) {
-                const avgLow = recentLows.reduce((sum, price) => sum + price, 0) / recentLows.length;
-                const currentPrice = movements[movements.length - 1].price;
-                
-                if (currentPrice < avgLow * 1.02) {
-                    patterns.push({
-                        type: 'Approaching Support Level',
-                        signal: 'BUY',
-                        strength: 'Medium',
-                        reason: `Price near recent support level around $${avgLow.toLocaleString()}`,
-                        timestamp: movements[movements.length - 1].x
-                    });
-                }
             }
             
             console.log(`🔍 Found ${patterns.length} price movement patterns:`, patterns.map(p => p.type));
@@ -2039,7 +1833,7 @@
                 patternsHTML = `
                     <div class="indicator patterns-container">
                         <h3>${patternTitle}</h3>
-                        <div class="patterns-content">
+                        <div style="max-height: 250px; overflow-y: auto;">
                             ${candlePatterns.map(pattern => `
                                 <div class="pattern-entry">
                                     <div class="signal ${pattern.signal.toLowerCase()}">${pattern.type}</div>
@@ -2052,11 +1846,9 @@
                 `;
             } else {
                 patternsHTML = `
-                    <div class="indicator patterns-container">
+                    <div class="indicator">
                         <h3>${patternTitle}</h3>
-                        <div class="patterns-content">
-                            <div class="explanation">No significant patterns detected in recent data.</div>
-                        </div>
+                        <div class="explanation">No significant patterns detected in recent data.</div>
                     </div>
                 `;
             }

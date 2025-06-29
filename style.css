@@ -590,19 +590,13 @@ main {
 /* Enhanced pattern entries for better readability */
 .pattern-entry {
     margin: 0.5rem 0;
-    padding: 0.875rem;
+    padding: 0.75rem;
     border: 1px solid var(--border-color);
     border-radius: 8px;
     background: var(--bg-secondary);
-    font-size: 0.88em;
+    font-size: 0.9em;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
     transition: all 0.2s ease;
-    min-height: 75px;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    width: 100%;
-    box-sizing: border-box;
 }
 
 .pattern-entry:hover {
@@ -612,28 +606,23 @@ main {
 }
 
 .pattern-entry .signal {
-    font-size: 0.85em;
-    padding: 0.3rem 0.6rem;
-    margin-bottom: 0.5rem;
+    font-size: 0.8em;
+    padding: 0.2rem 0.5rem;
+    margin-bottom: 0.3rem;
     font-weight: 600;
-    flex-shrink: 0;
 }
 
 .pattern-entry .signal-strength {
-    font-size: 0.8em;
-    margin: 0.3rem 0;
+    font-size: 0.75em;
+    margin-top: 0.2rem;
     font-weight: 500;
-    flex-shrink: 0;
 }
 
 .pattern-entry .explanation {
-    font-size: 0.85em;
-    margin-top: 0.5rem;
-    line-height: 1.4;
+    font-size: 0.8em;
+    margin-top: 0.3rem;
+    line-height: 1.3;
     color: var(--text-primary);
-    flex: 1;
-    display: flex;
-    align-items: center;
 }
 .indicator h3 {
     color: var(--text-primary);
@@ -1991,11 +1980,11 @@ button.loading::after {
     overflow-wrap: break-word;
 }
 
-.chart-info-box strong {
-    color: var(--accent-color);
-    font-weight: 700;
-    font-size: 1.05em;
-}
+    .chart-info-box strong {
+        color: var(--accent-color);
+        font-weight: 700;
+        font-size: 1.05em;
+    }
 
 /* Responsive Chart Info Boxes for TA Module */
 .ta-responsive-chart-container .chart-info-box {
@@ -2380,7 +2369,7 @@ button:active {
     max-width: 100%;
     margin: 0 auto;
     padding: 0 0.75rem;
-    width: 100%;
+        width: 100%;
     box-sizing: border-box;
 }
 
@@ -2485,7 +2474,7 @@ button:active {
     opacity: 1 !important;
     border-radius: 6px;
     box-sizing: border-box;
-}
+    }
     
 .ta-header {
     text-align: center;
@@ -2607,19 +2596,17 @@ button:active {
 .patterns-container {
     background: var(--bg-tertiary);
     border-radius: 8px;
-    padding: 1rem;
+    padding: 0.75rem;
     margin-top: 0;
     margin-bottom: 0;
     width: 100%;
     box-sizing: border-box;
     flex: 1;
-    min-height: 450px;
-    max-height: 500px;
+    min-height: 420px;
     display: flex;
     flex-direction: column;
     justify-content: flex-start;
-    overflow-y: auto;
-    overflow-x: hidden;
+    /* Remove max-height and overflow - let content flow naturally */
 }
 
 .patterns-container h3 {
@@ -2632,38 +2619,14 @@ button:active {
     padding: 0.25rem 0;
     border-bottom: 1px solid var(--border-color);
     flex-shrink: 0;
-    z-index: 10;
 }
 
-/* Dedicated scrollable content area for patterns */
-.patterns-container .patterns-content {
+/* Add flexible spacer to patterns container to fill remaining space */
+.patterns-container::after {
+    content: '';
     flex: 1;
-    overflow-y: auto;
-    overflow-x: hidden;
-    padding-right: 0.25rem;
-    min-height: 350px;
+    min-height: 50px;
 }
-
-/* Custom scrollbar styling for patterns */
-.patterns-container .patterns-content::-webkit-scrollbar {
-    width: 6px;
-}
-
-.patterns-container .patterns-content::-webkit-scrollbar-track {
-    background: var(--bg-secondary);
-    border-radius: 3px;
-}
-
-.patterns-container .patterns-content::-webkit-scrollbar-thumb {
-    background: var(--border-color);
-    border-radius: 3px;
-}
-
-.patterns-container .patterns-content::-webkit-scrollbar-thumb:hover {
-    background: var(--accent-color);
-}
-
-/* Remove the old spacer - no longer needed with proper scrolling */
 
 /* More compact chart containers */
 .ta-container .chart-container {
@@ -2949,15 +2912,9 @@ button:active {
     }
     
     .patterns-container {
-        min-height: 300px;
-        max-height: 350px;
+        min-height: auto;
         flex: none;
-        padding: 0.75rem;
-        overflow-y: auto;
-    }
-    
-    .patterns-container .patterns-content {
-        min-height: 250px;
+        padding: 0.5rem;
     }
     
     .indicator {
