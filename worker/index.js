@@ -845,7 +845,7 @@ async function explainPatternWithCohere(rsi, sma, bb, signals, coin, timeframe, 
 Provide a detailed, well-structured explanation in plain English that helps users understand the current market pattern.`;
 
   console.log('🤖 Sending comprehensive explanation request to Cohere...');
-
+  
   // Make request to Cohere Chat API v2
   const response = await fetch('https://api.cohere.com/v2/chat', {
     method: 'POST',
@@ -865,19 +865,19 @@ Provide a detailed, well-structured explanation in plain English that helps user
       max_tokens: 1500
     }),
   });
-
+  
   if (!response.ok) {
     const errorBody = await response.text();
     console.log('Cohere Chat API explanation error:', errorBody);
     throw new Error(`Cohere Chat API error: ${response.status}`);
   }
-
+  
   const data = await response.json();
   console.log('🤖 Cohere explanation API success');
 
   // Extract the explanation
   const explanation = data.message?.content?.[0]?.text || 'No explanation generated';
-
+  
   return jsonResponse({
     explanation: explanation,
     method: 'cohere-chat-api',
