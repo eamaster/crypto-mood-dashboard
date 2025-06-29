@@ -510,6 +510,10 @@
         
         const ctx = elements.mainChart.getContext('2d');
         
+        // Mobile responsive settings
+        const isMobile = window.innerWidth <= 768;
+        const isSmallMobile = window.innerWidth <= 480;
+        
         // Prepare sentiment bar data for last day
         const lastDate = priceHistory[priceHistory.length - 1].x;
         const sentimentBarData = [{
@@ -539,10 +543,12 @@
                         data: priceHistory,
                         borderColor: '#007bff',
                         backgroundColor: 'rgba(0, 123, 255, 0.1)',
-                        borderWidth: 2,
+                        borderWidth: isMobile ? 1.5 : 2,
                         fill: true,
                         tension: 0.1,
-                        yAxisID: 'price'
+                        yAxisID: 'price',
+                        pointRadius: isMobile ? 1 : 2,
+                        pointHoverRadius: isMobile ? 4 : 6
                     },
                     {
                         label: 'Today\'s Sentiment',
@@ -552,13 +558,14 @@
                         borderColor: sentimentColor.replace('0.8', '1'),
                         borderWidth: 1,
                         yAxisID: 'sentiment',
-                        barThickness: 30
+                        barThickness: isMobile ? 20 : 30
                     }
                 ]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                devicePixelRatio: window.devicePixelRatio || 1,
                 interaction: {
                     mode: 'index',
                     intersect: false,
@@ -569,12 +576,21 @@
                         time: {
                             unit: 'day',
                             displayFormats: {
-                                day: 'MMM dd'
+                                day: isSmallMobile ? 'M/d' : 'MMM dd'
                             }
                         },
                         title: {
-                            display: true,
-                            text: 'Date'
+                            display: !isSmallMobile,
+                            text: 'Date',
+                            font: {
+                                size: isMobile ? 10 : 12
+                            }
+                        },
+                        ticks: {
+                            maxTicksLimit: isSmallMobile ? 3 : isMobile ? 5 : 7,
+                            font: {
+                                size: isSmallMobile ? 9 : isMobile ? 10 : 11
+                            }
                         }
                     },
                     price: {
@@ -582,22 +598,32 @@
                         display: true,
                         position: 'left',
                         title: {
-                            display: true,
-                            text: 'Price (USD)'
+                            display: !isSmallMobile,
+                            text: isMobile ? 'Price' : 'Price (USD)',
+                            font: {
+                                size: isMobile ? 10 : 12
+                            }
                         },
                         ticks: {
                             callback: function(value) {
-                                return formatCurrency(value);
-                            }
+                                return isMobile ? `$${(value/1000).toFixed(0)}k` : formatCurrency(value);
+                            },
+                            font: {
+                                size: isSmallMobile ? 9 : isMobile ? 10 : 11
+                            },
+                            maxTicksLimit: isMobile ? 5 : 7
                         }
                     },
                     sentiment: {
                         type: 'linear',
-                        display: true,
+                        display: !isSmallMobile,
                         position: 'right',
                         title: {
-                            display: true,
-                            text: 'Sentiment Score'
+                            display: !isSmallMobile,
+                            text: 'Sentiment',
+                            font: {
+                                size: isMobile ? 10 : 12
+                            }
                         },
                         min: -5,
                         max: 5,
@@ -606,25 +632,51 @@
                         },
                         ticks: {
                             callback: function(value) {
+                                if (isMobile) {
+                                    return value > 1 ? '+' : value < -1 ? '-' : '0';
+                                }
                                 if (value > 1) return `${value} (Bullish)`;
                                 if (value < -1) return `${value} (Bearish)`;
                                 return `${value} (Neutral)`;
-                            }
+                            },
+                            font: {
+                                size: isSmallMobile ? 9 : isMobile ? 10 : 11
+                            },
+                            maxTicksLimit: isMobile ? 3 : 5
                         }
                     }
                 },
                 plugins: {
                     title: {
                         display: true,
-                        text: `${symbol} Price vs Market Sentiment`,
+                        text: isSmallMobile ? `${symbol} Chart` : `${symbol} Price vs Market Sentiment`,
                         font: {
-                            size: 16
+                            size: isSmallMobile ? 12 : isMobile ? 14 : 16,
+                            weight: 'bold'
                         }
                     },
                     legend: {
-                        display: true
+                        display: !isSmallMobile,
+                        position: isMobile ? 'bottom' : 'top',
+                        labels: {
+                            font: {
+                                size: isMobile ? 10 : 12
+                            },
+                            padding: isMobile ? 10 : 20,
+                            usePointStyle: true,
+                            boxWidth: isMobile ? 12 : 20
+                        }
                     },
                     tooltip: {
+                        enabled: true,
+                        mode: 'index',
+                        intersect: false,
+                        titleFont: {
+                            size: isMobile ? 11 : 13
+                        },
+                        bodyFont: {
+                            size: isMobile ? 10 : 12
+                        },
                         callbacks: {
                             label: function(context) {
                                 if (context.dataset.label.includes('Price')) {
@@ -635,9 +687,31 @@
                             }
                         }
                     }
+                },
+                // Mobile-specific optimizations
+                animation: {
+                    duration: isMobile ? 200 : 500
+                },
+                elements: {
+                    point: {
+                        radius: isMobile ? 1 : 2,
+                        hoverRadius: isMobile ? 4 : 6
+                    },
+                    line: {
+                        borderWidth: isMobile ? 1.5 : 2
+                    }
                 }
             }
         });
+        
+        // Force chart resize after creation on mobile
+        if (isMobile) {
+            setTimeout(() => {
+                if (state.chartInstance) {
+                    state.chartInstance.resize();
+                }
+            }, 100);
+        }
         
         hideError(elements.chartError);
     }
@@ -845,6 +919,56 @@
         }
         console.warn('Unhandled promise rejection:', event.reason);
     });
+    
+    // Mobile responsive handlers
+    function handleResize() {
+        // Debounce resize events for better performance
+        clearTimeout(window.resizeTimeout);
+        window.resizeTimeout = setTimeout(() => {
+            // Resize chart if it exists
+            if (state.chartInstance) {
+                state.chartInstance.resize();
+            }
+            
+            // Force refresh on mobile orientation change
+            if (window.innerWidth <= 768) {
+                console.log('Mobile resize detected, optimizing layout...');
+                
+                // Small delay to ensure DOM has settled
+                setTimeout(() => {
+                    if (state.chartInstance) {
+                        state.chartInstance.update('none'); // Update without animation
+                        state.chartInstance.resize();
+                    }
+                }, 150);
+            }
+        }, 250);
+    }
+    
+    // Add resize listener for responsive updates
+    window.addEventListener('resize', handleResize);
+    
+    // Handle orientation change specifically for mobile devices
+    window.addEventListener('orientationchange', () => {
+        setTimeout(() => {
+            handleResize();
+            // Force a dashboard refresh to ensure proper mobile layout
+            if (window.innerWidth <= 768 && state.selectedCoin) {
+                console.log('Orientation change detected, refreshing dashboard...');
+                updateDashboard(state.selectedCoin);
+            }
+        }, 500); // Delay to allow orientation change to complete
+    });
+    
+    // Prevent zoom on double-tap for better mobile UX
+    let lastTouchEnd = 0;
+    document.addEventListener('touchend', function (event) {
+        const now = (new Date()).getTime();
+        if (now - lastTouchEnd <= 300) {
+            event.preventDefault();
+        }
+        lastTouchEnd = now;
+    }, false);
     
     // Wait for DOM and external libraries to load
     if (document.readyState === 'loading') {

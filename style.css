@@ -1,8 +1,36 @@
-/* Reset and base styles */
+/* Reset and base styles - Mobile-First Approach */
 * {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
+}
+
+/* Prevent horizontal overflow on all elements */
+*, *::before, *::after {
+    max-width: 100%;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+}
+
+/* Ensure body and html don't overflow */
+html, body {
+    overflow-x: hidden;
+    width: 100%;
+    position: relative;
+}
+
+/* Smooth scrolling and better mobile touch */
+html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+    -ms-text-size-adjust: 100%;
+}
+
+/* Better mobile touch handling */
+body {
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: rgba(0, 0, 0, 0.1);
+    touch-action: manipulation;
 }
 
 :root {
@@ -360,7 +388,8 @@ main {
     min-height: 320px;
     height: auto;
     flex: 1;
-    overflow: visible;
+    overflow: hidden; /* Prevent overflow on mobile */
+    box-sizing: border-box;
 }
 
 .chart-container h3 {
@@ -726,71 +755,72 @@ main {
         transform: none !important;
     }
 }
-/* Responsive breakpoints for different screen sizes */
-@media (min-width: 1920px) {
-    .ta-container { max-width: 2000px; padding: 0 3rem; }
-    .grid { gap: 3rem; }
-    .chart-container, .indicators-panel { padding: 3rem; }
-    .ai-analysis-grid { gap: 3rem; }
-}
-@media (max-width: 1200px) {
-    .ta-container { max-width: 1400px; padding: 0 1.5rem; width: 92%; }
-    .grid { gap: 2rem; }
-    .chart-container, .indicators-panel { padding: 2rem; }
-    .controls { padding: 1.75rem 2rem; }
-    .ai-analysis-card, .ai-explanation-card, .ta-summary { padding: 2rem; }
-}
-@media (max-width: 900px) {
-    .ta-container { max-width: 1200px; padding: 0 1rem; width: 90%; }
-    .ta-container .grid { 
-        grid-template-columns: 1fr; 
-        gap: 1rem; 
-    }
-    .ta-container .chart-container { 
-        grid-column: 1 / 2; 
-        margin-bottom: 1rem;
-        min-height: 250px;
-    }
-    .ta-container .indicators-panel { 
-        grid-column: 1 / 2; 
-        grid-row: auto; 
-        max-height: 50vh;
-        position: static;
-    }
-    
-    /* Compact patterns on mobile */
-    .patterns-container {
-        max-height: 200px;
-    }
-    
-    .pattern-entry {
-        padding: 0.25rem;
-        margin: 0.2rem 0;
-        font-size: 0.75em;
-    }
-    
-    .pattern-entry .explanation {
-        font-size: 0.65em;
-        line-height: 1.0;
-    }
-}
-@media (max-width: 768px) {
+/* Enhanced Mobile-First Responsive Design */
+
+/* Tablet breakpoint - optimize for medium screens */
+@media (max-width: 1024px) {
     .header-content {
-        padding: 1rem;
-        flex-wrap: wrap;
-        gap: 1rem;
-    }
-    
-    h1 {
-        font-size: 1.4rem;
-    }
-    
-    main {
-        padding: 1rem;
+        padding: 0.875rem 1rem;
+        gap: 0.75rem;
     }
     
     .controls {
+        padding: 1.25rem;
+    }
+    
+    .dashboard-grid {
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 1.25rem;
+    }
+    
+    .ta-container { 
+        max-width: 100%; 
+        padding: 0 1rem; 
+        width: 95%; 
+    }
+}
+
+/* Mobile Landscape - 768px and below */
+@media (max-width: 768px) {
+    /* Header Improvements */
+    .header-content {
+        padding: 0.75rem 1rem;
+        flex-direction: row;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: nowrap;
+        min-height: 60px;
+    }
+    
+    h1 {
+        font-size: 1.3rem;
+        flex: 1;
+        margin: 0;
+        line-height: 1.2;
+    }
+    
+    .theme-toggle {
+        width: 40px;
+        height: 40px;
+        font-size: 1.1rem;
+        flex-shrink: 0;
+    }
+    
+    /* Main Content */
+    main {
+        padding: 0.75rem;
+    }
+    
+    /* Controls Section - Complete Redesign */
+    .controls {
         padding: 1rem;
+        margin-bottom: 1rem;
+    }
+    
+    .controls-layout {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
     }
     
     .controls-row {
@@ -801,164 +831,732 @@ main {
     }
     
     .controls-left {
-        gap: 0.75rem;
         width: 100%;
         min-width: auto;
-        justify-content: flex-start;
+        gap: 1rem;
+        order: 1;
     }
     
     .controls-right {
-        align-items: center;
-        justify-content: center;
         width: 100%;
         min-width: auto;
         height: auto;
+        order: 2;
+        justify-content: center;
+        align-items: center;
     }
     
+    /* Coin Selector Improvements */
     .coin-selector {
         flex-direction: column;
         align-items: stretch;
-        gap: 0.5rem;
+        gap: 0.75rem;
         width: 100%;
+        margin-bottom: 0;
+    }
+    
+    .coin-selector label {
+        text-align: left;
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        margin-bottom: 0.25rem;
+    }
+    
+    /* Button Group - Enhanced Mobile Layout */
+    .button-group {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.75rem;
+        width: 100%;
+        margin-top: 0.5rem;
+    }
+    
+    .button-group button {
+        min-width: auto;
+        width: 100%;
+        padding: 0.875rem 0.75rem;
+        font-size: 0.9rem;
+        font-weight: 600;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        min-height: 44px; /* Ensure touch target */
+    }
+    
+    /* Technical Analysis button spans full width */
+    .ta-button {
+        grid-column: 1 / -1;
+        margin-top: 0.5rem;
+    }
+    
+    /* Dashboard Status - Mobile Optimized */
+    .dashboard-status {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        width: 100%;
+        gap: 0.75rem;
+        background: var(--bg-secondary);
+        padding: 0.875rem;
+        border-radius: 8px;
+        border: 1px solid var(--border-color);
+    }
+    
+    .last-updated {
+        font-size: 0.85rem;
+        color: var(--text-secondary);
+        font-weight: 500;
+        white-space: normal;
+        line-height: 1.3;
+    }
+    
+    .real-time-status {
+        font-size: 0.8rem;
+        padding: 0.5rem 0.875rem;
+        white-space: normal;
+        text-align: center;
+        max-width: 100%;
+        border-radius: 6px;
+        word-break: break-word;
+        line-height: 1.3;
+    }
+    
+    /* Dashboard Grid - Mobile First */
+    .dashboard-grid {
+        grid-template-columns: 1fr;
+        gap: 1rem;
+        margin-bottom: 1rem;
+    }
+    
+    /* Card Improvements */
+    .card {
+        border-radius: 12px;
+        overflow: hidden;
+    }
+    
+    .card h2 {
+        padding: 0.875rem 1rem;
+        font-size: 1.1rem;
+        text-align: center;
+    }
+    
+    /* Price Card Mobile Optimization */
+    .price-widget {
+        padding: 1.25rem 1rem;
+        text-align: center;
+    }
+    
+    .price-value {
+        font-size: 2.2rem;
+        line-height: 1.1;
+        margin-bottom: 0.75rem;
+        word-break: break-all;
+    }
+    
+    .price-change {
+        font-size: 1.3rem;
+        margin-bottom: 0.5rem;
+    }
+    
+    .price-symbol {
+        font-size: 1rem;
+        font-weight: 700;
+    }
+    
+    /* Mood Card Mobile Optimization */
+    .mood-widget {
+        padding: 1rem;
+    }
+    
+    .mood-badge {
+        font-size: 1.6rem;
+        padding: 0.875rem 1rem;
+        margin-bottom: 1rem;
+        line-height: 1.2;
+    }
+    
+    .mood-score {
+        font-size: 1.1rem;
+        margin-bottom: 0.75rem;
+        word-break: break-word;
+    }
+    
+    .mood-source {
+        font-size: 0.85rem;
+        line-height: 1.4;
+        word-break: break-word;
+    }
+    
+    /* News Container */
+    .news-container {
+        padding: 0 1rem 1rem;
+        max-height: 150px;
+        overflow-y: auto;
+    }
+    
+    .news-item {
+        padding: 0.75rem;
+        margin: 0.5rem 0;
+        font-size: 0.85rem;
+        line-height: 1.4;
+        word-break: break-word;
+    }
+    
+    /* Chart Container - Critical Mobile Fix */
+    .chart-container {
+        padding: 0.75rem;
+        min-height: 280px;
+        max-height: 400px;
+    }
+    
+    .chart-container canvas {
+        max-height: 300px !important;
+        width: 100% !important;
+        height: auto !important;
+    }
+    
+    /* Form Elements - Enhanced Touch Targets */
+    select, button {
+        min-height: 44px;
+        padding: 0.875rem 1rem;
+        font-size: 0.95rem;
+        border-radius: 8px;
+        -webkit-appearance: none;
+        appearance: none;
+    }
+    
+    select {
+        width: 100%;
+        max-width: none;
+        background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6,9 12,15 18,9'%3e%3c/polyline%3e%3c/svg%3e");
+        background-repeat: no-repeat;
+        background-position: right 0.875rem center;
+        background-size: 1rem;
+        padding-right: 2.5rem;
+    }
+}
+
+/* Mobile Portrait - 480px and below */
+@media (max-width: 480px) {
+    /* Ultra-compact mobile design */
+    .header-content {
+        padding: 0.5rem 0.75rem;
+        min-height: 56px;
+    }
+    
+    h1 {
+        font-size: 1.1rem;
+        font-weight: 700;
+    }
+    
+    .theme-toggle {
+        width: 36px;
+        height: 36px;
+        font-size: 1rem;
+    }
+    
+    main {
+        padding: 0.5rem;
+    }
+    
+    /* Controls - Ultra Compact */
+    .controls {
+        padding: 0.875rem;
         margin-bottom: 0.75rem;
     }
     
     .coin-selector label {
-        text-align: center;
         font-size: 0.9rem;
-        min-width: auto;
     }
     
+    /* Single column button layout */
     .button-group {
-        justify-content: center;
-        flex-wrap: wrap;
+        grid-template-columns: 1fr;
         gap: 0.5rem;
-        width: 100%;
+        margin-top: 0.75rem;
     }
     
     .button-group button {
-        flex: 1 1 auto;
-        min-width: 110px;
-        max-width: 160px;
+        padding: 1rem 0.75rem;
+        font-size: 0.85rem;
+        min-height: 48px; /* Larger touch target */
     }
     
+    /* Dashboard Status - Minimal */
     .dashboard-status {
-        align-items: center;
-        text-align: center;
-        width: 100%;
-        min-width: auto;
-        height: auto;
+        padding: 0.75rem;
         gap: 0.5rem;
-    }
-    
-    select {
-        min-width: auto;
-        width: 100%;
-        max-width: none;
-    }
-    
-    .dashboard-grid {
-        grid-template-columns: 1fr;
-        gap: 1rem;
-    }
-    
-    .price-value {
-        font-size: 2rem;
-    }
-    
-    .real-time-status {
-        white-space: normal;
-        text-align: center;
-        max-width: 100%;
-        font-size: 0.75rem;
     }
     
     .last-updated {
-        white-space: normal;
-        text-align: center;
         font-size: 0.8rem;
     }
-}
-
-@media (max-width: 480px) {
-    .header-content {
+    
+    .real-time-status {
+        font-size: 0.75rem;
+        padding: 0.5rem 0.75rem;
+    }
+    
+    /* Dashboard Grid - Minimal spacing */
+    .dashboard-grid {
+        gap: 0.75rem;
+        margin-bottom: 0.75rem;
+    }
+    
+    .card h2 {
         padding: 0.75rem;
+        font-size: 1rem;
     }
     
-    h1 {
-        font-size: 1.2rem;
-    }
-    
-    main {
-        padding: 0.75rem;
-    }
-    
-    .controls {
-        padding: 0.75rem;
-    }
-    
-    .controls-row {
-        gap: 1rem;
-    }
-    
-    .button-group {
-        flex-direction: column;
-        gap: 0.5rem;
-        align-items: stretch;
-    }
-    
-    .button-group button {
-        min-width: 100px;
-        width: 100%;
-        max-width: none;
-        padding: 0.6rem 0.8rem;
-        font-size: 0.85rem;
+    /* Price Card - Compact */
+    .price-widget {
+        padding: 1rem 0.75rem;
     }
     
     .price-value {
         font-size: 1.8rem;
+        margin-bottom: 0.5rem;
+    }
+    
+    .price-change {
+        font-size: 1.1rem;
+    }
+    
+    .price-symbol {
+        font-size: 0.9rem;
+    }
+    
+    /* Mood Card - Compact */
+    .mood-badge {
+        font-size: 1.4rem;
+        padding: 0.75rem;
+        margin-bottom: 0.75rem;
+    }
+    
+    .mood-score {
+        font-size: 1rem;
+        margin-bottom: 0.5rem;
+    }
+    
+    .mood-source {
+        font-size: 0.8rem;
+    }
+    
+    /* Chart Container - Ultra Mobile */
+    .chart-container {
+        padding: 0.5rem;
+        min-height: 240px;
+        max-height: 320px;
+    }
+    
+    .chart-container h2 {
+        font-size: 0.95rem;
+        padding: 0.5rem;
+    }
+    
+    /* Form Elements - Larger touch targets */
+    select, button {
+        min-height: 48px;
+        padding: 1rem;
+        font-size: 0.9rem;
+    }
+    
+    select {
+        padding-right: 3rem;
+        background-size: 1.2rem;
+    }
+}
+
+/* Ultra-small screens - 320px and below */
+@media (max-width: 320px) {
+    /* Absolute maximum width constraints */
+    *, *::before, *::after {
+        max-width: 100vw !important;
+        box-sizing: border-box !important;
+    }
+    
+    /* Container constraints */
+    .header-content, main, .controls, .dashboard-grid, .card {
+        max-width: 100% !important;
+        width: 100% !important;
+        margin-left: 0 !important;
+        margin-right: 0 !important;
+    }
+    
+    .header-content {
+        padding: 0.5rem 0.375rem;
+        min-height: 52px;
+        gap: 0.5rem;
+    }
+    
+    h1 {
+        font-size: 0.95rem;
+        font-weight: 600;
+        line-height: 1.1;
+        flex: 1;
+        min-width: 0;
+    }
+    
+    .theme-toggle {
+        width: 32px;
+        height: 32px;
+        font-size: 0.85rem;
+        flex-shrink: 0;
+    }
+    
+    main {
+        padding: 0.25rem;
+        width: 100%;
+        max-width: 100%;
+    }
+    
+    /* Controls - Ultra compact */
+    .controls {
+        padding: 0.625rem;
+        margin-bottom: 0.5rem;
+        width: 100%;
+        max-width: 100%;
+    }
+    
+    .coin-selector {
+        gap: 0.5rem;
+        margin-bottom: 0.5rem;
+    }
+    
+    .coin-selector label {
+        font-size: 0.85rem;
+        line-height: 1.2;
+    }
+    
+    /* Ultra-compact buttons */
+    .button-group {
+        grid-template-columns: 1fr;
+        gap: 0.375rem;
+        margin-top: 0.5rem;
+        width: 100%;
+    }
+    
+    .button-group button {
+        padding: 0.75rem 0.5rem;
+        font-size: 0.8rem;
+        min-height: 44px;
+        width: 100%;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    
+    /* Dashboard status - minimal */
+    .dashboard-status {
+        padding: 0.5rem;
+        gap: 0.375rem;
+        font-size: 0.75rem;
+        width: 100%;
+        max-width: 100%;
+    }
+    
+    .last-updated, .real-time-status {
+        font-size: 0.7rem;
+        line-height: 1.2;
+        word-break: break-word;
+        text-align: center;
+    }
+    
+    /* Dashboard grid - minimal spacing */
+    .dashboard-grid {
+        gap: 0.5rem;
+        margin-bottom: 0.5rem;
+        width: 100%;
+        max-width: 100%;
+    }
+    
+    .card {
+        border-radius: 8px;
+        overflow: hidden;
+        width: 100%;
+        max-width: 100%;
+    }
+    
+    .card h2 {
+        padding: 0.625rem;
+        font-size: 0.95rem;
+        line-height: 1.2;
+    }
+    
+    /* Price card - ultra compact */
+    .price-widget {
+        padding: 0.875rem 0.5rem;
+        text-align: center;
+    }
+    
+    .price-value {
+        font-size: 1.5rem;
+        margin-bottom: 0.375rem;
+        line-height: 1;
+        word-break: break-all;
+    }
+    
+    .price-change {
+        font-size: 1rem;
+        margin-bottom: 0.25rem;
+    }
+    
+    .price-symbol {
+        font-size: 0.85rem;
+        font-weight: 700;
+    }
+    
+    /* Mood card - ultra compact */
+    .mood-widget {
+        padding: 0.75rem 0.5rem;
     }
     
     .mood-badge {
-        font-size: 1.5rem;
+        font-size: 1.1rem;
+        padding: 0.5rem 0.75rem;
+        margin-bottom: 0.5rem;
+        line-height: 1.1;
+        word-break: break-word;
+    }
+    
+    .mood-score {
+        font-size: 0.9rem;
+        margin-bottom: 0.375rem;
+        word-break: break-word;
+    }
+    
+    .mood-source {
+        font-size: 0.75rem;
+        line-height: 1.3;
+        word-break: break-word;
+    }
+    
+    /* Chart container - ultra minimal */
+    .chart-container {
+        padding: 0.375rem;
+        min-height: 180px;
+        max-height: 240px;
+        width: 100%;
+        max-width: 100%;
+    }
+    
+    .chart-container h2 {
+        font-size: 0.9rem;
+        padding: 0.375rem;
+        margin-bottom: 0.25rem;
+    }
+    
+    .chart-wrapper {
+        height: 160px !important;
+        min-height: 140px !important;
+        max-height: 200px !important;
+        width: 100% !important;
+        max-width: 100% !important;
+    }
+    
+    /* Form elements - ultra compact but still tappable */
+    select, button {
+        min-height: 44px;
+        padding: 0.75rem 0.5rem;
+        font-size: 0.8rem;
+        border-radius: 6px;
+        width: 100%;
+        max-width: 100%;
+    }
+    
+    select {
+        padding-right: 2.5rem;
+        background-size: 1rem;
+        background-position: right 0.5rem center;
+    }
+    
+    /* News container - minimal */
+    .news-container {
+        padding: 0 0.5rem 0.75rem;
+        max-height: 120px;
+    }
+    
+    .news-item {
+        padding: 0.5rem;
+        margin: 0.25rem 0;
+        font-size: 0.75rem;
+        line-height: 1.3;
+    }
+    
+    /* Error messages - compact */
+    .error-message {
+        padding: 0.5rem;
+        margin: 0.5rem;
+        border-radius: 6px;
+        font-size: 0.8rem;
+        line-height: 1.3;
+    }
+}
+
+/* Additional Mobile Fixes for 480px and below */
+@media (max-width: 480px) {
+    /* Even more compact layout for small phones */
+    .chart-wrapper {
+        height: 200px !important;
+        min-height: 180px !important;
+        max-height: 240px !important;
+        padding: 0.125rem;
+    }
+    
+    #taChart, #candleChart, #mainChart {
+        min-height: 160px !important;
+        max-height: 220px !important;
+    }
+    
+    /* Compact chart info */
+    .chart-info-box {
+        padding: 0.5rem;
+        font-size: 0.75em;
+        margin: 0.25rem 0;
+    }
+    
+    /* AI Analysis - Ultra Compact */
+    .ai-analysis-card {
+        padding: 1rem;
+        margin-bottom: 0.75rem;
+        border-radius: 12px;
+    }
+    
+    .ai-analysis-header {
+        font-size: 1rem;
+        margin-bottom: 1rem;
+    }
+    
+    .ai-method-badge {
+        font-size: 0.65em;
+        padding: 0.25rem 0.5rem;
+    }
+    
+    .ai-mood-display {
         padding: 0.75rem;
     }
     
-    .real-time-status {
-        font-size: 0.8rem;
-        padding: 0.4rem 0.8rem;
-        white-space: normal;
-        text-align: center;
+    .ai-mood-icon {
+        font-size: 2em;
+        margin-bottom: 0.5rem;
     }
     
-    .last-updated {
-        font-size: 0.8rem;
-        white-space: normal;
-        text-align: center;
-    }
-}
-
-/* Override for mobile to ensure proper button sizing */
-@media (max-width: 768px) {
-    select {
-        min-width: auto;
-        max-width: none;
-        width: 100%;
+    .ai-mood-label {
+        font-size: 1.1em;
+        margin-bottom: 0.5rem;
     }
     
-    .button-group button {
-        flex: 1 1 120px;
-        min-width: 120px;
-        max-width: 180px;
+    .ai-confidence {
+        font-size: 0.8em;
+        padding: 0.25rem 0.5rem;
     }
-}
-
-@media (max-width: 480px) {
-    .button-group button {
-        flex: 1 1 100%;
-        min-width: auto;
-        max-width: none;
-        width: 100%;
+    
+    .ai-reasoning {
+        padding: 0.75rem;
+        font-size: 0.8em;
+        line-height: 1.4;
+    }
+    
+    /* TA Summary - Ultra Compact */
+    .ta-summary {
+        padding: 1rem;
+        margin-top: 0.75rem;
+    }
+    
+    .ta-summary h3 {
+        font-size: 1em;
+        margin-bottom: 0.75rem;
+    }
+    
+    .overall-signal {
+        font-size: 1.6em;
+        padding: 0.5rem 1rem;
+        margin: 0.75rem 0;
+    }
+    
+    .confidence {
+        font-size: 0.85em;
+        padding: 0.375rem 0.75rem;
+        margin: 0.5rem 0;
+    }
+    
+    .ta-summary > div:last-child {
+        padding: 0.75rem;
+        margin-top: 1rem;
+        font-size: 0.75em;
+        line-height: 1.4;
+    }
+    
+    /* Technical Analysis Module Mobile Fixes */
+    .ta-container .grid {
+        grid-template-columns: 1fr;
+        gap: 0.75rem;
+    }
+    
+    .ta-container .chart-container {
+        min-height: 200px;
+    }
+    
+    .ta-container .indicators-panel {
+        max-height: 40vh;
+        position: static;
+    }
+    
+    .patterns-container {
+        max-height: 150px;
+    }
+    
+    .pattern-entry {
+        padding: 0.25rem;
+        margin: 0.125rem 0;
+        font-size: 0.7em;
+    }
+    
+    .pattern-entry .explanation {
+        font-size: 0.6em;
+        line-height: 1.1;
+    }
+    
+    /* Educational notes - compact */
+    .educational-notes {
+        margin-top: 0.5rem;
+        padding: 0.5rem;
+        font-size: 0.75em;
+        line-height: 1.3;
+    }
+    
+    /* Indicators - compact */
+    .indicator {
+        margin-bottom: 0.375rem;
+        padding: 0.3rem;
+    }
+    
+    .indicator h3 {
+        font-size: 0.85em;
+        margin-bottom: 0.25rem;
+    }
+    
+    .indicator-value {
+        font-size: 0.9em;
+        margin-bottom: 0.25rem;
+    }
+    
+    .signal {
+        padding: 0.125rem 0.375rem;
+        font-size: 0.7em;
+    }
+    
+    .signal-strength {
+        font-size: 0.65em;
+        margin-top: 0.125rem;
+    }
+    
+    .explanation {
+        font-size: 0.65em;
+        margin-top: 0.125rem;
+        line-height: 1.2;
     }
 }
 
@@ -1269,72 +1867,177 @@ button.loading::after {
     transform: scale(1.05);
 }
 
-/* Mobile responsiveness for enhanced designs */
+/* Enhanced Mobile Chart Responsiveness */
 @media (max-width: 768px) {
+    /* Chart Specific Mobile Fixes */
+    .chart-wrapper {
+        width: 100%;
+        height: 240px !important;
+        min-height: 200px !important;
+        max-height: 300px !important;
+        position: relative;
+        margin: 0.5rem 0;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 0.25rem;
+        box-sizing: border-box;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+    }
+    
+    #taChart, #candleChart, #mainChart {
+        width: 100% !important;
+        height: 100% !important;
+        max-width: 100% !important;
+        max-height: 100% !important;
+        min-height: 180px !important;
+        display: block !important;
+        background: transparent;
+        position: relative;
+        z-index: 10;
+        opacity: 1;
+        visibility: visible !important;
+        border-radius: 6px;
+    }
+    
+    /* Chart Info Box - Mobile Optimized */
+    .chart-info-box {
+        background: var(--bg-secondary);
+        padding: 0.75rem;
+        border-radius: 8px;
+        margin: 0.5rem 0;
+        font-size: 0.8em;
+        line-height: 1.4;
+        word-break: break-word;
+        overflow-wrap: break-word;
+    }
+    
+    /* AI Analysis Mobile Optimization */
     .ai-analysis-card {
-        padding: 1.5rem;
+        padding: 1.25rem;
         margin-bottom: 1rem;
+        border-radius: 16px;
+        overflow: hidden;
     }
     
     .ai-analysis-grid {
         grid-template-columns: 1fr;
-        gap: 1.5rem;
+        gap: 1.25rem;
     }
     
     .ai-analysis-header {
-        font-size: 1.2rem;
+        font-size: 1.1rem;
         flex-direction: column;
         align-items: flex-start;
-        gap: 1rem;
+        gap: 0.75rem;
+        margin-bottom: 1.25rem;
+    }
+    
+    .ai-method-badge {
+        font-size: 0.7em;
+        padding: 0.375rem 0.75rem;
+        align-self: flex-start;
     }
     
     .ai-mood-display {
         padding: 1rem;
+        border-radius: 12px;
+        text-align: center;
     }
     
     .ai-mood-icon {
-        font-size: 3em;
+        font-size: 2.5em;
+        margin-bottom: 0.75rem;
     }
     
     .ai-mood-label {
-        font-size: 1.4em;
+        font-size: 1.3em;
+        margin-bottom: 0.75rem;
+        word-break: break-word;
     }
     
     .ai-confidence {
-        font-size: 1em;
+        font-size: 0.9em;
+        padding: 0.375rem 0.75rem;
     }
     
     .ai-reasoning {
         padding: 1rem;
-        font-size: 0.9em;
+        font-size: 0.85em;
+        line-height: 1.5;
+        border-radius: 12px;
+        word-break: break-word;
+        overflow-wrap: break-word;
     }
     
-    .ta-summary {
-        padding: 1.5rem;
+    /* AI Explanation Card */
+    .ai-explanation-card {
+        padding: 1.25rem;
         margin-top: 1rem;
+        border-radius: 16px;
     }
     
-    .ta-summary h3 {
-        font-size: 1.2em;
+    .ai-explanation-header {
+        font-size: 1.1rem;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.75rem;
         margin-bottom: 1rem;
     }
     
+    .ai-explain-badge {
+        font-size: 0.7em;
+        padding: 0.375rem 0.75rem;
+        align-self: flex-start;
+    }
+    
+    .ai-explanation-content {
+        padding: 1rem;
+        font-size: 0.85em;
+        line-height: 1.6;
+        word-break: break-word;
+        overflow-wrap: break-word;
+    }
+    
+    /* Technical Analysis Summary */
+    .ta-summary {
+        padding: 1.25rem;
+        margin-top: 1rem;
+        border-radius: 16px;
+        text-align: center;
+    }
+    
+    .ta-summary h3 {
+        font-size: 1.1em;
+        margin-bottom: 1rem;
+        line-height: 1.3;
+    }
+    
     .overall-signal {
-        font-size: 2.2em;
-        padding: 0.75rem 1.5rem;
+        font-size: 2em;
+        padding: 0.75rem 1.25rem;
         margin: 1rem 0;
+        line-height: 1.2;
+        word-break: break-word;
     }
     
     .confidence {
-        font-size: 1.1em;
+        font-size: 1em;
         padding: 0.5rem 1rem;
+        margin: 0.75rem 0;
     }
     
     .ta-summary > div:last-child {
         padding: 1rem;
-        margin-top: 1.5rem;
-        text-align: center;
+        margin-top: 1.25rem;
+        text-align: left;
         font-size: 0.8em;
+        line-height: 1.5;
+        word-break: break-word;
+        overflow-wrap: break-word;
     }
 }
 
