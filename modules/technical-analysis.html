@@ -161,7 +161,8 @@
                 message.includes('message channel closed') ||
                 message.includes('listener indicated an asynchronous response') ||
                 message.includes('Could not establish connection') ||
-                message.includes('Extension context invalidated')) {
+                message.includes('Extension context invalidated') ||
+                message.includes('Unchecked runtime.lastError')) {
                 return; // Ignore extension errors
             }
             originalError.apply(console, args);
@@ -172,7 +173,9 @@
             const message = args.join(' ');
             if (message.includes('runtime.lastError') || 
                 message.includes('extension') ||
-                message.includes('content script')) {
+                message.includes('content script') ||
+                message.includes('Could not establish connection') ||
+                message.includes('Unchecked runtime.lastError')) {
                 return; // Ignore extension warnings
             }
             originalWarn.apply(console, args);

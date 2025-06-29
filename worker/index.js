@@ -517,6 +517,37 @@ async function handleAIAnalysis(request, env) {
 }
 
 /**
+ * Enhanced AI Market Mood Classification with Candlestick Patterns
+ * Uses Cohere v2/classify to analyze technical signals AND candlestick patterns
+ */
+async function handleAIAnalysisEnhanced(request, env) {
+  try {
+    if (request.method !== 'POST') {
+      return errorResponse('Method not allowed', 405);
+    }
+    
+    const body = await request.json();
+    const { rsi, smaSignal, bbSignal, priceData, candlePatterns, coin } = body;
+    
+    if (!rsi || !smaSignal || !bbSignal || !priceData) {
+      return errorResponse('Missing required technical analysis data');
+    }
+    
+    // Try enhanced Cohere AI classification with patterns
+    try {
+      return await classifyMarketMoodWithCohereEnhanced(rsi, smaSignal, bbSignal, priceData, candlePatterns || [], coin, env);
+    } catch (error) {
+      console.log('Enhanced Cohere AI classification failed, using enhanced fallback:', error.message);
+      return classifyMarketMoodEnhancedFallback(rsi, smaSignal, bbSignal, priceData, candlePatterns || [], coin);
+    }
+    
+  } catch (error) {
+    console.error('Enhanced AI Analysis error:', error);
+    return errorResponse(`Failed to perform enhanced AI analysis: ${error.message}`);
+  }
+}
+
+/**
  * AI Pattern Explanation 
  * Uses Cohere v2/chat to provide natural language explanations of technical patterns
  */
@@ -657,26 +688,132 @@ async function classifyMarketMoodWithCohere(rsi, smaSignal, bbSignal, priceData,
 }
 
 /**
- * Fallback market mood classification using rule-based logic
+ * Enhanced classification with candlestick patterns
  */
-function classifyMarketMoodFallback(rsi, smaSignal, bbSignal, priceData, coin) {
+async function classifyMarketMoodWithCohereEnhanced(rsi, smaSignal, bbSignal, priceData, candlePatterns, coin, env) {
+  // Enhanced examples that include pattern analysis
+  const examples = [
+    {
+      text: "RSI: 85, SMA: SELL, BB: SELL, Price trend: declining sharply, Patterns: 3 bearish reversal",
+      label: "bearish"
+    },
+    {
+      text: "RSI: 25, SMA: BUY, BB: BUY, Price trend: rising from oversold, Patterns: 2 bullish hammer",
+      label: "bullish"
+    },
+    {
+      text: "RSI: 45, SMA: NEUTRAL, BB: NEUTRAL, Price trend: sideways movement, Patterns: 4 doji neutral",
+      label: "neutral"
+    },
+    {
+      text: "RSI: 75, SMA: BUY, BB: NEUTRAL, Price trend: strong upward momentum, Patterns: 3 bullish continuation",
+      label: "bullish"
+    },
+    {
+      text: "RSI: 30, SMA: SELL, BB: SELL, Price trend: continued downtrend, Patterns: 2 shooting star bearish",
+      label: "bearish"
+    },
+    {
+      text: "RSI: 55, SMA: BUY, BB: BUY, Price trend: breaking resistance, Patterns: 1 bullish engulfing",
+      label: "bullish"
+    }
+  ];
+  
+  // Calculate price trend
+  const recentPrices = priceData.slice(-5);
+  const oldPrice = recentPrices[0]?.y || 0;
+  const newPrice = recentPrices[recentPrices.length - 1]?.y || 0;
+  const priceChange = ((newPrice - oldPrice) / oldPrice) * 100;
+  
+  let priceTrend = 'sideways movement';
+  if (priceChange > 2) priceTrend = 'rising strongly';
+  else if (priceChange > 0.5) priceTrend = 'rising gradually';
+  else if (priceChange < -2) priceTrend = 'declining sharply';
+  else if (priceChange < -0.5) priceTrend = 'declining gradually';
+  
+  // Analyze patterns
+  const bullishPatterns = candlePatterns.filter(p => p.signal === 'BUY').length;
+  const bearishPatterns = candlePatterns.filter(p => p.signal === 'SELL').length;
+  const neutralPatterns = candlePatterns.filter(p => p.signal === 'NEUTRAL').length;
+  
+  let patternText = 'no clear patterns';
+  if (bullishPatterns > bearishPatterns && bullishPatterns > 0) {
+    patternText = `${bullishPatterns} bullish patterns`;
+  } else if (bearishPatterns > bullishPatterns && bearishPatterns > 0) {
+    patternText = `${bearishPatterns} bearish patterns`;
+  } else if (neutralPatterns > 2) {
+    patternText = `${neutralPatterns} neutral patterns`;
+  }
+  
+  // Create enhanced input text
+  const inputText = `RSI: ${rsi.toFixed(0)}, SMA: ${smaSignal}, BB: ${bbSignal}, Price trend: ${priceTrend}, Patterns: ${patternText}`;
+  
+  console.log('Enhanced classification for:', inputText);
+  
+  // Make request to Cohere Classify API v2
+  const response = await fetch('https://api.cohere.com/v2/classify', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${env.COHERE_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'embed-english-v3.0',
+      inputs: [inputText],
+      examples: examples,
+      task_description: 'Classify cryptocurrency market sentiment based on technical analysis indicators AND candlestick patterns. Use "bullish" for positive outlook, "bearish" for negative outlook, and "neutral" for mixed or unclear signals.'
+    }),
+  });
+  
+  if (!response.ok) {
+    const errorBody = await response.text();
+    console.log('Enhanced Cohere Classify API error:', errorBody);
+    throw new Error(`Enhanced Cohere Classify API error: ${response.status}`);
+  }
+  
+  const data = await response.json();
+  console.log('Enhanced Cohere Classify API success:', data);
+  
+  // Extract classification result
+  const classification = data.classifications?.[0];
+  if (!classification) {
+    throw new Error('No enhanced classification result returned');
+  }
+  
+  const prediction = classification.prediction;
+  const confidence = classification.confidence || 0;
+  const confidencePercentage = Math.round(confidence * 100);
+  
+  return jsonResponse({
+    mood: prediction,
+    confidence: confidencePercentage,
+    reasoning: `Enhanced analysis: RSI ${rsi.toFixed(1)}, SMA: ${smaSignal}, BB: ${bbSignal}, price trend: ${priceTrend}, with ${patternText}`,
+    method: 'cohere-enhanced-api',
+    patterns: patternText,
+    coin: coin,
+    timestamp: new Date().toISOString()
+  });
+}
+
+/**
+ * Enhanced fallback with pattern analysis
+ */
+function classifyMarketMoodEnhancedFallback(rsi, smaSignal, bbSignal, priceData, candlePatterns, coin) {
   let bullishScore = 0;
   let bearishScore = 0;
   
-  // RSI scoring
-  if (rsi < 30) bullishScore += 2; // Oversold
-  else if (rsi > 70) bearishScore += 2; // Overbought
-  else if (rsi >= 45 && rsi <= 55) bullishScore += 0.5; // Neutral momentum
+  // Traditional indicators scoring
+  if (rsi < 30) bullishScore += 2;
+  else if (rsi > 70) bearishScore += 2;
+  else if (rsi >= 45 && rsi <= 55) bullishScore += 0.5;
   
-  // SMA scoring
   if (smaSignal === 'BUY') bullishScore += 1.5;
   else if (smaSignal === 'SELL') bearishScore += 1.5;
   
-  // Bollinger Bands scoring
   if (bbSignal === 'BUY') bullishScore += 1;
   else if (bbSignal === 'SELL') bearishScore += 1;
   
-  // Calculate price trend
+  // Price trend analysis
   if (priceData.length >= 3) {
     const recentPrices = priceData.slice(-3);
     const trend = (recentPrices[2].y - recentPrices[0].y) / recentPrices[0].y;
@@ -684,14 +821,20 @@ function classifyMarketMoodFallback(rsi, smaSignal, bbSignal, priceData, coin) {
     else if (trend < -0.01) bearishScore += 1;
   }
   
+  // Pattern analysis boost
+  const bullishPatterns = candlePatterns.filter(p => p.signal === 'BUY').length;
+  const bearishPatterns = candlePatterns.filter(p => p.signal === 'SELL').length;
+  bullishScore += bullishPatterns * 0.3;
+  bearishScore += bearishPatterns * 0.3;
+  
   // Determine mood
   let mood, confidence;
   if (bullishScore > bearishScore + 1) {
     mood = 'bullish';
-    confidence = Math.min(90, 60 + (bullishScore - bearishScore) * 10);
+    confidence = Math.min(90, 60 + (bullishScore - bearishScore) * 8);
   } else if (bearishScore > bullishScore + 1) {
     mood = 'bearish';
-    confidence = Math.min(90, 60 + (bearishScore - bullishScore) * 10);
+    confidence = Math.min(90, 60 + (bearishScore - bullishScore) * 8);
   } else {
     mood = 'neutral';
     confidence = 50 + Math.abs(bullishScore - bearishScore) * 5;
@@ -700,195 +843,10 @@ function classifyMarketMoodFallback(rsi, smaSignal, bbSignal, priceData, coin) {
   return jsonResponse({
     mood: mood,
     confidence: Math.round(confidence),
-    reasoning: `Rule-based analysis: bullish signals ${bullishScore}, bearish signals ${bearishScore}`,
-    method: 'rule-based-fallback',
+    reasoning: `Enhanced fallback: bullish signals ${bullishScore.toFixed(1)}, bearish signals ${bearishScore.toFixed(1)}, with ${bullishPatterns} bullish and ${bearishPatterns} bearish patterns`,
+    method: 'enhanced-fallback',
+    patterns: `${bullishPatterns} bullish, ${bearishPatterns} bearish patterns`,
     coin: coin,
-    timestamp: new Date().toISOString()
-  });
-}
-
-/**
- * Generate natural language explanation using Cohere's v2/chat endpoint
- */
-async function explainPatternWithCohere(rsi, sma, bb, signals, coin, timeframe, env, priceContext = null) {
-  // Prepare context for the AI
-  const overallSignal = calculateOverallSignal(signals);
-  
-  // ✅ FIX: Use actual price data from frontend if available, otherwise fallback to calculation
-  let currentRSI, safeSMA, safeBBUpper, safeBBLower, resistance, support;
-  
-  if (priceContext && priceContext.currentPrice) {
-    // Use actual price data from frontend
-    currentRSI = priceContext.currentRSI || 50;
-    safeSMA = priceContext.currentSMA || priceContext.currentPrice;
-    safeBBUpper = priceContext.currentBBUpper || priceContext.currentPrice * 1.05;
-    safeBBLower = priceContext.currentBBLower || priceContext.currentPrice * 0.95;
-    resistance = Math.max(safeBBUpper, safeSMA * 1.05);
-    support = Math.min(safeBBLower, safeSMA * 0.95);
-    
-    console.log(`✅ Using actual price data from frontend: Current=${priceContext.currentPrice}, SMA=${safeSMA}, BB=[${safeBBLower}-${safeBBUpper}]`);
-  } else {
-    // Fallback to worker calculations (old behavior)
-    currentRSI = rsi[rsi.length - 1]?.y || 50;
-    const currentSMA = sma[sma.length - 1]?.y || sma[sma.length - 1] || 0;
-    const bbUpper = bb.upper?.[bb.upper.length - 1]?.y || bb.upper?.[bb.upper.length - 1] || 0;
-    const bbLower = bb.lower?.[bb.lower.length - 1]?.y || bb.lower?.[bb.lower.length - 1] || 0;
-    
-    const defaultPrices = { bitcoin: 50000, ethereum: 3000, litecoin: 100, dogecoin: 0.08 };
-    const defaultPrice = defaultPrices[coin.toLowerCase()] || 50000;
-    
-    safeSMA = currentSMA > 0 ? currentSMA : defaultPrice;
-    safeBBUpper = bbUpper > 0 ? bbUpper : safeSMA * 1.05;
-    safeBBLower = bbLower > 0 ? bbLower : safeSMA * 0.95;
-    resistance = Math.max(safeBBUpper, safeSMA * 1.05);
-    support = Math.min(safeBBLower, safeSMA * 0.95);
-    
-    console.log(`⚠️ Using fallback calculations for ${coin}: SMA=${safeSMA}, BB=[${safeBBLower}-${safeBBUpper}]`);
-  }
-  
-  const prompt = `As a professional crypto technical analyst, explain the current ${coin.toUpperCase()} chart pattern in simple terms for a beginner trader.
-
-LIVE Current Technical Analysis (MUST use these exact values):
-- Current Price: $${(priceContext?.currentPrice || safeSMA).toLocaleString()}
-- RSI (14): ${currentRSI.toFixed(1)}
-- SMA (20): $${safeSMA.toLocaleString()}
-- Bollinger Band Upper: $${safeBBUpper.toLocaleString()}
-- Bollinger Band Lower: $${safeBBLower.toLocaleString()}
-- Key Resistance Level: $${resistance.toLocaleString()}
-- Key Support Level: $${support.toLocaleString()}
-- Overall Signal: ${overallSignal.signal} (${overallSignal.confidence}% confidence)
-- Time Period: ${timeframe} days
-- Individual Signals: ${signals.map(s => `${s.type}: ${s.signal} (${s.strength})`).join(', ')}
-
-Please provide a market analysis using EXACTLY these price levels:
-1. Explain what the current pattern means for ${coin.toUpperCase()} at $${(priceContext?.currentPrice || safeSMA).toLocaleString()}
-2. What might happen next (scenarios with resistance at $${resistance.toLocaleString()} and support at $${support.toLocaleString()})
-3. Key levels to watch: resistance $${resistance.toLocaleString()} and support $${support.toLocaleString()}
-4. Simple summary for beginners
-
-CRITICAL: You MUST use the exact price values listed above ($${resistance.toLocaleString()}, $${support.toLocaleString()}, $${(priceContext?.currentPrice || safeSMA).toLocaleString()}, etc.) - NO placeholders, NO generic numbers, NO $50,000 or $XXX examples. Use the LIVE data provided. Keep under 200 words, educational focus, no trading advice.`;
-
-  console.log('Generating AI explanation for:', coin);
-  
-  // Make request to Cohere Chat API v2
-  const response = await fetch('https://api.cohere.com/v2/chat', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${env.COHERE_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'command-r',
-      messages: [
-        {
-          role: 'user',
-          content: prompt
-        }
-      ],
-      temperature: 0.7,
-      max_tokens: 300
-    }),
-  });
-  
-  if (!response.ok) {
-    const errorBody = await response.text();
-    console.log('Cohere Chat API error:', errorBody);
-    throw new Error(`Cohere Chat API error: ${response.status}`);
-  }
-  
-  const data = await response.json();
-  console.log('Cohere Chat API success for explanation');
-  
-  // Extract explanation
-  const explanation = data.message?.content?.[0]?.text || '';
-  
-  if (!explanation) {
-    throw new Error('No explanation generated');
-  }
-  
-  return jsonResponse({
-    explanation: explanation.trim(),
-    method: 'cohere-chat-api',
-    coin: coin,
-    timeframe: timeframe,
-    timestamp: new Date().toISOString()
-  });
-}
-
-/**
- * Fallback explanation generator
- */
-function explainPatternFallback(rsi, sma, bb, signals, coin, timeframe, priceContext = null) {
-  const overallSignal = calculateOverallSignal(signals);
-  
-  // ✅ FIX: Use actual price data from frontend if available, otherwise fallback to calculation
-  let currentRSI, safeSMA, safeBBUpper, safeBBLower, resistance, support;
-  
-  if (priceContext && priceContext.currentPrice) {
-    // Use actual price data from frontend
-    currentRSI = priceContext.currentRSI || 50;
-    safeSMA = priceContext.currentSMA || priceContext.currentPrice;
-    safeBBUpper = priceContext.currentBBUpper || priceContext.currentPrice * 1.05;
-    safeBBLower = priceContext.currentBBLower || priceContext.currentPrice * 0.95;
-    resistance = Math.max(safeBBUpper, safeSMA * 1.05);
-    support = Math.min(safeBBLower, safeSMA * 0.95);
-    
-    console.log(`✅ Fallback using actual price data: Current=${priceContext.currentPrice}, SMA=${safeSMA}, BB=[${safeBBLower}-${safeBBUpper}]`);
-  } else {
-    // Fallback to worker calculations (old behavior)
-    currentRSI = rsi[rsi.length - 1]?.y || 50;
-    const currentSMA = sma[sma.length - 1]?.y || sma[sma.length - 1] || 0;
-    const bbUpper = bb.upper?.[bb.upper.length - 1]?.y || bb.upper?.[bb.upper.length - 1] || 0;
-    const bbLower = bb.lower?.[bb.lower.length - 1]?.y || bb.lower?.[bb.lower.length - 1] || 0;
-    
-    const defaultPrices = { bitcoin: 50000, ethereum: 3000, litecoin: 100, dogecoin: 0.08 };
-    const defaultPrice = defaultPrices[coin.toLowerCase()] || 50000;
-    
-    safeSMA = currentSMA > 0 ? currentSMA : defaultPrice;
-    safeBBUpper = bbUpper > 0 ? bbUpper : safeSMA * 1.05;
-    safeBBLower = bbLower > 0 ? bbLower : safeSMA * 0.95;
-    resistance = Math.max(safeBBUpper, safeSMA * 1.05);
-    support = Math.min(safeBBLower, safeSMA * 0.95);
-    
-    console.log(`⚠️ Fallback using calculations for ${coin}: SMA=${safeSMA}, BB=[${safeBBLower}-${safeBBUpper}]`);
-  }
-  
-  const currentPriceDisplay = priceContext?.currentPrice || safeSMA;
-  
-  let explanation = `LIVE ${coin.toUpperCase()} Analysis (${timeframe} days) - Current Price: $${currentPriceDisplay.toLocaleString()}:\n\n`;
-  
-  // RSI explanation with actual price context
-  if (currentRSI < 30) {
-    explanation += `📉 RSI at ${currentRSI.toFixed(1)} shows oversold conditions - ${coin.toUpperCase()} at $${currentPriceDisplay.toLocaleString()} may have fallen too much and could bounce toward resistance at $${resistance.toLocaleString()}. `;
-  } else if (currentRSI > 70) {
-    explanation += `📈 RSI at ${currentRSI.toFixed(1)} indicates overbought territory - ${coin.toUpperCase()} at $${currentPriceDisplay.toLocaleString()} may have risen too quickly and could pull back toward support at $${support.toLocaleString()}. `;
-  } else {
-    explanation += `⚖️ RSI at ${currentRSI.toFixed(1)} is in normal range - ${coin.toUpperCase()} at $${currentPriceDisplay.toLocaleString()} shows no extreme pressure between support $${support.toLocaleString()} and resistance $${resistance.toLocaleString()}. `;
-  }
-  
-  // Overall signal explanation with specific price levels
-  if (overallSignal.signal === 'BUY') {
-    explanation += `Technical indicators suggest ${coin.toUpperCase()} could move from current $${currentPriceDisplay.toLocaleString()} toward resistance at $${resistance.toLocaleString()}. `;
-  } else if (overallSignal.signal === 'SELL') {
-    explanation += `Technical indicators suggest ${coin.toUpperCase()} could decline from current $${currentPriceDisplay.toLocaleString()} toward support at $${support.toLocaleString()}. `;
-  } else {
-    explanation += `Technical indicators are mixed - ${coin.toUpperCase()} likely to consolidate between support $${support.toLocaleString()} and resistance $${resistance.toLocaleString()}. `;
-  }
-  
-  // Add specific price level scenarios
-  explanation += `\n\nPrice Scenarios:\n`;
-  explanation += `• Bullish breakout: Above $${resistance.toLocaleString()} could target higher levels\n`;
-  explanation += `• Bearish breakdown: Below $${support.toLocaleString()} could see further decline\n`;
-  explanation += `• Consolidation: Between $${support.toLocaleString()}-$${resistance.toLocaleString()} for sideways movement\n`;
-  explanation += `• Key moving average: $${safeSMA.toLocaleString()} (SMA 20)\n`;
-  
-  explanation += `\n⚠️ Current ${coin.toUpperCase()} at $${currentPriceDisplay.toLocaleString()} - Remember: Technical analysis helps identify patterns but markets can be unpredictable. Always do your own research!`;
-  
-  return jsonResponse({
-    explanation: explanation,
-    method: 'rule-based-fallback',
-    coin: coin,
-    timeframe: timeframe,
     timestamp: new Date().toISOString()
   });
 }
@@ -1063,6 +1021,9 @@ export default {
           
         case '/ai-analysis':
           return await handleAIAnalysis(request, env);
+          
+        case '/ai-analysis-enhanced':
+          return await handleAIAnalysisEnhanced(request, env);
           
         case '/ai-explain':
           return await handleAIExplain(request, env);
