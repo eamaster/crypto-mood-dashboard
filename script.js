@@ -565,6 +565,7 @@
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                resizeDelay: 100,
                 devicePixelRatio: window.devicePixelRatio || 1,
                 interaction: {
                     mode: 'index',
@@ -704,14 +705,26 @@
             }
         });
         
-        // Force chart resize after creation on mobile
-        if (isMobile) {
-            setTimeout(() => {
-                if (state.chartInstance) {
-                    state.chartInstance.resize();
-                }
-            }, 100);
-        }
+        // Enhanced chart initialization and visibility handling
+        debouncedChartInit(() => {
+            if (state.chartInstance) {
+                // Ensure chart visibility and proper sizing
+                ensureChartVisibility(state.chartInstance, 'mainChart');
+                
+                // Force resize for responsive behavior
+                setTimeout(() => {
+                    if (state.chartInstance) {
+                        try {
+                            state.chartInstance.resize();
+                            state.chartInstance.update('none');
+                            console.log('📊 Main dashboard chart initialized and resized');
+                        } catch (error) {
+                            console.error('Error during chart initialization:', error);
+                        }
+                    }
+                }, isMobile ? 200 : 100);
+            }
+        }, isMobile ? 300 : 150);
         
         hideError(elements.chartError);
     }
@@ -920,29 +933,125 @@
         console.warn('Unhandled promise rejection:', event.reason);
     });
     
-    // Mobile responsive handlers
+    // Enhanced Mobile responsive handlers with TA chart support
     function handleResize() {
         // Debounce resize events for better performance
         clearTimeout(window.resizeTimeout);
         window.resizeTimeout = setTimeout(() => {
-            // Resize chart if it exists
+            console.log('🔄 Handling window resize for responsive charts...');
+            
+            // Resize main dashboard chart if it exists
             if (state.chartInstance) {
-                state.chartInstance.resize();
+                try {
+                    state.chartInstance.resize();
+                    console.log('📊 Main chart resized successfully');
+                } catch (error) {
+                    console.error('Error resizing main chart:', error);
+                }
+            }
+            
+            // Resize Technical Analysis charts if they exist (window scope)
+            if (typeof window.chartInstance !== 'undefined' && window.chartInstance) {
+                try {
+                    window.chartInstance.resize();
+                    console.log('📈 TA primary chart resized successfully');
+                } catch (error) {
+                    console.error('Error resizing TA primary chart:', error);
+                }
+            }
+            
+            if (typeof window.candleChartInstance !== 'undefined' && window.candleChartInstance) {
+                try {
+                    window.candleChartInstance.resize();
+                    console.log('🕯️ TA candlestick chart resized successfully');
+                } catch (error) {
+                    console.error('Error resizing TA candlestick chart:', error);
+                }
             }
             
             // Force refresh on mobile orientation change
             if (window.innerWidth <= 768) {
-                console.log('Mobile resize detected, optimizing layout...');
+                console.log('📱 Mobile resize detected, optimizing layout...');
                 
                 // Small delay to ensure DOM has settled
                 setTimeout(() => {
+                    // Re-render main dashboard chart
                     if (state.chartInstance) {
-                        state.chartInstance.update('none'); // Update without animation
-                        state.chartInstance.resize();
+                        try {
+                            state.chartInstance.update('none'); // Update without animation
+                            state.chartInstance.resize();
+                        } catch (error) {
+                            console.error('Error updating main chart on mobile:', error);
+                        }
                     }
+                    
+                    // Re-render TA charts
+                    if (typeof window.chartInstance !== 'undefined' && window.chartInstance) {
+                        try {
+                            window.chartInstance.update('none');
+                            window.chartInstance.resize();
+                        } catch (error) {
+                            console.error('Error updating TA primary chart on mobile:', error);
+                        }
+                    }
+                    
+                    if (typeof window.candleChartInstance !== 'undefined' && window.candleChartInstance) {
+                        try {
+                            window.candleChartInstance.update('none');
+                            window.candleChartInstance.resize();
+                        } catch (error) {
+                            console.error('Error updating TA candlestick chart on mobile:', error);
+                        }
+                    }
+                    
+                    console.log('✅ Mobile chart optimizations complete');
                 }, 150);
             }
         }, 250);
+    }
+    
+    // Enhanced chart resize utilities
+    function ensureChartVisibility(chartInstance, canvasId) {
+        const canvas = document.getElementById(canvasId);
+        if (!canvas || !chartInstance) return false;
+        
+        // Check if canvas container is visible
+        const container = canvas.closest('.chart-container, .ta-responsive-chart-container');
+        if (!container) return false;
+        
+        const containerRect = container.getBoundingClientRect();
+        const isVisible = containerRect.width > 0 && containerRect.height > 0;
+        
+        if (isVisible && (canvas.clientWidth === 0 || canvas.clientHeight === 0)) {
+            console.log(`🔧 Fixing visibility for chart: ${canvasId}`);
+            
+            // Force visibility
+            canvas.style.display = 'block';
+            canvas.style.visibility = 'visible';
+            canvas.style.opacity = '1';
+            
+            // Trigger resize
+            setTimeout(() => {
+                if (chartInstance) {
+                    chartInstance.resize();
+                    chartInstance.update('none');
+                }
+            }, 100);
+            
+            return true;
+        }
+        
+        return isVisible;
+    }
+    
+    // Debounced chart initialization helper
+    function debouncedChartInit(callback, delay = 300) {
+        clearTimeout(window.chartInitTimeout);
+        window.chartInitTimeout = setTimeout(() => {
+            if (typeof callback === 'function') {
+                callback();
+            }
+        }, delay);
     }
     
     // Add resize listener for responsive updates
@@ -954,10 +1063,54 @@
             handleResize();
             // Force a dashboard refresh to ensure proper mobile layout
             if (window.innerWidth <= 768 && state.selectedCoin) {
-                console.log('Orientation change detected, refreshing dashboard...');
+                console.log('🔄 Orientation change detected, refreshing dashboard...');
                 updateDashboard(state.selectedCoin);
             }
         }, 500); // Delay to allow orientation change to complete
+    });
+    
+    // Global Technical Analysis chart resize support
+    // This ensures TA charts resize properly even when loaded on different pages
+    window.addEventListener('load', () => {
+        // Check if we're on the TA module page
+        if (window.location.pathname.includes('technical-analysis') || 
+            document.querySelector('#taChart, #candleChart')) {
+            
+            console.log('🔧 TA module detected, enabling enhanced chart resize support');
+            
+            // Additional resize handler specifically for TA charts
+            const taResizeHandler = () => {
+                clearTimeout(window.taResizeTimeout);
+                window.taResizeTimeout = setTimeout(() => {
+                    // Resize TA charts if they exist
+                    if (typeof window.chartInstance !== 'undefined' && window.chartInstance) {
+                        try {
+                            window.chartInstance.resize();
+                            console.log('📈 TA primary chart resized via global handler');
+                        } catch (error) {
+                            console.error('Error resizing TA primary chart:', error);
+                        }
+                    }
+                    
+                    if (typeof window.candleChartInstance !== 'undefined' && window.candleChartInstance) {
+                        try {
+                            window.candleChartInstance.resize();
+                            console.log('🕯️ TA candlestick chart resized via global handler');
+                        } catch (error) {
+                            console.error('Error resizing TA candlestick chart:', error);
+                        }
+                    }
+                }, 200);
+            };
+            
+            // Add dedicated TA resize listener
+            window.addEventListener('resize', taResizeHandler);
+            
+            // Also handle orientation changes for TA charts
+            window.addEventListener('orientationchange', () => {
+                setTimeout(taResizeHandler, 600);
+            });
+        }
     });
     
     // Prevent zoom on double-tap for better mobile UX

@@ -63,38 +63,42 @@
             </div>
         </div>
 
-        <div class="grid">
-            <div class="chart-container">
-                <h3>📈 Price Chart with Technical Indicators</h3>
-                <div class="chart-info-box">
-                    <strong>ℹ️ Chart Information:</strong> Technical indicators (SMA, Bollinger Bands) start after collecting sufficient data points for accurate calculations. This delayed start is mathematically correct and ensures reliable signals.
-                    <br><strong>🤖 AI Enhancement:</strong> Advanced AI analysis will automatically classify market mood and provide pattern explanations below the chart.
+        <div class="ta-charts-grid">
+            <div class="ta-chart-column left">
+                <div class="ta-responsive-chart-container">
+                    <h3>📈 Price Chart with Technical Indicators</h3>
+                    <div class="chart-info-box">
+                        <strong>ℹ️ Chart Information:</strong> Technical indicators (SMA, Bollinger Bands) start after collecting sufficient data points for accurate calculations. This delayed start is mathematically correct and ensures reliable signals.
+                        <br><strong>🤖 AI Enhancement:</strong> Advanced AI analysis will automatically classify market mood and provide pattern explanations below the chart.
+                    </div>
+                    <div id="loading" class="loading" style="display: none;">Fetching data and calculating indicators...</div>
+                    <div class="ta-responsive-chart-wrapper">
+                        <canvas id="taChart"></canvas>
+                    </div>
+                    <div id="chartError" class="error" style="display: none;"></div>
                 </div>
-                <div id="loading" class="loading" style="display: none;">Fetching data and calculating indicators...</div>
-                <div class="chart-wrapper">
-                    <canvas id="taChart"></canvas>
+
+                <div class="ta-responsive-chart-container">
+                    <h3>📊 Price Movement Analysis</h3>
+                    <div class="chart-info-box">
+                        <strong>ℹ️ Price Analysis Information:</strong> Shows price movements over time. Green bars = price increased from previous period, Red bars = price decreased, Blue line = overall trend.
+                        <br><strong>📊 Visual Analysis:</strong> Bar heights represent actual price levels. Color patterns reveal market sentiment and momentum changes over the selected timeframe.
+                        <br><strong>🔧 Pattern Recognition:</strong> Consecutive price movements and trend changes help identify potential trading opportunities and market psychology.
+                    </div>
+                    <div id="candleLoading" class="loading" style="display: none;">Fetching OHLC data...</div>
+                    <div class="ta-responsive-chart-wrapper">
+                        <canvas id="candleChart"></canvas>
+                    </div>
+                    <div id="candleError" class="error" style="display: none;"></div>
                 </div>
-                <div id="chartError" class="error" style="display: none;"></div>
             </div>
 
-            <div class="chart-container">
-                <h3>📊 Price Movement Analysis</h3>
-                <div class="chart-info-box">
-                    <strong>ℹ️ Price Analysis Information:</strong> Shows price movements over time. Green bars = price increased from previous period, Red bars = price decreased, Blue line = overall trend.
-                    <br><strong>📊 Visual Analysis:</strong> Bar heights represent actual price levels. Color patterns reveal market sentiment and momentum changes over the selected timeframe.
-                    <br><strong>🔧 Pattern Recognition:</strong> Consecutive price movements and trend changes help identify potential trading opportunities and market psychology.
-                </div>
-                <div id="candleLoading" class="loading" style="display: none;">Fetching OHLC data...</div>
-                <div class="chart-wrapper">
-                    <canvas id="candleChart"></canvas>
-                </div>
-                <div id="candleError" class="error" style="display: none;"></div>
-            </div>
-
-            <div class="indicators-panel">
-                <h3>📊 Technical Indicators</h3>
-                <div id="indicators">
-                    <div class="loading">Analysis results will appear here...</div>
+            <div class="ta-chart-column right">
+                <div class="indicators-panel">
+                    <h3>📊 Technical Indicators</h3>
+                    <div id="indicators">
+                        <div class="loading">Analysis results will appear here...</div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -754,6 +758,10 @@
             
             // ✅ CHART FIX: Properly destroy existing chart to prevent memory leaks
             if (chartInstance) {
+                // Unregister from responsive manager
+                if (window.taChartManager) {
+                    window.taChartManager.unregisterChart('taChart');
+                }
                 chartInstance.destroy();
                 chartInstance = null;
             }
@@ -838,7 +846,7 @@
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
-                    resizeDelay: 0,
+                    resizeDelay: 100,
                     devicePixelRatio: window.devicePixelRatio || 1,
                     interaction: {
                         intersect: false,
@@ -1019,6 +1027,11 @@
                     chartInstance.update();
                     chartInstance.resize();
                     
+                    // Register chart with responsive manager
+                    if (window.taChartManager) {
+                        window.taChartManager.registerChart('taChart', chartInstance);
+                    }
+                    
                     // Final render after a short delay
                     setTimeout(() => {
                         chartInstance.render();
@@ -1055,6 +1068,10 @@
             
             // Destroy existing chart to prevent memory leaks
             if (candleChartInstance) {
+                // Unregister from responsive manager
+                if (window.taChartManager) {
+                    window.taChartManager.unregisterChart('candleChart');
+                }
                 candleChartInstance.destroy();
                 candleChartInstance = null;
             }
@@ -1348,6 +1365,11 @@
                     candleChartInstance.update();
                     candleChartInstance.resize();
                     
+                    // Register chart with responsive manager
+                    if (window.taChartManager) {
+                        window.taChartManager.registerChart('candleChart', candleChartInstance);
+                    }
+                    
                     // Final render after a short delay
                     setTimeout(() => {
                         candleChartInstance.render();
@@ -1380,6 +1402,10 @@
             
             // Destroy existing chart to prevent memory leaks
             if (candleChartInstance) {
+                // Unregister from responsive manager
+                if (window.taChartManager) {
+                    window.taChartManager.unregisterChart('candleChart');
+                }
                 candleChartInstance.destroy();
                 candleChartInstance = null;
             }
@@ -1654,6 +1680,11 @@
                 if (candleChartInstance) {
                     candleChartInstance.update();
                     candleChartInstance.resize();
+                    
+                    // Register chart with responsive manager
+                    if (window.taChartManager) {
+                        window.taChartManager.registerChart('candleChart', candleChartInstance);
+                    }
                     
                     setTimeout(() => {
                         candleChartInstance.render();
@@ -2290,6 +2321,10 @@
             
             // 🔧 FIXED: Destroy test chart if it exists
             if (window.testChartInstance) {
+                // Unregister test chart from responsive manager
+                if (window.taChartManager) {
+                    window.taChartManager.unregisterChart('taChart');
+                }
                 window.testChartInstance.destroy();
                 window.testChartInstance = null;
                 console.log('🧪 Test chart destroyed, starting real analysis...');
@@ -2461,6 +2496,141 @@
             return testChart;
         }
 
+        // Enhanced Responsive Chart Management for TA Module
+        class TAResponsiveChartManager {
+            constructor() {
+                this.charts = new Map();
+                this.resizeTimeout = null;
+                this.orientationTimeout = null;
+                this.isInitialized = false;
+            }
+            
+            registerChart(chartId, chartInstance) {
+                this.charts.set(chartId, chartInstance);
+                console.log(`📊 Registered chart: ${chartId}`);
+            }
+            
+            unregisterChart(chartId) {
+                if (this.charts.has(chartId)) {
+                    this.charts.delete(chartId);
+                    console.log(`🗑️ Unregistered chart: ${chartId}`);
+                }
+            }
+            
+            resizeAllCharts() {
+                console.log('🔄 Resizing all TA charts...');
+                let resizedCount = 0;
+                
+                this.charts.forEach((chart, chartId) => {
+                    try {
+                        if (chart && typeof chart.resize === 'function') {
+                            // Ensure container is visible before resizing
+                            const canvas = document.getElementById(chartId);
+                            const container = canvas?.closest('.ta-responsive-chart-container');
+                            
+                            if (container && this.isContainerVisible(container)) {
+                                chart.resize();
+                                chart.update('none'); // Update without animation for better performance
+                                resizedCount++;
+                                console.log(`✅ Resized chart: ${chartId}`);
+                            }
+                        }
+                    } catch (error) {
+                        console.error(`❌ Error resizing chart ${chartId}:`, error);
+                    }
+                });
+                
+                console.log(`📊 Resized ${resizedCount} charts successfully`);
+            }
+            
+            isContainerVisible(container) {
+                const rect = container.getBoundingClientRect();
+                return rect.width > 0 && rect.height > 0;
+            }
+            
+            handleResize() {
+                clearTimeout(this.resizeTimeout);
+                this.resizeTimeout = setTimeout(() => {
+                    this.resizeAllCharts();
+                    
+                    // Additional mobile optimizations
+                    if (window.innerWidth <= 768) {
+                        this.optimizeForMobile();
+                    }
+                }, 200);
+            }
+            
+            handleOrientationChange() {
+                clearTimeout(this.orientationTimeout);
+                this.orientationTimeout = setTimeout(() => {
+                    console.log('📱 Orientation changed, optimizing charts...');
+                    this.resizeAllCharts();
+                    
+                    // Force re-render after orientation change
+                    this.charts.forEach((chart, chartId) => {
+                        try {
+                            if (chart && typeof chart.render === 'function') {
+                                chart.render();
+                            }
+                        } catch (error) {
+                            console.error(`❌ Error re-rendering chart ${chartId} after orientation change:`, error);
+                        }
+                    });
+                }, 500);
+            }
+            
+            optimizeForMobile() {
+                console.log('📱 Applying mobile optimizations...');
+                
+                // Ensure chart containers have proper mobile classes
+                document.querySelectorAll('.ta-responsive-chart-container').forEach(container => {
+                    if (!container.classList.contains('mobile-optimized')) {
+                        container.classList.add('mobile-optimized');
+                        container.style.width = '100%';
+                        container.style.maxWidth = '100%';
+                        container.style.boxSizing = 'border-box';
+                    }
+                });
+                
+                // Ensure chart wrappers are properly sized
+                document.querySelectorAll('.ta-responsive-chart-wrapper').forEach(wrapper => {
+                    wrapper.style.width = '100%';
+                    wrapper.style.maxWidth = 'calc(100vw - 1rem)';
+                    wrapper.style.overflow = 'visible';
+                });
+            }
+            
+            initialize() {
+                if (this.isInitialized) return;
+                
+                console.log('🚀 Initializing TA Responsive Chart Manager...');
+                
+                // Add resize listener
+                window.addEventListener('resize', () => this.handleResize());
+                
+                // Add orientation change listener
+                window.addEventListener('orientationchange', () => this.handleOrientationChange());
+                
+                // Initial mobile optimization if needed
+                if (window.innerWidth <= 768) {
+                    setTimeout(() => this.optimizeForMobile(), 100);
+                }
+                
+                this.isInitialized = true;
+                console.log('✅ TA Responsive Chart Manager initialized');
+            }
+            
+            destroy() {
+                clearTimeout(this.resizeTimeout);
+                clearTimeout(this.orientationTimeout);
+                this.charts.clear();
+                this.isInitialized = false;
+            }
+        }
+        
+        // Create global instance
+        window.taChartManager = new TAResponsiveChartManager();
+        
         // Initialize theme and Bitcoin analysis
         window.onload = function() {
             // Load theme preference
@@ -2473,6 +2643,9 @@
             // Set up theme toggle event listener
             document.getElementById('themeToggle').addEventListener('click', handleThemeToggle);
             
+            // Initialize responsive chart manager
+            window.taChartManager.initialize();
+            
             // 🔧 FIXED: Show test chart to verify Chart.js is working
             setTimeout(() => {
                 const testChartInstance = testChart();
@@ -2480,11 +2653,24 @@
                 
                 // Store reference to destroy when real analysis runs
                 window.testChartInstance = testChartInstance;
+                
+                // Register test chart for responsive handling
+                if (testChartInstance) {
+                    window.taChartManager.registerChart('taChart', testChartInstance);
+                }
             }, 100);
             
             // You can uncomment the line below to auto-analyze Bitcoin on page load
             // analyzeTA();
         };
+        
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+            if (window.taChartManager) {
+                window.taChartManager.destroy();
+                console.log('🧹 TA Chart Manager cleaned up on page unload');
+            }
+        });
     </script>
 </body>
 </html> 
