@@ -96,7 +96,7 @@
 <body>
     <div class="container">
         <h1>📊 Mood Impact Chart Demo</h1>
-        <p>Combines 7-day price data with today's sentiment analysis from Reddit headlines:</p>
+        <p>Combines 7-day price data with today's sentiment analysis from cryptocurrency news headlines:</p>
         
         <div>
             <input type="text" id="coinId" placeholder="bitcoin" value="bitcoin">
@@ -156,13 +156,16 @@
                 }
                 
                 console.log('Fetching price data and news...');
-                // Fetch price data and news in parallel
+                // Fetch price data and news in parallel with individual error handling
                 const [priceData, newsData] = await Promise.all([
                     fetchPriceData(coinId),
-                    fetchNewsData(coinId)
+                    fetchNewsData(coinId).catch(err => {
+                        console.warn('📰 News fetch failed, using empty array:', err.message);
+                        return []; // Return empty array on news error to continue with price-only chart
+                    })
                 ]);
-                console.log('Price data received:', priceData.length, 'points');
-                console.log('News data received:', newsData.length, 'headlines');
+                console.log('📈 Price data received:', priceData.length, 'points');
+                console.log('📰 News data received:', newsData.length, 'headlines');
                 
                 // Analyze sentiment
                 console.log('Analyzing sentiment...');
@@ -213,33 +216,41 @@
         
         async function fetchNewsData(coinId) {
             try {
+                console.log(`📰 Fetching news for ${coinId}...`);
                 const response = await fetch(`${WORKER_URL}/news?coin=${coinId}`);
                 
                 if (!response.ok) {
-                    throw new Error(`Failed to fetch news for ${coinId}`);
+                    console.error(`News API HTTP error: ${response.status}`);
+                    throw new Error(`Failed to fetch news for ${coinId} (HTTP ${response.status})`);
                 }
                 
                 const data = await response.json();
+                console.log('📰 News API response:', data);
                 
                 if (data.error) {
-                    console.warn('News API error:', data.error);
-                    return [];
+                    console.error('News API error:', data.error);
+                    throw new Error(`News API error: ${data.error}`);
                 }
                 
                 if (!data.headlines || data.headlines.length === 0) {
+                    console.warn(`⚠️ No news headlines found for ${coinId}`);
                     return []; // Return empty array if no news found
                 }
                 
+                console.log(`✅ Successfully fetched ${data.headlines.length} headlines for ${coinId}`);
                 return data.headlines;
                 
             } catch (error) {
-                console.warn('News fetch failed:', error.message);
-                return []; // Return empty array on error
+                console.error('❌ News fetch failed:', error.message);
+                throw error; // Re-throw to show error in UI instead of silent failure
             }
         }
         
         async function analyzeSentimentData(headlines) {
+            console.log(`🧠 Starting sentiment analysis for ${headlines.length} headlines...`);
+            
             if (headlines.length === 0) {
+                console.warn('⚠️ No headlines to analyze, returning neutral sentiment');
                 return {
                     score: 0,
                     category: 'neutral',
@@ -249,6 +260,7 @@
             }
             
             try {
+                console.log('🔗 Calling sentiment analysis API...');
                 const response = await fetch(`${WORKER_URL}/sentiment`, {
                     method: 'POST',
                     headers: {
@@ -260,10 +272,11 @@
                 });
                 
                 if (!response.ok) {
-                    throw new Error(`Sentiment analysis failed: ${response.status}`);
+                    throw new Error(`Sentiment analysis failed: HTTP ${response.status}`);
                 }
                 
                 const data = await response.json();
+                console.log('🧠 Sentiment analysis response:', data);
                 
                 if (data.error) {
                     throw new Error(data.error);
@@ -278,20 +291,26 @@
                     emoji = '😐';
                 }
                 
-                return {
-                    score: data.score,
-                    category: data.category,
+                const result = {
+                    score: data.score || 0,
+                    category: data.category || 'neutral',
                     emoji: emoji,
-                    count: data.total
+                    count: data.total || data.analyzed || headlines.length,
+                    confidence: data.confidence,
+                    method: data.method
                 };
                 
+                console.log('✅ Sentiment analysis complete:', result);
+                return result;
+                
             } catch (error) {
-                console.error('Error analyzing sentiment:', error);
+                console.error('❌ Error analyzing sentiment:', error);
                 return {
                     score: 0,
                     category: 'neutral',
                     emoji: '😐',
-                    count: headlines.length
+                    count: headlines.length,
+                    error: error.message
                 };
             }
         }
@@ -304,10 +323,16 @@
                 throw new Error('Chart.js library is not available');
             }
             
-            // Create sentiment bar data for the last day
-            const lastDate = priceData[priceData.length - 1].x;
+            console.log('📊 Creating chart with:', {
+                pricePoints: priceData.length,
+                sentimentScore: sentimentData.score,
+                sentimentCategory: sentimentData.category,
+                headlinesCount: sentimentData.count
+            });
+            
+            // Create sentiment bar data - position it at the end of the week for today's sentiment
             const sentimentBarData = [{
-                x: lastDate,
+                x: priceData[priceData.length - 1].x, // Use last date from price data
                 y: sentimentData.score || 0
             }];
             
@@ -320,6 +345,13 @@
                 sentimentColor = 'rgba(220, 53, 69, 0.8)';
             } else {
                 sentimentColor = 'rgba(108, 117, 125, 0.8)';
+            }
+            
+            console.log(`📊 Chart color: ${sentimentColor} for ${category} sentiment`);
+            
+            // Add validation for empty data
+            if (!priceData || priceData.length === 0) {
+                throw new Error('No price data available for chart');
             }
             
             chartInstance = new Chart(ctx, {
@@ -446,11 +478,26 @@
             const count = sentimentData.count || 0;
             const score = sentimentData.score || 0;
             
+            console.log('📊 Updating sentiment summary:', { emoji, category, count, score });
+            
             badge.textContent = `${emoji} ${category.charAt(0).toUpperCase() + category.slice(1)}`;
             badge.className = `sentiment-badge sentiment-${category}`;
             
             headlineCount.textContent = count;
-            averageScore.textContent = score.toFixed(2);
+            let scoreText = score.toFixed(2);
+            
+            // Add additional context
+            if (sentimentData.method) {
+                scoreText += ` (${sentimentData.method === 'cohere-chat-api' ? 'AI' : 'Keyword'})`;
+            }
+            if (sentimentData.confidence) {
+                scoreText += ` • ${(sentimentData.confidence * 100).toFixed(0)}% confidence`;
+            }
+            if (sentimentData.error) {
+                scoreText += ` • Error: ${sentimentData.error}`;
+            }
+            
+            averageScore.textContent = scoreText;
         }
         
         function updateNewsPreview(headlines) {

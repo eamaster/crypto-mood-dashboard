@@ -107,7 +107,7 @@
 <body>
     <div class="container">
         <h1>🧠 Sentiment Analyzer Demo</h1>
-        <p>Enter headlines or text to analyze sentiment using Sentiment.js:</p>
+        <p>Enter headlines or text to analyze sentiment using AI-powered analysis:</p>
         
         <div class="sample-buttons">
             <button onclick="loadSample('bullish')">Load Bullish Sample</button>
@@ -187,6 +187,7 @@ Positive regulatory developments worldwide</textarea>
             }
             
             try {
+                console.log(`🧠 Analyzing ${headlines.length} headlines...`);
                 resultsDiv.innerHTML = '<div class="sentiment-card">⏳ Analyzing sentiment...</div>';
                 
                 // Call worker for sentiment analysis
@@ -201,10 +202,12 @@ Positive regulatory developments worldwide</textarea>
                 });
                 
                 if (!response.ok) {
+                    console.error(`Sentiment API HTTP error: ${response.status}`);
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
                 
                 const data = await response.json();
+                console.log('🧠 Sentiment analysis response:', data);
                 
                 if (data.error) {
                     throw new Error(data.error);
@@ -276,8 +279,9 @@ Positive regulatory developments worldwide</textarea>
                         🐂 Bullish: Score > +1 (Very Positive)<br>
                         😐 Neutral: Score -1 to +1 (Balanced)<br>
                         🐻 Bearish: Score < -1 (Very Negative)<br><br>
-                        <strong>Note:</strong> Sentiment analysis powered by Cohere AI v2. 
-                        Scores are based on advanced NLP classification with confidence levels.
+                        <strong>Analysis Method:</strong> ${data.method === 'cohere-chat-api' ? 'Cohere AI v2 (Advanced NLP)' : data.method === 'keyword-analysis' ? 'Keyword-based Analysis' : 'Automatic Selection'}<br>
+                        <strong>Note:</strong> ${data.method === 'cohere-chat-api' ? 'Advanced AI classification with confidence levels' : 'Keyword matching with predetermined sentiment words'}. 
+                        Scores range from -5 (very bearish) to +5 (very bullish).
                     </div>
                 `;
                 
