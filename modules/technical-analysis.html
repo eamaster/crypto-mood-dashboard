@@ -82,6 +82,9 @@
             grid-template-columns: 2fr 1fr;
             gap: 2rem;
             margin-bottom: 2rem;
+            /* 🔧 FLEXIBLE: Grid adapts to content height */
+            align-items: start;
+            min-height: 0;
         }
 
         .chart-container {
@@ -90,47 +93,75 @@
             padding: 2rem;
             box-shadow: var(--shadow);
             position: relative;
-            min-height: 550px;
             width: 100%;
+            /* 🔧 FLEXIBLE: Container adapts to content size */
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+            justify-content: flex-start;
+            min-height: fit-content;
+            height: auto;
+            max-height: none;
+            /* Allow container to grow/shrink with content */
+            flex: 1;
+            overflow: visible;
         }
 
         .chart-container h3 {
             color: var(--text-primary);
             margin-bottom: 1rem;
-            font-size: 1.2rem;
-            font-weight: 600;
+            font-size: 1.4rem;
+            font-weight: 700;
+            font-family: system-ui, -apple-system, sans-serif;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+            padding: 0.75rem 1.25rem;
+            border-bottom: 3px solid var(--accent-color);
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            margin: -0.5rem -0.5rem 1.5rem -0.5rem;
+            letter-spacing: 0.5px;
         }
 
         .chart-wrapper {
             width: 100%;
+            /* 🔧 FIXED: Stable height for reliable chart display */
             height: 450px;
+            min-height: 350px;
+            max-height: 650px;
             position: relative;
             margin: 1rem 0;
-            background: var(--bg-secondary, #f8f9fa);
-            border: 1px solid var(--border-color, #e2e8f0);
-            border-radius: 8px;
-            padding: 10px;
+            background: var(--bg-secondary);
+            border: 2px solid var(--border-color);
+            border-radius: 12px;
+            padding: 15px;
             box-sizing: border-box;
+            display: block;
+            overflow: hidden;
         }
 
         #taChart {
+            /* 🔧 FIXED: Simplified chart canvas styling for reliability */
             width: 100% !important;
-            height: 430px !important;
+            height: 420px !important;
             max-width: 100% !important;
-            max-height: 430px !important;
+            min-height: 300px !important;
+            max-height: 600px !important;
             display: none;
             background: transparent;
             position: relative;
-            z-index: 1;
+            z-index: 10;
+            /* Ensure proper rendering */
+            opacity: 1;
+            visibility: visible;
         }
         
         #taChart.visible {
             display: block !important;
         }
         
-        /* Ensure chart container allows chart to render */
         .chart-container canvas {
             visibility: visible !important;
+            border-radius: 8px;
         }
 
         .indicators-panel {
@@ -208,20 +239,28 @@
             line-height: 1.4;
         }
 
+        /* 🛠️ FIX: Enhanced loading and error states with better theme consistency */
         .loading {
             text-align: center;
-            color: var(--text-secondary);
+            color: var(--text-primary);
             font-style: italic;
-            padding: 2.5rem;
+            padding: 2rem;
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            border: 2px solid var(--border-color);
+            margin: 1rem 0;
+            box-shadow: var(--shadow);
         }
 
         .error {
             background: var(--danger-color);
             color: white;
-            padding: 1rem;
+            padding: 1.25rem;
             border-radius: 12px;
             margin: 1rem 0;
             font-weight: 500;
+            box-shadow: var(--shadow);
+            border: 2px solid rgba(255, 255, 255, 0.2);
         }
 
         .ta-summary {
@@ -250,17 +289,18 @@
             opacity: 0.9;
         }
 
-        /* Mobile responsiveness */
+        /* 🛠️ FIX: Enhanced mobile responsiveness with improved dark theme support */
         @media (max-width: 768px) {
             .grid {
                 grid-template-columns: 1fr;
-                gap: 1rem;
+                gap: 1.5rem;
             }
             
             .controls {
                 flex-direction: column;
                 align-items: stretch;
                 gap: 1rem;
+                padding: 1.25rem;
             }
             
             .button-group {
@@ -276,37 +316,66 @@
             }
             
             .chart-wrapper {
+                /* 🔧 FIXED: Mobile-responsive height */
                 height: 350px;
+                min-height: 300px;
+                max-height: 400px;
+                padding: 12px;
+                margin: 0.75rem 0;
+                border-width: 1px;
             }
             
             #taChart {
+                /* 🔧 FIXED: Mobile chart with stable height */
                 height: 320px !important;
-                max-height: 320px !important;
+                min-height: 280px !important;
+                max-height: 370px !important;
             }
             
             .chart-container, .indicators-panel {
-                padding: 1rem;
+                padding: 1.25rem;
             }
             
             .chart-container {
-                min-height: 400px;
+                /* 🔧 FLEXIBLE: Mobile container adapts to content */
+                min-height: fit-content;
+                height: auto;
+            }
+            
+            .chart-container h3 {
+                font-size: 1.25rem;
+                font-weight: 700;
+                margin: -0.75rem -0.75rem 1.25rem -0.75rem;
+                padding: 0.75rem 1rem;
+                letter-spacing: 0.3px;
+            }
+            
+            .chart-info-box {
+                padding: 1rem;
+                font-size: 0.85em;
+                margin: 0.75rem 0;
+                border-width: 1px;
+                border-left-width: 4px;
             }
         }
 
-        /* Educational Notes with theme support */
+        /* 🛠️ FIX: Enhanced Educational Notes with better theme support */
         .educational-notes {
             margin-top: 1.5rem;
-            padding: 1rem;
+            padding: 1.25rem;
             background: var(--bg-secondary);
-            border: 1px solid var(--border-color);
+            border: 2px solid var(--border-color);
             border-radius: 12px;
             font-size: 0.9em;
-            border-left: 4px solid var(--accent-color);
+            border-left: 6px solid var(--accent-color);
             color: var(--text-primary);
+            box-shadow: var(--shadow);
+            line-height: 1.5;
         }
 
         .educational-notes strong {
-            color: var(--text-primary);
+            color: var(--accent-color);
+            font-weight: 600;
         }
 
         /* AI Analysis Section Styles */
@@ -447,15 +516,49 @@
             color: var(--text-primary);
         }
         
-        /* Chart theme improvements */
+        /* 🛠️ FIX: Enhanced chart theme improvements with better contrast */
         .chart-info-box {
             background: var(--bg-secondary);
-            padding: 1rem;
-            border-radius: 8px;
+            padding: 1.5rem;
+            border-radius: 12px;
             margin: 1rem 0;
-            font-size: 0.85em;
+            font-size: 0.95em;
+            font-weight: 500;
+            font-family: system-ui, -apple-system, sans-serif;
             color: var(--text-primary);
-            border-left: 4px solid var(--accent-color);
+            border: 2px solid var(--border-color);
+            border-left: 6px solid var(--accent-color);
+            box-shadow: var(--shadow);
+            line-height: 1.6;
+        }
+        
+        .chart-info-box strong {
+            color: var(--accent-color);
+            font-weight: 700;
+            font-size: 1.05em;
+        }
+
+        /* 🔧 FLEXIBLE: Additional utilities for flexible containers */
+        .flexible-container {
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            flex: 1;
+        }
+        
+        .auto-resize {
+            resize: both;
+            overflow: auto;
+            min-width: 300px;
+            min-height: 200px;
+        }
+        
+        /* Container query support for modern browsers */
+        @container (max-width: 500px) {
+            .chart-wrapper {
+                padding: 8px;
+                min-height: 200px;
+            }
         }
 
         /* Enhanced mobile responsiveness */
@@ -578,7 +681,7 @@
                     <strong>ℹ️ Chart Information:</strong> Technical indicators (SMA, Bollinger Bands) start after collecting sufficient data points for accurate calculations. This delayed start is mathematically correct and ensures reliable signals.
                     <br><strong>🤖 AI Enhancement:</strong> Advanced AI analysis will automatically classify market mood and provide pattern explanations below the chart.
                 </div>
-                <div id="loading" class="loading">Click "Analyze" to load technical analysis...</div>
+                <div id="loading" class="loading" style="display: none;">Fetching data and calculating indicators...</div>
                 <div class="chart-wrapper">
                     <canvas id="taChart"></canvas>
                 </div>
@@ -674,29 +777,24 @@
         function forceChartDisplay() {
             const canvas = document.getElementById('taChart');
             if (canvas && chartInstance) {
-                console.log('Forcing chart display as backup...');
-                
-                // Remove any problematic styles
-                canvas.removeAttribute('style');
+                console.log('🔧 Forcing chart display as backup...');
                 
                 // Apply essential styles directly
-                canvas.style.cssText = `
-                    display: block !important;
-                    visibility: visible !important;
-                    opacity: 1 !important;
-                    width: 100% !important;
-                    height: 430px !important;
-                    position: relative !important;
-                    z-index: 1 !important;
-                    background: transparent !important;
-                `;
+                canvas.style.display = 'block';
+                canvas.style.visibility = 'visible';
+                canvas.style.opacity = '1';
+                canvas.style.width = '100%';
+                canvas.style.height = '420px';
+                canvas.style.position = 'relative';
+                canvas.style.zIndex = '10';
+                canvas.classList.add('visible');
                 
                 // Force Chart.js to re-render
+                chartInstance.update();
                 chartInstance.resize();
                 chartInstance.render();
-                chartInstance.update('active');
                 
-                console.log('Backup chart display attempt completed');
+                console.log('✅ Backup chart display completed');
             }
         }
 
@@ -895,13 +993,20 @@
                 chartInstance = null;
             }
 
-            // Get theme-aware colors with fallbacks
+            // 🛠️ FIX: Enhanced theme-aware colors with better contrast
             const isDark = document.body.classList.contains('dark-theme');
             const priceColor = getComputedStyle(document.documentElement).getPropertyValue('--accent-color').trim() || '#3B82F6';
             const successColor = getComputedStyle(document.documentElement).getPropertyValue('--success-color').trim() || '#10B981';
             const dangerColor = getComputedStyle(document.documentElement).getPropertyValue('--danger-color').trim() || '#EF4444';
-            const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || (isDark ? '#ffffff' : '#000000');
-            const gridColor = isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
+            const warningColor = getComputedStyle(document.documentElement).getPropertyValue('--warning-color').trim() || '#F59E0B';
+            
+            // 🛠️ FIX: Better contrast colors for both light and dark themes
+            const textColor = isDark ? '#ffffff' : '#1a202c';
+            const gridColor = isDark ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.1)';
+            const backgroundColor = isDark ? 'rgba(30, 41, 59, 0.8)' : 'rgba(255, 255, 255, 0.95)';
+            const borderColor = isDark ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.1)';
+            
+            console.log('🎨 Theme colors applied:', { isDark, textColor, gridColor, backgroundColor });
 
             // Prepare datasets for chart
             const datasets = [
@@ -961,7 +1066,7 @@
 
             console.log('Chart datasets prepared:', datasets.map(d => ({ label: d.label, dataPoints: d.data.length })));
 
-            // ✅ CHART FIX: Create new chart with theme-aware colors
+            // 🛠️ FIX: Enhanced Chart.js configuration with improved theme consistency
             chartInstance = new Chart(ctx, {
                 type: 'line',
                 data: { datasets },
@@ -981,21 +1086,30 @@
                                 unit: 'day'
                             },
                             ticks: {
-                                maxTicksLimit: window.innerWidth < 768 ? 4 : 7, // Fewer ticks on mobile
+                                maxTicksLimit: window.innerWidth < 768 ? 4 : 7,
                                 font: {
-                                    size: window.innerWidth < 768 ? 10 : 12
+                                    size: window.innerWidth < 768 ? 12 : 14,
+                                    weight: '600',
+                                    family: 'system-ui, -apple-system, sans-serif'
                                 },
                                 color: textColor
                             },
                             grid: {
-                                color: gridColor
+                                color: gridColor,
+                                lineWidth: 1
+                            },
+                            border: {
+                                color: borderColor,
+                                width: 2
                             },
                             title: {
                                 display: true,
                                 text: 'Date',
                                 color: textColor,
                                 font: {
-                                    size: window.innerWidth < 768 ? 12 : 14
+                                    size: window.innerWidth < 768 ? 14 : 16,
+                                    weight: '700',
+                                    family: 'system-ui, -apple-system, sans-serif'
                                 }
                             }
                         },
@@ -1006,19 +1120,28 @@
                                     return '$' + value.toLocaleString();
                                 },
                                 font: {
-                                    size: window.innerWidth < 768 ? 10 : 12
+                                    size: window.innerWidth < 768 ? 12 : 14,
+                                    weight: '600',
+                                    family: 'system-ui, -apple-system, sans-serif'
                                 },
                                 color: textColor
                             },
                             grid: {
-                                color: gridColor
+                                color: gridColor,
+                                lineWidth: 1
+                            },
+                            border: {
+                                color: borderColor,
+                                width: 2
                             },
                             title: {
                                 display: true,
                                 text: 'Price (USD)',
                                 color: textColor,
                                 font: {
-                                    size: window.innerWidth < 768 ? 12 : 14
+                                    size: window.innerWidth < 768 ? 14 : 16,
+                                    weight: '700',
+                                    family: 'system-ui, -apple-system, sans-serif'
                                 }
                             }
                         }
@@ -1026,41 +1149,65 @@
                     plugins: {
                         title: {
                             display: true,
-                            text: 'Technical Analysis Chart',
+                            text: '📈 Technical Analysis Chart',
                             font: { 
-                                size: window.innerWidth < 768 ? 14 : 16,
-                                weight: 'bold'
+                                size: window.innerWidth < 768 ? 20 : 24,
+                                weight: 'bold',
+                                family: 'system-ui, -apple-system, sans-serif'
                             },
-                            color: textColor
+                            color: textColor,
+                            padding: {
+                                top: 15,
+                                bottom: 20
+                            }
                         },
                         legend: {
                             display: true,
                             position: window.innerWidth < 768 ? 'bottom' : 'top',
                             labels: {
                                 font: {
-                                    size: window.innerWidth < 768 ? 10 : 12
+                                    size: window.innerWidth < 768 ? 13 : 16,
+                                    weight: '600',
+                                    family: 'system-ui, -apple-system, sans-serif'
                                 },
-                                padding: window.innerWidth < 768 ? 10 : 20,
+                                padding: window.innerWidth < 768 ? 15 : 25,
                                 usePointStyle: true,
-                                boxWidth: window.innerWidth < 768 ? 8 : 12,
+                                boxWidth: window.innerWidth < 768 ? 12 : 16,
                                 color: textColor
                             }
                         },
                         subtitle: {
-                            display: window.innerWidth >= 768, // Hide subtitle on mobile to save space
+                            display: window.innerWidth >= 768,
                             text: '📝 Note: Technical indicators start after sufficient data points are collected for accurate calculation',
-                            font: { size: 12 },
+                            font: { 
+                                size: 14,
+                                style: 'italic',
+                                weight: '500',
+                                family: 'system-ui, -apple-system, sans-serif'
+                            },
                             color: textColor,
-                            padding: { bottom: 20 }
+                            padding: { 
+                                top: 5,
+                                bottom: 25 
+                            }
                         },
                         tooltip: {
-                            backgroundColor: isDark ? 'rgba(40, 40, 40, 0.95)' : 'rgba(0,0,0,0.8)',
-                            titleColor: '#ffffff',
-                            bodyColor: '#ffffff',
-                            borderColor: textColor,
-                            borderWidth: 1,
-                            titleFont: { size: window.innerWidth < 768 ? 12 : 14 },
-                            bodyFont: { size: window.innerWidth < 768 ? 10 : 12 },
+                            backgroundColor: backgroundColor,
+                            titleColor: textColor,
+                            bodyColor: textColor,
+                            borderColor: borderColor,
+                            borderWidth: 2,
+                            cornerRadius: 8,
+                            titleFont: { 
+                                size: window.innerWidth < 768 ? 14 : 16,
+                                weight: '700',
+                                family: 'system-ui, -apple-system, sans-serif'
+                            },
+                            bodyFont: { 
+                                size: window.innerWidth < 768 ? 13 : 15,
+                                weight: '600',
+                                family: 'system-ui, -apple-system, sans-serif'
+                            },
                             callbacks: {
                                 label: function(context) {
                                     let label = context.dataset.label || '';
@@ -1080,61 +1227,57 @@
                         duration: window.innerWidth < 768 ? 200 : 400,
                         easing: 'easeInOutQuart'
                     },
-                    // ✅ CHART FIX: Ensure chart stays within bounds
+                    // 🛠️ FIX: Better layout padding for improved containment
                     layout: {
                         padding: {
-                            top: window.innerWidth < 768 ? 5 : 10,
-                            bottom: window.innerWidth < 768 ? 5 : 10,
-                            left: window.innerWidth < 768 ? 5 : 10,
-                            right: window.innerWidth < 768 ? 5 : 10
+                            top: window.innerWidth < 768 ? 8 : 15,
+                            bottom: window.innerWidth < 768 ? 8 : 15,
+                            left: window.innerWidth < 768 ? 8 : 15,
+                            right: window.innerWidth < 768 ? 8 : 15
                         }
                     },
                     // Mobile-specific optimizations
                     elements: {
                         point: {
                             radius: window.innerWidth < 768 ? 2 : 3,
-                            hoverRadius: window.innerWidth < 768 ? 4 : 6
+                            hoverRadius: window.innerWidth < 768 ? 5 : 7,
+                            borderWidth: window.innerWidth < 768 ? 1 : 2
                         },
                         line: {
-                            tension: 0.1
+                            tension: 0.1,
+                            borderWidth: window.innerWidth < 768 ? 2 : 3
                         }
                     }
                 }
             });
 
-            // ✅ CHART FIX: Show chart only after it's fully rendered
-            requestAnimationFrame(() => {
-                setTimeout(() => {
-                    const canvas = document.getElementById('taChart');
+            // 🔧 FIXED: Reliable chart display with proper timing
+            setTimeout(() => {
+                const canvas = document.getElementById('taChart');
+                
+                // Simple, reliable canvas visibility
+                canvas.style.display = 'block';
+                canvas.style.visibility = 'visible';
+                canvas.style.opacity = '1';
+                canvas.classList.add('visible');
+                
+                // Ensure chart renders properly
+                if (chartInstance) {
+                    chartInstance.update();
+                    chartInstance.resize();
                     
-                    // Force canvas visibility with multiple approaches
-                    canvas.style.display = 'block';
-                    canvas.style.visibility = 'visible';
-                    canvas.style.opacity = '1';
-                    canvas.style.width = '100%';
-                    canvas.style.height = '430px';
-                    canvas.classList.add('visible');
-                    
-                    // Force chart to update and render
-                    if (chartInstance) {
-                        chartInstance.update('active');
-                        chartInstance.resize();
-                        
-                        // Double-check chart rendering
-                        setTimeout(() => {
-                            chartInstance.render();
-                        }, 100);
-                    }
-                    
-                    console.log('Chart forced visible with dimensions:', {
-                        width: canvas.clientWidth,
-                        height: canvas.clientHeight,
-                        display: canvas.style.display,
-                        visibility: canvas.style.visibility,
-                        opacity: canvas.style.opacity
-                    });
-                }, 200);
-            });
+                    // Final render after a short delay
+                    setTimeout(() => {
+                        chartInstance.render();
+                        console.log('✅ Chart successfully rendered:', {
+                            canvasWidth: canvas.clientWidth,
+                            canvasHeight: canvas.clientHeight,
+                            hasChart: !!chartInstance,
+                            datasetsCount: chartInstance.data.datasets.length
+                        });
+                    }, 50);
+                }
+            }, 100);
         }
 
         function displayIndicators(rsi, sma20, signals) {
@@ -1482,7 +1625,7 @@
                 animation: spin 1s linear infinite;
             }
             
-            /* Mobile-specific AI section improvements */
+            /* 🛠️ FIX: Mobile-specific AI section improvements with enhanced theme support */
             @media (max-width: 768px) {
                 #aiAnalysisSection > div > div {
                     grid-template-columns: 1fr !important;
@@ -1504,10 +1647,21 @@
                     margin-bottom: 10px;
                 }
                 
-                /* Improved loading state */
+                /* Improved loading state with better contrast */
                 .loading {
                     padding: 20px;
                     font-size: 0.9em;
+                    color: var(--text-primary);
+                    background: var(--bg-secondary);
+                    border-radius: 8px;
+                    border: 1px solid var(--border-color);
+                }
+                
+                /* Enhanced error state for mobile */
+                .error {
+                    font-size: 0.85em;
+                    padding: 1rem;
+                    border-radius: 8px;
                 }
             }
             
@@ -1533,6 +1687,13 @@
         async function analyzeTA() {
             const coinId = document.getElementById('coinSelect').value;
             const timeframe = parseInt(document.getElementById('timeframe').value);
+            
+            // 🔧 FIXED: Destroy test chart if it exists
+            if (window.testChartInstance) {
+                window.testChartInstance.destroy();
+                window.testChartInstance = null;
+                console.log('🧪 Test chart destroyed, starting real analysis...');
+            }
             
             // ✅ SCROLL FIX: Prevent any automatic scrolling during analysis
             const currentScrollPosition = window.pageYOffset;
@@ -1573,30 +1734,14 @@
                 displayIndicators(rsi, sma20, signals);
                 displaySummary(overallSignal, signals.length, coinId.toUpperCase());
                 
-                // Force chart visibility after a short delay - final safety check
+                // Final backup check to ensure chart is visible
                 setTimeout(() => {
                     const canvas = document.getElementById('taChart');
-                    if (canvas && chartInstance) {
-                        // Multiple visibility approaches for maximum compatibility
-                        canvas.style.display = 'block';
-                        canvas.style.visibility = 'visible';
-                        canvas.style.opacity = '1';
-                        canvas.style.position = 'relative';
-                        canvas.style.zIndex = '1';
-                        canvas.classList.add('visible');
-                        
-                        // Force chart to re-render completely
-                        chartInstance.resize();
-                        chartInstance.render();
-                        
-                        console.log('Chart forced to display - final safety check completed');
-                        
-                        // Last resort: log if chart still not visible
-                        if (canvas.clientWidth === 0 || canvas.clientHeight === 0) {
-                            console.warn('Chart canvas has zero dimensions - check CSS!');
-                        }
+                    if (canvas && chartInstance && (canvas.clientWidth === 0 || canvas.clientHeight === 0 || canvas.style.display === 'none')) {
+                        console.log('🔧 Chart not visible, attempting backup display...');
+                        forceChartDisplay();
                     }
-                }, 700);
+                }, 500);
                 
                 // 🤖 PERFORM AI ANALYSIS
                 console.log('🤖 Starting AI integration...');
@@ -1605,14 +1750,8 @@
                 document.getElementById('loading').style.display = 'none';
                 console.log('Analysis complete!');
                 
-                // Final backup attempt to ensure chart is visible
-                setTimeout(() => {
-                    const canvas = document.getElementById('taChart');
-                    if (canvas && (canvas.clientWidth === 0 || canvas.clientHeight === 0 || canvas.style.display === 'none')) {
-                        console.log('Chart not visible, attempting backup display method...');
-                        forceChartDisplay();
-                    }
-                }, 1000);
+                // Chart analysis complete
+                console.log('✅ Technical analysis complete with chart display!');
                 
                 // ✅ SCROLL FIX: Restore scroll position to prevent unwanted scrolling
                 window.scrollTo(0, currentScrollPosition);
@@ -1639,6 +1778,45 @@
             localStorage.setItem('cryptoDashboardTheme', isDark ? 'dark' : 'light');
         }
 
+        // 🔧 FIXED: Test chart functionality
+        function testChart() {
+            const canvas = document.getElementById('taChart');
+            const ctx = canvas.getContext('2d');
+            
+            // Simple test chart to verify Chart.js is working
+            const testChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: ['Day 1', 'Day 2', 'Day 3', 'Day 4', 'Day 5'],
+                    datasets: [{
+                        label: 'Test Data',
+                        data: [100, 150, 120, 180, 160],
+                        borderColor: '#3B82F6',
+                        backgroundColor: '#3B82F620',
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: '📊 Chart Test - Click Analyze to Load Real Data',
+                            font: { size: 18, weight: 'bold' }
+                        }
+                    }
+                }
+            });
+            
+            // Show test chart
+            canvas.style.display = 'block';
+            canvas.style.visibility = 'visible';
+            canvas.classList.add('visible');
+            
+            return testChart;
+        }
+
         // Initialize theme and Bitcoin analysis
         window.onload = function() {
             // Load theme preference
@@ -1650,6 +1828,15 @@
             
             // Set up theme toggle event listener
             document.getElementById('themeToggle').addEventListener('click', handleThemeToggle);
+            
+            // 🔧 FIXED: Show test chart to verify Chart.js is working
+            setTimeout(() => {
+                const testChartInstance = testChart();
+                console.log('🧪 Test chart displayed - Chart.js is working!');
+                
+                // Store reference to destroy when real analysis runs
+                window.testChartInstance = testChartInstance;
+            }, 100);
             
             // You can uncomment the line below to auto-analyze Bitcoin on page load
             // analyzeTA();
