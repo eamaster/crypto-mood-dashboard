@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="../style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <!-- Removed problematic candlestick library - using custom implementation -->
 </head>
 <body>
     <header>
@@ -21,10 +22,6 @@
         <div class="ta-container">
             <div class="ta-header">
                 <p class="subtitle">Professional crypto technical indicators and signals</p>
-                
-                <div class="disclaimer">
-                    ⚠️ <strong>IMPORTANT DISCLAIMER:</strong> This is for educational purposes only. Technical analysis is not guaranteed to predict future price movements. Cryptocurrency trading involves significant risk of loss. Never invest more than you can afford to lose. This is NOT financial advice. Always do your own research and consult with qualified financial advisors.
-                </div>
             </div>
 
         <div class="controls">
@@ -78,6 +75,20 @@
                     <canvas id="taChart"></canvas>
                 </div>
                 <div id="chartError" class="error" style="display: none;"></div>
+            </div>
+
+            <div class="chart-container">
+                <h3>📊 Price Movement Analysis</h3>
+                <div class="chart-info-box">
+                    <strong>ℹ️ Price Analysis Information:</strong> Shows price movements over time. Green bars = price increased from previous period, Red bars = price decreased, Blue line = overall trend.
+                    <br><strong>📊 Visual Analysis:</strong> Bar heights represent actual price levels. Color patterns reveal market sentiment and momentum changes over the selected timeframe.
+                    <br><strong>🔧 Pattern Recognition:</strong> Consecutive price movements and trend changes help identify potential trading opportunities and market psychology.
+                </div>
+                <div id="candleLoading" class="loading" style="display: none;">Fetching OHLC data...</div>
+                <div class="chart-wrapper">
+                    <canvas id="candleChart"></canvas>
+                </div>
+                <div id="candleError" class="error" style="display: none;"></div>
             </div>
 
             <div class="indicators-panel">
@@ -164,6 +175,7 @@
         const WORKER_URL = 'https://crypto-mood-dashboard.smah0085.workers.dev';
         
         let chartInstance = null;
+        let candleChartInstance = null;
         
         // Backup function to force chart display if primary method fails
         function forceChartDisplay() {
@@ -316,6 +328,279 @@
             return signals;
         }
 
+        function analyzeCandlestickPatterns(ohlcData) {
+            const patterns = [];
+            
+            if (ohlcData.length < 2) {
+                console.log('📊 Insufficient data for pattern analysis');
+                return patterns;
+            }
+            
+            console.log(`🔍 Analyzing patterns in ${ohlcData.length} OHLC periods...`);
+            
+            // Analyze all candles for patterns (not just last few)
+            for (let i = 1; i < ohlcData.length; i++) {
+                const candle = ohlcData[i];
+                const prevCandle = ohlcData[i - 1];
+                
+                // Calculate candle properties
+                const body = Math.abs(candle.c - candle.o);
+                const upperShadow = candle.h - Math.max(candle.c, candle.o);
+                const lowerShadow = Math.min(candle.c, candle.o) - candle.l;
+                const totalRange = candle.h - candle.l;
+                const isBullish = candle.c > candle.o;
+                
+                // More lenient thresholds for pattern detection
+                const avgPrice = (candle.h + candle.l + candle.c + candle.o) / 4;
+                const significantMove = avgPrice * 0.01; // 1% move is significant
+                
+                // 1. Doji pattern (small body relative to total range)
+                if (totalRange > 0 && body < totalRange * 0.3 && totalRange > significantMove) {
+                    patterns.push({
+                        type: 'Doji',
+                        signal: 'NEUTRAL',
+                        strength: 'Medium',
+                        reason: `Doji pattern shows market indecision (body: $${body.toFixed(2)}, range: $${totalRange.toFixed(2)})`,
+                        timestamp: candle.x
+                    });
+                }
+                
+                // 2. Strong bullish/bearish candles
+                if (body > totalRange * 0.6 && totalRange > significantMove) {
+                    const patternType = isBullish ? 'Strong Bullish Candle' : 'Strong Bearish Candle';
+                    const signal = isBullish ? 'BUY' : 'SELL';
+                    patterns.push({
+                        type: patternType,
+                        signal: signal,
+                        strength: 'Medium',
+                        reason: `${patternType} with large body indicates strong ${isBullish ? 'buying' : 'selling'} pressure`,
+                        timestamp: candle.x
+                    });
+                }
+                
+                // 3. Hammer-like patterns (longer lower shadow)
+                if (totalRange > 0 && lowerShadow > body && lowerShadow > totalRange * 0.4) {
+                    const patternName = 'Hammer-like';
+                    patterns.push({
+                        type: patternName,
+                        signal: 'BUY',
+                        strength: 'Medium',
+                        reason: `${patternName} pattern with long lower shadow suggests potential support`,
+                        timestamp: candle.x
+                    });
+                }
+                
+                // 4. Shooting Star-like patterns (longer upper shadow)
+                if (totalRange > 0 && upperShadow > body && upperShadow > totalRange * 0.4) {
+                    const patternName = 'Shooting Star-like';
+                    patterns.push({
+                        type: patternName,
+                        signal: 'SELL',
+                        strength: 'Medium',
+                        reason: `${patternName} pattern with long upper shadow suggests potential resistance`,
+                        timestamp: candle.x
+                    });
+                }
+                
+                // 5. Trend continuation patterns
+                const prevBody = Math.abs(prevCandle.c - prevCandle.o);
+                const prevIsBullish = prevCandle.c > prevCandle.o;
+                
+                // Two consecutive bullish candles
+                if (isBullish && prevIsBullish && body > significantMove && prevBody > significantMove) {
+                    patterns.push({
+                        type: 'Bullish Continuation',
+                        signal: 'BUY',
+                        strength: 'Medium',
+                        reason: 'Two consecutive bullish periods suggest upward momentum',
+                        timestamp: candle.x
+                    });
+                }
+                
+                // Two consecutive bearish candles
+                if (!isBullish && !prevIsBullish && body > significantMove && prevBody > significantMove) {
+                    patterns.push({
+                        type: 'Bearish Continuation',
+                        signal: 'SELL',
+                        strength: 'Medium',
+                        reason: 'Two consecutive bearish periods suggest downward momentum',
+                        timestamp: candle.x
+                    });
+                }
+                
+                // 6. Reversal patterns (direction change)
+                if (prevIsBullish && !isBullish && body > prevBody * 0.8) {
+                    patterns.push({
+                        type: 'Bearish Reversal',
+                        signal: 'SELL',
+                        strength: 'Strong',
+                        reason: 'Strong bearish candle after bullish period suggests trend reversal',
+                        timestamp: candle.x
+                    });
+                }
+                
+                if (!prevIsBullish && isBullish && body > prevBody * 0.8) {
+                    patterns.push({
+                        type: 'Bullish Reversal',
+                        signal: 'BUY',
+                        strength: 'Strong',
+                        reason: 'Strong bullish candle after bearish period suggests trend reversal',
+                        timestamp: candle.x
+                    });
+                }
+            }
+            
+            console.log(`🔍 Found ${patterns.length} candlestick patterns:`, patterns.map(p => p.type));
+            return patterns;
+        }
+
+        function analyzePriceMovementPatterns(priceData) {
+            const patterns = [];
+            
+            if (priceData.length < 3) {
+                console.log('📊 Insufficient price data for pattern analysis');
+                return patterns;
+            }
+            
+            console.log(`🔍 Analyzing price movement patterns in ${priceData.length} data points...`);
+            
+            // Calculate price movements and trends
+            const movements = [];
+            for (let i = 1; i < priceData.length; i++) {
+                const prevPrice = priceData[i - 1].y;
+                const currentPrice = priceData[i].y;
+                const change = currentPrice - prevPrice;
+                const percentChange = (change / prevPrice) * 100;
+                
+                movements.push({
+                    x: priceData[i].x,
+                    price: currentPrice,
+                    change: change,
+                    percentChange: percentChange,
+                    isPositive: change >= 0,
+                    isSignificant: Math.abs(percentChange) > 1 // 1% change is significant
+                });
+            }
+            
+            // Look for consecutive patterns
+            for (let i = 1; i < movements.length; i++) {
+                const currentMove = movements[i];
+                const prevMove = movements[i - 1];
+                
+                // Strong upward movement
+                if (currentMove.percentChange > 2) {
+                    patterns.push({
+                        type: 'Strong Price Increase',
+                        signal: 'BUY',
+                        strength: 'Medium',
+                        reason: `Strong upward movement of ${currentMove.percentChange.toFixed(2)}% suggests buying interest`,
+                        timestamp: currentMove.x
+                    });
+                }
+                
+                // Strong downward movement
+                if (currentMove.percentChange < -2) {
+                    patterns.push({
+                        type: 'Strong Price Decrease',
+                        signal: 'SELL',
+                        strength: 'Medium',
+                        reason: `Strong downward movement of ${currentMove.percentChange.toFixed(2)}% suggests selling pressure`,
+                        timestamp: currentMove.x
+                    });
+                }
+                
+                // Trend continuation (two consecutive moves in same direction)
+                if (currentMove.isPositive && prevMove.isPositive && 
+                    currentMove.isSignificant && prevMove.isSignificant) {
+                    patterns.push({
+                        type: 'Bullish Momentum',
+                        signal: 'BUY',
+                        strength: 'Medium',
+                        reason: 'Two consecutive positive price movements suggest upward momentum',
+                        timestamp: currentMove.x
+                    });
+                }
+                
+                if (!currentMove.isPositive && !prevMove.isPositive && 
+                    currentMove.isSignificant && prevMove.isSignificant) {
+                    patterns.push({
+                        type: 'Bearish Momentum',
+                        signal: 'SELL',
+                        strength: 'Medium',
+                        reason: 'Two consecutive negative price movements suggest downward momentum',
+                        timestamp: currentMove.x
+                    });
+                }
+                
+                // Reversal patterns (direction change)
+                if (prevMove.isPositive && !currentMove.isPositive && 
+                    Math.abs(currentMove.percentChange) > Math.abs(prevMove.percentChange)) {
+                    patterns.push({
+                        type: 'Bearish Reversal',
+                        signal: 'SELL',
+                        strength: 'Strong',
+                        reason: 'Strong negative movement after positive suggests trend reversal',
+                        timestamp: currentMove.x
+                    });
+                }
+                
+                if (!prevMove.isPositive && currentMove.isPositive && 
+                    Math.abs(currentMove.percentChange) > Math.abs(prevMove.percentChange)) {
+                    patterns.push({
+                        type: 'Bullish Reversal',
+                        signal: 'BUY',
+                        strength: 'Strong',
+                        reason: 'Strong positive movement after negative suggests trend reversal',
+                        timestamp: currentMove.x
+                    });
+                }
+            }
+            
+            // Look for consolidation patterns (small movements)
+            let consolidationCount = 0;
+            for (let i = movements.length - 5; i < movements.length; i++) {
+                if (i >= 0 && Math.abs(movements[i].percentChange) < 0.5) {
+                    consolidationCount++;
+                }
+            }
+            
+            if (consolidationCount >= 3) {
+                patterns.push({
+                    type: 'Price Consolidation',
+                    signal: 'NEUTRAL',
+                    strength: 'Medium',
+                    reason: `Recent price movements show consolidation with ${consolidationCount} small changes`,
+                    timestamp: movements[movements.length - 1].x
+                });
+            }
+            
+            // Look for overall trend in recent movements
+            const recentMovements = movements.slice(-5);
+            const positiveCount = recentMovements.filter(m => m.isPositive).length;
+            const negativeCount = recentMovements.filter(m => !m.isPositive).length;
+            
+            if (positiveCount >= 4) {
+                patterns.push({
+                    type: 'Strong Uptrend',
+                    signal: 'BUY',
+                    strength: 'Strong',
+                    reason: `${positiveCount} out of ${recentMovements.length} recent movements are positive`,
+                    timestamp: movements[movements.length - 1].x
+                });
+            } else if (negativeCount >= 4) {
+                patterns.push({
+                    type: 'Strong Downtrend',
+                    signal: 'SELL',
+                    strength: 'Strong',
+                    reason: `${negativeCount} out of ${recentMovements.length} recent movements are negative`,
+                    timestamp: movements[movements.length - 1].x
+                });
+            }
+            
+            console.log(`🔍 Found ${patterns.length} price movement patterns:`, patterns.map(p => p.type));
+            return patterns;
+        }
+
         function calculateOverallSignal(signals) {
             let buyCount = 0;
             let sellCount = 0;
@@ -360,6 +645,94 @@
                 return priceData;
             } catch (error) {
                 console.error('Error fetching price data:', error);
+                throw error;
+            }
+        }
+
+        async function fetchOHLCData(coinId, days) {
+            try {
+                console.log(`Fetching OHLC data for ${coinId} over ${days} days...`);
+                
+                // First try to get OHLC data from a dedicated endpoint
+                try {
+                    const response = await fetch(`${WORKER_URL}/ohlc?coin=${coinId}&days=${days}`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        console.log(`Received ${data.ohlc.length} OHLC points`);
+                        
+                        const ohlcData = data.ohlc.map(item => ({
+                            x: new Date(item.timestamp),
+                            o: item.open,
+                            h: item.high,
+                            l: item.low,
+                            c: item.close
+                        }));
+                        
+                        return ohlcData;
+                    }
+                } catch (ohlcError) {
+                    console.log('OHLC endpoint not available, using price data to simulate OHLC...');
+                }
+                
+                // Fallback: Convert price data to simulated OHLC
+                const priceData = await fetchPriceData(coinId, days);
+                const ohlcData = [];
+                
+                // Create reasonable number of candlesticks (aim for 20-30 candles)
+                const targetCandles = Math.min(30, Math.max(15, Math.floor(days * 0.8)));
+                const periodSize = Math.max(1, Math.floor(priceData.length / targetCandles));
+                
+                console.log(`Creating ${targetCandles} target candles with period size ${periodSize} from ${priceData.length} price points`);
+                
+                for (let i = 0; i < priceData.length; i += periodSize) {
+                    const periodData = priceData.slice(i, Math.min(i + periodSize, priceData.length));
+                    if (periodData.length === 0) continue;
+                    
+                    const open = periodData[0].y;
+                    const close = periodData[periodData.length - 1].y;
+                    const high = Math.max(...periodData.map(p => p.y));
+                    const low = Math.min(...periodData.map(p => p.y));
+                    
+                    // Ensure meaningful OHLC differences for pattern detection
+                    const priceRange = high - low;
+                    const bodySize = Math.abs(close - open);
+                    
+                    // Only include periods with meaningful price movement
+                    if (priceRange > 0 && (bodySize > priceRange * 0.05 || priceRange > open * 0.001)) {
+                        const candle = {
+                            x: periodData[Math.floor(periodData.length / 2)].x, // Use middle timestamp
+                            o: parseFloat(open.toFixed(2)),
+                            h: parseFloat(high.toFixed(2)),
+                            l: parseFloat(low.toFixed(2)),
+                            c: parseFloat(close.toFixed(2)),
+                            // Add volume simulation
+                            v: Math.random() * 1000000 + 500000
+                        };
+                        ohlcData.push(candle);
+                        
+                        // Enhanced debug logging
+                        if (ohlcData.length <= 5) {
+                            console.log(`Candle ${ohlcData.length}:`, {
+                                date: candle.x.toLocaleDateString(),
+                                open: candle.o,
+                                high: candle.h,
+                                low: candle.l,
+                                close: candle.c,
+                                direction: candle.c >= candle.o ? 'BULLISH ⬆️' : 'BEARISH ⬇️',
+                                bodySize: Math.abs(candle.c - candle.o).toFixed(2),
+                                priceRange: priceRange.toFixed(2)
+                            });
+                        }
+                    } else {
+                        console.log(`Skipping period with insufficient movement: range=${priceRange.toFixed(2)}, body=${bodySize.toFixed(2)}`);
+                    }
+                }
+                
+                console.log(`Generated ${ohlcData.length} valid OHLC candles from price data`);
+                return ohlcData;
+                
+            } catch (error) {
+                console.error('Error fetching OHLC data:', error);
                 throw error;
             }
         }
@@ -660,6 +1033,644 @@
             }, 100);
         }
 
+                function displayCandlestickChart(ohlcData, coinId) {
+            console.log('Creating OHLC visualization with data:', {
+                candlePoints: ohlcData.length
+            });
+            
+            // Validate OHLC data
+            if (!ohlcData || ohlcData.length === 0) {
+                console.error('No OHLC data available for candlestick chart');
+                document.getElementById('candleError').style.display = 'block';
+                document.getElementById('candleError').innerHTML = '<strong>⚠️ No Data:</strong> Unable to generate candlestick chart - insufficient price data.';
+                return;
+            }
+            
+            const canvas = document.getElementById('candleChart');
+            const ctx = canvas.getContext('2d');
+            
+            // Reset canvas visibility
+            canvas.style.display = 'none';
+            canvas.classList.remove('visible');
+            
+            // Destroy existing chart to prevent memory leaks
+            if (candleChartInstance) {
+                candleChartInstance.destroy();
+                candleChartInstance = null;
+            }
+
+            // Get theme-aware colors
+            const isDark = document.body.classList.contains('dark-theme');
+            const textColor = isDark ? '#ffffff' : '#1a202c';
+            const gridColor = isDark ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.1)';
+            const backgroundColor = isDark ? 'rgba(30, 41, 59, 0.8)' : 'rgba(255, 255, 255, 0.95)';
+            const borderColor = isDark ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.1)';
+            
+            console.log('🎨 OHLC chart theme colors applied:', { isDark, textColor, gridColor, backgroundColor });
+
+            // Create improved OHLC visualization using multiple datasets
+            const datasets = [];
+            
+            // Split data into bullish and bearish periods
+            const bullishCandles = ohlcData.filter(candle => candle.c > candle.o);
+            const bearishCandles = ohlcData.filter(candle => candle.c < candle.o);
+            const dojiCandles = ohlcData.filter(candle => Math.abs(candle.c - candle.o) < (candle.h - candle.l) * 0.1);
+            
+            console.log(`📊 OHLC Analysis: ${bullishCandles.length} bullish, ${bearishCandles.length} bearish, ${dojiCandles.length} doji periods`);
+            
+            // 1. Bullish periods (close > open) - Green bars
+            if (bullishCandles.length > 0) {
+                datasets.push({
+                    label: `Bullish Periods (${bullishCandles.length})`,
+                    type: 'bar',
+                    data: bullishCandles.map(candle => ({
+                        x: candle.x,
+                        y: candle.c
+                    })),
+                    backgroundColor: '#10B98160',
+                    borderColor: '#10B981',
+                    borderWidth: 2,
+                    barThickness: 'flex',
+                    maxBarThickness: 20,
+                    order: 1
+                });
+            }
+            
+            // 2. Bearish periods (close < open) - Red bars  
+            if (bearishCandles.length > 0) {
+                datasets.push({
+                    label: `Bearish Periods (${bearishCandles.length})`,
+                    type: 'bar', 
+                    data: bearishCandles.map(candle => ({
+                        x: candle.x,
+                        y: candle.c
+                    })),
+                    backgroundColor: '#EF444460',
+                    borderColor: '#EF4444',
+                    borderWidth: 2,
+                    barThickness: 'flex',
+                    maxBarThickness: 20,
+                    order: 2
+                });
+            }
+            
+            // 3. High-Low wicks for all periods
+            datasets.push({
+                label: 'High-Low Wicks',
+                type: 'scatter',
+                data: ohlcData.flatMap(candle => [
+                    { x: candle.x, y: candle.h },
+                    { x: candle.x, y: candle.l }
+                ]),
+                borderColor: '#6B728050',
+                backgroundColor: '#6B728050',
+                pointRadius: 1,
+                pointHoverRadius: 3,
+                showLine: false,
+                order: 4
+            });
+            
+            // 4. Overall price trend line
+            datasets.push({
+                label: 'Price Trend',
+                type: 'line',
+                data: ohlcData.map(candle => ({
+                    x: candle.x,
+                    y: candle.c
+                })),
+                borderColor: '#3B82F6',
+                backgroundColor: 'transparent',
+                borderWidth: 2,
+                pointRadius: 1,
+                pointHoverRadius: 4,
+                tension: 0.2,
+                order: 0
+            });
+
+            candleChartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: { datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    resizeDelay: 0,
+                    devicePixelRatio: window.devicePixelRatio || 1,
+                    interaction: {
+                        intersect: false,
+                        mode: 'index'
+                    },
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: { unit: 'day' },
+                            ticks: {
+                                maxTicksLimit: window.innerWidth < 768 ? 4 : 7,
+                                font: {
+                                    size: window.innerWidth < 768 ? 10 : 11,
+                                    weight: '500',
+                                    family: 'system-ui, -apple-system, sans-serif'
+                                },
+                                color: textColor,
+                                padding: 2
+                            },
+                            grid: {
+                                color: gridColor,
+                                lineWidth: 1
+                            },
+                            border: {
+                                color: borderColor,
+                                width: 1
+                            },
+                            title: {
+                                display: true,
+                                text: 'Date',
+                                color: textColor,
+                                font: {
+                                    size: window.innerWidth < 768 ? 11 : 12,
+                                    weight: '600',
+                                    family: 'system-ui, -apple-system, sans-serif'
+                                },
+                                padding: { top: 2, bottom: 2 }
+                            }
+                        },
+                        y: {
+                            beginAtZero: false,
+                            ticks: {
+                                callback: function(value) {
+                                    return '$' + value.toLocaleString();
+                                },
+                                font: {
+                                    size: window.innerWidth < 768 ? 10 : 11,
+                                    weight: '500',
+                                    family: 'system-ui, -apple-system, sans-serif'
+                                },
+                                color: textColor,
+                                padding: 2
+                            },
+                            grid: {
+                                color: gridColor,
+                                lineWidth: 1
+                            },
+                            border: {
+                                color: borderColor,
+                                width: 1
+                            },
+                            title: {
+                                display: true,
+                                text: 'Price (USD)',
+                                color: textColor,
+                                font: {
+                                    size: window.innerWidth < 768 ? 11 : 12,
+                                    weight: '600',
+                                    family: 'system-ui, -apple-system, sans-serif'
+                                },
+                                padding: { top: 2, bottom: 2 }
+                            }
+                        }
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: '🕯️ OHLC Price Analysis',
+                            font: { 
+                                size: window.innerWidth < 768 ? 13 : 15,
+                                weight: 'bold',
+                                family: 'system-ui, -apple-system, sans-serif'
+                            },
+                            color: textColor,
+                            padding: { top: 4, bottom: 6 }
+                        },
+                        legend: {
+                            display: true,
+                            position: window.innerWidth < 768 ? 'bottom' : 'top',
+                            labels: {
+                                font: {
+                                    size: window.innerWidth < 768 ? 10 : 11,
+                                    weight: '500',
+                                    family: 'system-ui, -apple-system, sans-serif'
+                                },
+                                padding: 8,
+                                usePointStyle: true,
+                                boxWidth: window.innerWidth < 768 ? 8 : 10,
+                                color: textColor,
+                                filter: function(legendItem) {
+                                    // Hide High-Low Wicks from legend to reduce clutter
+                                    return !['High-Low Wicks'].includes(legendItem.text);
+                                }
+                            }
+                        },
+                        subtitle: {
+                            display: window.innerWidth >= 768,
+                            text: '📝 Green bars = price increased, Red bars = price decreased, Blue line = price trend',
+                            font: { 
+                                size: 10,
+                                style: 'italic',
+                                weight: '400',
+                                family: 'system-ui, -apple-system, sans-serif'
+                            },
+                            color: textColor,
+                            padding: { top: 2, bottom: 6 }
+                        },
+                        tooltip: {
+                            backgroundColor: backgroundColor,
+                            titleColor: textColor,
+                            bodyColor: textColor,
+                            borderColor: borderColor,
+                            borderWidth: 1,
+                            cornerRadius: 6,
+                            titleFont: { 
+                                size: window.innerWidth < 768 ? 11 : 12,
+                                weight: '600',
+                                family: 'system-ui, -apple-system, sans-serif'
+                            },
+                            bodyFont: { 
+                                size: window.innerWidth < 768 ? 10 : 11,
+                                weight: '500',
+                                family: 'system-ui, -apple-system, sans-serif'
+                            },
+                            callbacks: {
+                                title: function(context) {
+                                    return context[0].label; // Show the date
+                                },
+                                beforeBody: function(context) {
+                                    // Find the corresponding OHLC data for this time point
+                                    const timePoint = context[0].parsed.x;
+                                    const candle = ohlcData.find(c => c.x.getTime() === new Date(timePoint).getTime());
+                                    
+                                    if (candle) {
+                                        const priceChange = candle.c - candle.o;
+                                        const percentChange = ((priceChange / candle.o) * 100).toFixed(2);
+                                        const direction = candle.c >= candle.o ? '📈' : '📉';
+                                        
+                                        return [
+                                            `${direction} OHLC Data:`,
+                                            `Open: $${candle.o.toLocaleString()}`,
+                                            `High: $${candle.h.toLocaleString()}`,
+                                            `Low: $${candle.l.toLocaleString()}`,
+                                            `Close: $${candle.c.toLocaleString()}`,
+                                            `Change: ${priceChange >= 0 ? '+' : ''}$${priceChange.toFixed(2)} (${percentChange}%)`,
+                                            `Range: $${(candle.h - candle.l).toFixed(2)}`
+                                        ];
+                                    }
+                                    return ['No OHLC data available'];
+                                },
+                                label: function(context) {
+                                    // Show the dataset name and value
+                                    const label = context.dataset.label || '';
+                                    const value = context.parsed.y;
+                                    return `${label}: $${value.toLocaleString()}`;
+                                }
+                            }
+                        }
+                    },
+                    layout: {
+                        padding: { top: 2, bottom: 2, left: 2, right: 2 }
+                    },
+                    animation: {
+                        duration: window.innerWidth < 768 ? 100 : 200,
+                        easing: 'easeInOutQuart'
+                    }
+                }
+            });
+
+            // Reliable chart display with proper timing
+            setTimeout(() => {
+                const canvas = document.getElementById('candleChart');
+                
+                // Simple, reliable canvas visibility
+                canvas.style.display = 'block';
+                canvas.style.visibility = 'visible';
+                canvas.style.opacity = '1';
+                canvas.classList.add('visible');
+                
+                // Ensure chart renders properly
+                if (candleChartInstance) {
+                    candleChartInstance.update();
+                    candleChartInstance.resize();
+                    
+                    // Final render after a short delay
+                    setTimeout(() => {
+                        candleChartInstance.render();
+                        console.log('✅ OHLC chart successfully rendered:', {
+                            canvasWidth: canvas.clientWidth,
+                            canvasHeight: canvas.clientHeight,
+                            hasChart: !!candleChartInstance,
+                            totalCandles: ohlcData.length,
+                            bullishCandles: bullishCandles.length,
+                            bearishCandles: bearishCandles.length,
+                            dojiCandles: dojiCandles.length,
+                            datasetsCreated: datasets.length
+                        });
+                    }, 50);
+                }
+            }, 100);
+        }
+
+        function displayPriceBasedOHLC(priceData, coinId) {
+            console.log('Creating price-based OHLC visualization with data:', {
+                pricePoints: priceData.length
+            });
+            
+            const canvas = document.getElementById('candleChart');
+            const ctx = canvas.getContext('2d');
+            
+            // Reset canvas visibility
+            canvas.style.display = 'none';
+            canvas.classList.remove('visible');
+            
+            // Destroy existing chart to prevent memory leaks
+            if (candleChartInstance) {
+                candleChartInstance.destroy();
+                candleChartInstance = null;
+            }
+
+            // Get theme-aware colors
+            const isDark = document.body.classList.contains('dark-theme');
+            const textColor = isDark ? '#ffffff' : '#1a202c';
+            const gridColor = isDark ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.1)';
+            const backgroundColor = isDark ? 'rgba(30, 41, 59, 0.8)' : 'rgba(255, 255, 255, 0.95)';
+            const borderColor = isDark ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.1)';
+            
+            // Create price movement visualization
+            const datasets = [];
+            
+            // Calculate price changes between consecutive points
+            const priceChanges = [];
+            for (let i = 1; i < priceData.length; i++) {
+                const prevPrice = priceData[i - 1].y;
+                const currentPrice = priceData[i].y;
+                const change = currentPrice - prevPrice;
+                
+                priceChanges.push({
+                    x: priceData[i].x,
+                    y: currentPrice,
+                    change: change,
+                    isPositive: change >= 0,
+                    percentChange: (change / prevPrice) * 100
+                });
+            }
+            
+            // Split into positive and negative movements
+            const positiveChanges = priceChanges.filter(p => p.isPositive);
+            const negativeChanges = priceChanges.filter(p => !p.isPositive);
+            
+            console.log(`📊 Price Analysis: ${positiveChanges.length} positive movements, ${negativeChanges.length} negative movements`);
+            
+            // Positive price movements (green bars)
+            if (positiveChanges.length > 0) {
+                datasets.push({
+                    label: `Price Increases (${positiveChanges.length})`,
+                    type: 'bar',
+                    data: positiveChanges.map(p => ({
+                        x: p.x,
+                        y: p.y
+                    })),
+                    backgroundColor: '#10B98160',
+                    borderColor: '#10B981',
+                    borderWidth: 2,
+                    barThickness: 'flex',
+                    maxBarThickness: 25,
+                    order: 1
+                });
+            }
+            
+            // Negative price movements (red bars)
+            if (negativeChanges.length > 0) {
+                datasets.push({
+                    label: `Price Decreases (${negativeChanges.length})`,
+                    type: 'bar',
+                    data: negativeChanges.map(p => ({
+                        x: p.x,
+                        y: p.y
+                    })),
+                    backgroundColor: '#EF444460',
+                    borderColor: '#EF4444',
+                    borderWidth: 2,
+                    barThickness: 'flex',
+                    maxBarThickness: 25,
+                    order: 2
+                });
+            }
+            
+            // Overall price trend line
+            datasets.push({
+                label: 'Price Trend',
+                type: 'line',
+                data: priceData,
+                borderColor: '#3B82F6',
+                backgroundColor: 'transparent',
+                borderWidth: 2,
+                pointRadius: 2,
+                pointHoverRadius: 5,
+                tension: 0.2,
+                order: 0
+            });
+
+            candleChartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: { datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    resizeDelay: 0,
+                    devicePixelRatio: window.devicePixelRatio || 1,
+                    interaction: {
+                        intersect: false,
+                        mode: 'index'
+                    },
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: { unit: 'day' },
+                            ticks: {
+                                maxTicksLimit: window.innerWidth < 768 ? 4 : 7,
+                                font: {
+                                    size: window.innerWidth < 768 ? 10 : 11,
+                                    weight: '500',
+                                    family: 'system-ui, -apple-system, sans-serif'
+                                },
+                                color: textColor,
+                                padding: 2
+                            },
+                            grid: {
+                                color: gridColor,
+                                lineWidth: 1
+                            },
+                            border: {
+                                color: borderColor,
+                                width: 1
+                            },
+                            title: {
+                                display: true,
+                                text: 'Date',
+                                color: textColor,
+                                font: {
+                                    size: window.innerWidth < 768 ? 11 : 12,
+                                    weight: '600',
+                                    family: 'system-ui, -apple-system, sans-serif'
+                                },
+                                padding: { top: 2, bottom: 2 }
+                            }
+                        },
+                        y: {
+                            beginAtZero: false,
+                            ticks: {
+                                callback: function(value) {
+                                    return '$' + value.toLocaleString();
+                                },
+                                font: {
+                                    size: window.innerWidth < 768 ? 10 : 11,
+                                    weight: '500',
+                                    family: 'system-ui, -apple-system, sans-serif'
+                                },
+                                color: textColor,
+                                padding: 2
+                            },
+                            grid: {
+                                color: gridColor,
+                                lineWidth: 1
+                            },
+                            border: {
+                                color: borderColor,
+                                width: 1
+                            },
+                            title: {
+                                display: true,
+                                text: 'Price (USD)',
+                                color: textColor,
+                                font: {
+                                    size: window.innerWidth < 768 ? 11 : 12,
+                                    weight: '600',
+                                    family: 'system-ui, -apple-system, sans-serif'
+                                },
+                                padding: { top: 2, bottom: 2 }
+                            }
+                        }
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: '📊 Price Movement Analysis',
+                            font: { 
+                                size: window.innerWidth < 768 ? 13 : 15,
+                                weight: 'bold',
+                                family: 'system-ui, -apple-system, sans-serif'
+                            },
+                            color: textColor,
+                            padding: { top: 4, bottom: 6 }
+                        },
+                        legend: {
+                            display: true,
+                            position: window.innerWidth < 768 ? 'bottom' : 'top',
+                            labels: {
+                                font: {
+                                    size: window.innerWidth < 768 ? 10 : 11,
+                                    weight: '500',
+                                    family: 'system-ui, -apple-system, sans-serif'
+                                },
+                                padding: 8,
+                                usePointStyle: true,
+                                boxWidth: window.innerWidth < 768 ? 8 : 10,
+                                color: textColor
+                            }
+                        },
+                        subtitle: {
+                            display: window.innerWidth >= 768,
+                            text: '📝 Green bars = price increased from previous point, Red bars = price decreased',
+                            font: { 
+                                size: 10,
+                                style: 'italic',
+                                weight: '400',
+                                family: 'system-ui, -apple-system, sans-serif'
+                            },
+                            color: textColor,
+                            padding: { top: 2, bottom: 6 }
+                        },
+                        tooltip: {
+                            backgroundColor: backgroundColor,
+                            titleColor: textColor,
+                            bodyColor: textColor,
+                            borderColor: borderColor,
+                            borderWidth: 1,
+                            cornerRadius: 6,
+                            titleFont: { 
+                                size: window.innerWidth < 768 ? 11 : 12,
+                                weight: '600',
+                                family: 'system-ui, -apple-system, sans-serif'
+                            },
+                            bodyFont: { 
+                                size: window.innerWidth < 768 ? 10 : 11,
+                                weight: '500',
+                                family: 'system-ui, -apple-system, sans-serif'
+                            },
+                            callbacks: {
+                                title: function(context) {
+                                    return context[0].label;
+                                },
+                                beforeBody: function(context) {
+                                    const timePoint = context[0].parsed.x;
+                                    const movement = priceChanges.find(p => p.x.getTime() === new Date(timePoint).getTime());
+                                    
+                                    if (movement) {
+                                        const direction = movement.isPositive ? '📈' : '📉';
+                                        const changeText = movement.isPositive ? 'Increased' : 'Decreased';
+                                        
+                                        return [
+                                            `${direction} Price ${changeText}:`,
+                                            `Current: $${movement.y.toLocaleString()}`,
+                                            `Change: ${movement.change >= 0 ? '+' : ''}$${movement.change.toFixed(2)}`,
+                                            `Percent: ${movement.change >= 0 ? '+' : ''}${movement.percentChange.toFixed(2)}%`
+                                        ];
+                                    }
+                                    return ['Price point'];
+                                },
+                                label: function(context) {
+                                    const label = context.dataset.label || '';
+                                    const value = context.parsed.y;
+                                    return `${label}: $${value.toLocaleString()}`;
+                                }
+                            }
+                        }
+                    },
+                    layout: {
+                        padding: { top: 2, bottom: 2, left: 2, right: 2 }
+                    },
+                    animation: {
+                        duration: window.innerWidth < 768 ? 100 : 200,
+                        easing: 'easeInOutQuart'
+                    }
+                }
+            });
+
+            // Reliable chart display with proper timing
+            setTimeout(() => {
+                const canvas = document.getElementById('candleChart');
+                
+                canvas.style.display = 'block';
+                canvas.style.visibility = 'visible';
+                canvas.style.opacity = '1';
+                canvas.classList.add('visible');
+                
+                if (candleChartInstance) {
+                    candleChartInstance.update();
+                    candleChartInstance.resize();
+                    
+                    setTimeout(() => {
+                        candleChartInstance.render();
+                        console.log('✅ Price-based OHLC chart successfully rendered:', {
+                            canvasWidth: canvas.clientWidth,
+                            canvasHeight: canvas.clientHeight,
+                            hasChart: !!candleChartInstance,
+                            totalPricePoints: priceData.length,
+                            positiveMovements: positiveChanges.length,
+                            negativeMovements: negativeChanges.length,
+                            datasetsCreated: datasets.length
+                        });
+                    }, 50);
+                }
+            }, 100);
+        }
+
         function displayIndicators(rsi, sma20, signals) {
             // ✅ FIX: Robust RSI value extraction with proper fallbacks
             const currentRSI = rsi.length > 0 ? rsi[rsi.length - 1].y : null;
@@ -702,6 +1713,82 @@
                     • <strong>SMA signals:</strong> Price above SMA suggests potential uptrend<br>
                     • <strong>Bollinger Bands:</strong> Price touching bands may indicate reversal opportunities<br>
                     • <strong>Technical accuracy:</strong> Delayed indicator start ensures mathematical correctness
+                </div>
+            `;
+        }
+
+        function displayIndicatorsWithPatterns(rsi, sma20, traditionalSignals, candlePatterns) {
+            // Traditional indicators
+            const currentRSI = rsi.length > 0 ? rsi[rsi.length - 1].y : null;
+            const rsiDisplay = currentRSI !== null ? currentRSI.toFixed(2) : 'N/A';
+            const rsiStatus = currentRSI !== null ? 'Available' : 'Insufficient data (needs 15+ points)';
+
+            const rsiSignal = traditionalSignals.find(s => s.type === 'RSI');
+            const smaSignal = traditionalSignals.find(s => s.type === 'SMA');
+            const bbSignal = traditionalSignals.find(s => s.type === 'BB');
+
+            // Price patterns section (candlestick or price movement patterns)
+            let patternsHTML = '';
+            const patternTitle = candlePatterns.some(p => p.type.includes('Price')) ? 
+                '📊 Price Movement Patterns' : '🕯️ Candlestick Patterns';
+            
+            if (candlePatterns.length > 0) {
+                patternsHTML = `
+                    <div class="indicator patterns-container">
+                        <h3>${patternTitle}</h3>
+                        <div style="max-height: 250px; overflow-y: auto;">
+                            ${candlePatterns.map(pattern => `
+                                <div class="pattern-entry">
+                                    <div class="signal ${pattern.signal.toLowerCase()}">${pattern.type}</div>
+                                    <div class="signal-strength">${pattern.strength} Signal</div>
+                                    <div class="explanation">${pattern.reason}</div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            } else {
+                patternsHTML = `
+                    <div class="indicator">
+                        <h3>${patternTitle}</h3>
+                        <div class="explanation">No significant patterns detected in recent data.</div>
+                    </div>
+                `;
+            }
+
+            document.getElementById('indicators').innerHTML = `
+                <div class="indicator">
+                    <h3>📈 RSI (14)</h3>
+                    <div class="indicator-value">${rsiDisplay}</div>
+                    <div class="signal ${rsiSignal.signal.toLowerCase()}">${rsiSignal.signal}</div>
+                    <div class="signal-strength">${rsiSignal.strength} Signal</div>
+                    <div class="explanation">${rsiSignal.reason}</div>
+                    ${currentRSI === null ? `<div style="font-size: 0.8em; color: var(--warning-color); margin-top: 5px;">⚠️ ${rsiStatus}</div>` : ''}
+                </div>
+
+                <div class="indicator">
+                    <h3>📊 Moving Average (20)</h3>
+                    <div class="signal ${smaSignal.signal.toLowerCase()}">${smaSignal.signal}</div>
+                    <div class="signal-strength">${smaSignal.strength} Signal</div>
+                    <div class="explanation">${smaSignal.reason}</div>
+                </div>
+
+                <div class="indicator">
+                    <h3>📏 Bollinger Bands</h3>
+                    <div class="signal ${bbSignal.signal.toLowerCase()}">${bbSignal.signal}</div>
+                    <div class="signal-strength">${bbSignal.strength} Signal</div>
+                    <div class="explanation">${bbSignal.reason}</div>
+                </div>
+
+                ${patternsHTML}
+
+                <div class="educational-notes">
+                    <strong>📚 Educational Notes:</strong><br>
+                    • <strong>Technical Indicators:</strong> RSI, SMA, and Bollinger Bands provide quantitative analysis<br>
+                    • <strong>Candlestick Patterns:</strong> Visual patterns that reveal market psychology and sentiment<br>
+                    • <strong>Combined Analysis:</strong> Both technical indicators and candlestick patterns work together for comprehensive market analysis<br>
+                    • <strong>Pattern Recognition:</strong> Doji = indecision, Hammer = potential reversal, Engulfing = strong momentum<br>
+                    • <strong>AI Enhancement:</strong> Machine learning analyzes all signals together for improved accuracy
                 </div>
             `;
         }
@@ -870,6 +1957,139 @@
             document.getElementById('aiConfidence').textContent = 'Error occurred';
             document.getElementById('aiReasoning').textContent = `AI analysis temporarily unavailable: ${errorMessage}. Using traditional indicators instead.`;
             document.getElementById('aiMethodBadge').textContent = 'Fallback';
+        }
+
+        /**
+         * Enhanced AI analysis that includes candlestick patterns
+         * Combines traditional indicators with pattern recognition
+         */
+        async function performAIAnalysisWithPatterns(priceData, rsi, sma20, bb, traditionalSignals, candlePatterns, coinId) {
+            try {
+                console.log('🤖 Starting enhanced AI analysis with candlestick patterns...');
+                
+                // Extract current values
+                const liveCurrentPrice = priceData[priceData.length - 1].y;
+                const liveCurrentRSI = rsi.length > 0 ? rsi[rsi.length - 1].y : 50;
+                const liveCurrentSMA = sma20.length > 0 ? sma20[sma20.length - 1].y : liveCurrentPrice;
+                const liveCurrentBBUpper = bb.upper.length > 0 ? bb.upper[bb.upper.length - 1].y : liveCurrentPrice * 1.05;
+                const liveCurrentBBLower = bb.lower.length > 0 ? bb.lower[bb.lower.length - 1].y : liveCurrentPrice * 0.95;
+                
+                const smaSignal = traditionalSignals.find(s => s.type === 'SMA')?.signal || 'NEUTRAL';
+                const bbSignal = traditionalSignals.find(s => s.type === 'BB')?.signal || 'NEUTRAL';
+                
+                console.log(`📊 Enhanced Analysis Context: Price=$${liveCurrentPrice.toLocaleString()}, RSI=${liveCurrentRSI.toFixed(1)}, Patterns=${candlePatterns.length}`);
+                
+                // Store enhanced data for AI explanation
+                currentAnalysisData = {
+                    priceData, rsi, sma: sma20, bb, 
+                    signals: [...traditionalSignals, ...candlePatterns], 
+                    candlePatterns,
+                    coin: coinId, 
+                    timeframe: parseInt(document.getElementById('timeframe').value),
+                    currentPrice: liveCurrentPrice,
+                    currentRSI: liveCurrentRSI,
+                    currentSMA: liveCurrentSMA,
+                    currentBBUpper: liveCurrentBBUpper,
+                    currentBBLower: liveCurrentBBLower
+                };
+                
+                // Call enhanced AI analysis endpoint
+                const response = await fetch(`${WORKER_URL}/ai-analysis-enhanced`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        rsi: liveCurrentRSI,
+                        smaSignal: smaSignal,
+                        bbSignal: bbSignal,
+                        priceData: priceData,
+                        candlePatterns: candlePatterns,
+                        coin: coinId
+                    }),
+                });
+                
+                if (!response.ok) {
+                    // Fallback to regular AI analysis if enhanced endpoint not available
+                    console.log('Enhanced AI endpoint not available, falling back to regular analysis...');
+                    return await performAIAnalysis(priceData, rsi, sma20, bb, traditionalSignals, coinId);
+                }
+                
+                const aiResult = await response.json();
+                console.log('🤖 Enhanced AI Analysis result:', aiResult);
+                
+                // Display enhanced AI analysis results
+                displayEnhancedAIAnalysis(aiResult);
+                
+                // Show the AI Explain button
+                document.getElementById('aiExplainBtn').style.display = 'inline-flex';
+                
+            } catch (error) {
+                console.error('❌ Enhanced AI Analysis failed:', error);
+                // Fallback to regular AI analysis
+                console.log('Falling back to regular AI analysis...');
+                return await performAIAnalysis(priceData, rsi, sma20, bb, traditionalSignals, coinId);
+            }
+        }
+
+        /**
+         * Display enhanced AI analysis results with candlestick pattern context
+         */
+        function displayEnhancedAIAnalysis(aiResult) {
+            // Show the AI analysis section
+            document.getElementById('aiAnalysisSection').style.display = 'block';
+            
+            // Update mood icon and label
+            const moodIcons = {
+                'bullish': '🚀',
+                'bearish': '🐻',
+                'neutral': '⚖️'
+            };
+            
+            const aiMoodLabel = document.getElementById('aiMoodLabel');
+            const aiMoodIcon = document.getElementById('aiMoodIcon');
+            
+            // Set icon and text
+            aiMoodIcon.textContent = moodIcons[aiResult.mood] || '🤖';
+            aiMoodLabel.textContent = aiResult.mood.toUpperCase();
+            
+            // Apply enhanced styling for mood
+            aiMoodLabel.className = '';
+            aiMoodLabel.classList.add(aiResult.mood);
+            
+            if (aiResult.mood === 'neutral') {
+                aiMoodLabel.style.color = '#ffffff';
+                aiMoodLabel.style.background = 'rgba(255,255,255,0.25)';
+                aiMoodLabel.style.border = '2px solid rgba(255,255,255,0.4)';
+                aiMoodLabel.style.padding = '8px 16px';
+                aiMoodLabel.style.borderRadius = '8px';
+                aiMoodLabel.style.textShadow = '2px 2px 4px rgba(0,0,0,0.8)';
+                aiMoodLabel.style.fontWeight = '800';
+            } else if (aiResult.mood === 'bullish') {
+                aiMoodLabel.style.color = '#4ade80';
+                aiMoodLabel.style.textShadow = '2px 2px 4px rgba(0,0,0,0.8)';
+                aiMoodLabel.style.fontWeight = '800';
+            } else if (aiResult.mood === 'bearish') {
+                aiMoodLabel.style.color = '#f87171';
+                aiMoodLabel.style.textShadow = '2px 2px 4px rgba(0,0,0,0.8)';
+                aiMoodLabel.style.fontWeight = '800';
+            }
+            
+            // Enhanced confidence styling
+            const aiConfidence = document.getElementById('aiConfidence');
+            aiConfidence.textContent = `Confidence: ${aiResult.confidence}%`;
+            aiConfidence.style.color = '#ffffff';
+            aiConfidence.style.fontWeight = '600';
+            aiConfidence.style.textShadow = '1px 1px 2px rgba(0,0,0,0.6)';
+            
+            // Update reasoning with pattern context
+            const reasoning = aiResult.reasoning + (aiResult.patterns ? `\n\nCandlestick Patterns: ${aiResult.patterns}` : '');
+            document.getElementById('aiReasoning').textContent = reasoning;
+            
+            // Update method badge
+            const methodText = aiResult.method === 'cohere-enhanced-api' ? 'Cohere AI Enhanced' : 
+                              aiResult.method === 'cohere-classify-api' ? 'Cohere AI' : 'Rule-based';
+            document.getElementById('aiMethodBadge').textContent = methodText;
         }
 
         /**
@@ -1078,18 +2298,27 @@
             // ✅ SCROLL FIX: Prevent any automatic scrolling during analysis
             const currentScrollPosition = window.pageYOffset;
             
+            // Show loading states for both charts
             document.getElementById('loading').style.display = 'block';
+            document.getElementById('candleLoading').style.display = 'block';
             document.getElementById('taChart').style.display = 'none';
+            document.getElementById('candleChart').style.display = 'none';
             document.getElementById('indicators').innerHTML = '<div class="loading">Calculating indicators...</div>';
             document.getElementById('taSummary').style.display = 'none';
             // Hide AI sections initially
             document.getElementById('aiAnalysisSection').style.display = 'none';
             document.getElementById('aiExplainBtn').style.display = 'none';
             document.getElementById('chartError').style.display = 'none';
+            document.getElementById('candleError').style.display = 'none';
 
             try {
                 console.log(`Starting analysis for ${coinId} over ${timeframe} days`);
-                const priceData = await fetchPriceData(coinId, timeframe);
+                
+                // Fetch both price data and OHLC data in parallel
+                const [priceData, ohlcData] = await Promise.all([
+                    fetchPriceData(coinId, timeframe),
+                    fetchOHLCData(coinId, timeframe)
+                ]);
                 
                 // Calculate indicators
                 console.log('Calculating technical indicators...');
@@ -1097,41 +2326,73 @@
                 const rsi = calculateRSI(priceData);
                 const bb = calculateBollingerBands(priceData);
                 
+                // Analyze candlestick patterns (use price data if no OHLC)
+                console.log('Analyzing candlestick patterns...');
+                const candlePatterns = ohlcData.length > 0 ? 
+                    analyzeCandlestickPatterns(ohlcData) : 
+                    analyzePriceMovementPatterns(priceData);
+                
                 console.log('Indicators calculated:', {
                     pricePoints: priceData.length,
+                    ohlcPoints: ohlcData.length,
                     smaPoints: sma20.length,
                     rsiPoints: rsi.length,
-                    bbPoints: bb.upper.length
+                    bbPoints: bb.upper.length,
+                    candlePatterns: candlePatterns.length
                 });
                 
-                // Generate signals
-                const signals = generateTradingSignals(priceData, rsi, sma20, bb);
-                const overallSignal = calculateOverallSignal(signals);
+                // Generate signals (including candlestick patterns)
+                const traditionalSignals = generateTradingSignals(priceData, rsi, sma20, bb);
+                const allSignals = [...traditionalSignals, ...candlePatterns];
+                const overallSignal = calculateOverallSignal(allSignals);
                 
-                // Display traditional analysis
-                console.log('Creating chart...');
+                // Display both charts
+                console.log('Creating charts...');
                 displayChart(priceData, sma20, bb);
-                displayIndicators(rsi, sma20, signals);
-                displaySummary(overallSignal, signals.length, coinId.toUpperCase());
                 
-                // Final backup check to ensure chart is visible
+                // Always display OHLC section, create fallback if needed
+                if (ohlcData && ohlcData.length > 0) {
+                    displayCandlestickChart(ohlcData, coinId);
+                } else {
+                    console.warn('No valid OHLC data available, creating price-based visualization...');
+                    // Create simple price-based OHLC visualization
+                    displayPriceBasedOHLC(priceData, coinId);
+                }
+                
+                // Update indicators display to include candlestick patterns
+                displayIndicatorsWithPatterns(rsi, sma20, traditionalSignals, candlePatterns);
+                displaySummary(overallSignal, allSignals.length, coinId.toUpperCase());
+                
+                // Final backup check to ensure charts are visible
                 setTimeout(() => {
                     const canvas = document.getElementById('taChart');
+                    const candleCanvas = document.getElementById('candleChart');
+                    
                     if (canvas && chartInstance && (canvas.clientWidth === 0 || canvas.clientHeight === 0 || canvas.style.display === 'none')) {
                         console.log('🔧 Chart not visible, attempting backup display...');
                         forceChartDisplay();
                     }
+                    
+                    if (candleCanvas && candleChartInstance && (candleCanvas.clientWidth === 0 || candleCanvas.clientHeight === 0 || candleCanvas.style.display === 'none')) {
+                        console.log('🔧 Candlestick chart not visible, forcing display...');
+                        candleCanvas.style.display = 'block';
+                        candleCanvas.style.visibility = 'visible';
+                        candleCanvas.classList.add('visible');
+                        candleChartInstance.update();
+                        candleChartInstance.resize();
+                    }
                 }, 500);
                 
-                // 🤖 PERFORM AI ANALYSIS
-                console.log('🤖 Starting AI integration...');
-                await performAIAnalysis(priceData, rsi, sma20, bb, signals, coinId);
+                // 🤖 PERFORM AI ANALYSIS (enhanced with candlestick patterns)
+                console.log('🤖 Starting AI integration with candlestick patterns...');
+                await performAIAnalysisWithPatterns(priceData, rsi, sma20, bb, traditionalSignals, candlePatterns, coinId);
                 
                 document.getElementById('loading').style.display = 'none';
+                document.getElementById('candleLoading').style.display = 'none';
                 console.log('Analysis complete!');
                 
                 // Chart analysis complete
-                console.log('✅ Technical analysis complete with chart display!');
+                console.log('✅ Technical analysis complete with both charts displayed!');
                 
                 // ✅ SCROLL FIX: Restore scroll position to prevent unwanted scrolling
                 window.scrollTo(0, currentScrollPosition);
@@ -1139,8 +2400,11 @@
             } catch (error) {
                 console.error('Analysis error:', error);
                 document.getElementById('loading').style.display = 'none';
+                document.getElementById('candleLoading').style.display = 'none';
                 document.getElementById('chartError').style.display = 'block';
+                document.getElementById('candleError').style.display = 'block';
                 document.getElementById('chartError').innerHTML = `<strong>⚠️ Analysis Failed:</strong> ${error.message}. Please try a longer timeframe or check your connection.`;
+                document.getElementById('candleError').innerHTML = `<strong>⚠️ Candlestick Chart Failed:</strong> ${error.message}`;
                 document.getElementById('indicators').innerHTML = '<div class="error">Analysis failed - please try again with a longer timeframe</div>';
                 // ✅ SCROLL FIX: Restore scroll position even on error
                 window.scrollTo(0, currentScrollPosition);

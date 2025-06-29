@@ -415,6 +415,26 @@ main {
     display: block !important;
 }
 
+/* Candlestick Chart Styles */
+#candleChart {
+    width: 100% !important;
+    height: 100% !important;
+    max-width: 100% !important;
+    min-height: 120px !important;
+    max-height: 320px !important;
+    display: block !important;
+    background: transparent;
+    position: relative;
+    z-index: 10;
+    opacity: 1;
+    visibility: visible !important;
+    border-radius: 6px;
+}
+
+#candleChart.visible {
+    display: block !important;
+}
+
 .chart-container canvas {
     visibility: visible !important;
     border-radius: 8px;
@@ -447,6 +467,10 @@ main {
     border-radius: 12px;
     padding: 0.5rem;
     box-shadow: var(--shadow);
+    max-height: 80vh;
+    overflow-y: auto;
+    position: sticky;
+    top: 1rem;
 }
 .indicators-panel h3 {
     color: var(--text-primary);
@@ -456,10 +480,62 @@ main {
 }
 .indicator {
     margin-bottom: 0.5rem;
-    padding: 0.5rem;
+    padding: 0.4rem;
     border: 1px solid var(--border-color);
-    border-radius: 8px;
+    border-radius: 6px;
     background: var(--bg-secondary);
+}
+
+/* Special styling for pattern containers to limit height - multiple selectors for better browser support */
+.indicator h3[data-pattern],
+.indicator:has(h3:contains("Pattern")),
+.indicator h3:contains("Pattern") {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+/* Target pattern sections more specifically */
+.indicator:nth-child(4),
+.indicator:nth-child(5) {
+    max-height: 300px;
+    overflow-y: auto;
+    background: var(--bg-tertiary);
+    border: 2px solid var(--border-color);
+}
+
+/* Style pattern list items */
+.indicator div[style*="margin: 0.5rem 0"] {
+    margin: 0.25rem 0 !important;
+    padding: 0.3rem !important;
+    font-size: 0.8em;
+    border-radius: 4px;
+}
+
+/* Compact pattern entries */
+.pattern-entry {
+    margin: 0.25rem 0;
+    padding: 0.3rem;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--bg-secondary);
+    font-size: 0.8em;
+}
+
+.pattern-entry .signal {
+    font-size: 0.7em;
+    padding: 0.1rem 0.3rem;
+    margin-bottom: 0.2rem;
+}
+
+.pattern-entry .signal-strength {
+    font-size: 0.65em;
+    margin-top: 0.1rem;
+}
+
+.pattern-entry .explanation {
+    font-size: 0.7em;
+    margin-top: 0.2rem;
+    line-height: 1.1;
 }
 .indicator h3 {
     color: var(--text-primary);
@@ -528,26 +604,127 @@ main {
     border: 2px solid rgba(255, 255, 255, 0.2);
 }
 .ta-summary {
-    background: linear-gradient(135deg, var(--accent-color), var(--accent-hover));
+    background: linear-gradient(135deg, #1E40AF 0%, #3B82F6 50%, #06B6D4 100%);
     color: white;
-    padding: 1.5rem;
-    border-radius: 16px;
+    padding: 2.5rem;
+    border-radius: 20px;
     margin-top: 1.5rem;
     text-align: center;
-    box-shadow: var(--shadow);
+    box-shadow: 0 10px 30px rgba(30, 64, 175, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    position: relative;
+    overflow: hidden;
 }
+
+.ta-summary::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.6), transparent);
+}
+
 .ta-summary h3 {
-    margin-bottom: 0.75rem;
-    font-size: 1.3em;
-}
-.overall-signal {
-    font-size: 2em;
+    margin-bottom: 1.5rem;
+    font-size: 1.5em;
     font-weight: 700;
-    margin: 0.75rem 0;
+    text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+    letter-spacing: 0.5px;
 }
+
+.overall-signal {
+    font-size: 3em;
+    font-weight: 900;
+    margin: 1.5rem 0;
+    text-shadow: 3px 3px 6px rgba(0,0,0,0.4);
+    letter-spacing: 2px;
+    background: rgba(255,255,255,0.1);
+    padding: 1rem 2rem;
+    border-radius: 16px;
+    display: inline-block;
+    border: 2px solid rgba(255,255,255,0.2);
+    backdrop-filter: blur(10px);
+}
+
 .confidence {
+    font-size: 1.3em;
+    font-weight: 700;
+    background: rgba(255,255,255,0.15);
+    padding: 0.75rem 1.5rem;
+    border-radius: 25px;
+    display: inline-block;
+    margin: 1rem 0;
+    border: 1px solid rgba(255,255,255,0.3);
+    text-shadow: 1px 1px 3px rgba(0,0,0,0.5);
+    backdrop-filter: blur(5px);
+}
+
+.ta-summary > div:last-child {
+    background: rgba(0,0,0,0.2);
+    padding: 1.5rem;
+    border-radius: 12px;
+    margin-top: 2rem;
+    border: 1px solid rgba(255,255,255,0.1);
+    backdrop-filter: blur(10px);
     font-size: 0.9em;
+    line-height: 1.5;
+    text-align: left;
+}
+
+/* Better typography for technical indicators count */
+.ta-summary > div:nth-child(4) {
+    font-size: 1.1em;
+    font-weight: 600;
+    margin: 1rem 0;
     opacity: 0.9;
+}
+
+/* Improved signal emoji styling */
+.overall-signal::before {
+    content: '';
+    display: inline-block;
+    margin-right: 0.5rem;
+}
+
+/* Add subtle glow effects for better visual appeal */
+.ai-mood-label.bullish {
+    box-shadow: 0 0 20px rgba(52, 211, 153, 0.3);
+}
+
+.ai-mood-label.bearish {
+    box-shadow: 0 0 20px rgba(248, 113, 113, 0.3);
+}
+
+.ai-mood-label.neutral {
+    box-shadow: 0 0 20px rgba(255, 255, 255, 0.2);
+}
+
+/* Dark theme optimizations for the enhanced designs */
+.dark-theme .ai-analysis-card {
+    background: linear-gradient(135deg, #312E81 0%, #5B21B6 50%, #BE185D 100%);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+
+.dark-theme .ta-summary {
+    background: linear-gradient(135deg, #1E3A8A 0%, #1E40AF 50%, #0284C7 100%);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+
+.dark-theme .ai-analysis-card:hover, .dark-theme .ta-summary:hover {
+    box-shadow: 0 15px 40px rgba(0, 0, 0, 0.7);
+}
+
+/* Accessibility improvements */
+@media (prefers-reduced-motion: reduce) {
+    .ai-analysis-card, .ta-summary, .ai-mood-icon, .overall-signal {
+        transition: none !important;
+    }
+    
+    .ai-analysis-card:hover, .ta-summary:hover, .ai-mood-icon:hover, .overall-signal:hover {
+        transform: none !important;
+    }
 }
 /* Responsive breakpoints for different screen sizes */
 @media (min-width: 1920px) {
@@ -565,7 +742,37 @@ main {
 }
 @media (max-width: 900px) {
     .ta-container { max-width: 1200px; padding: 0 1rem; width: 90%; }
-    .grid { grid-template-columns: 2fr 1fr; gap: 1.5rem; }
+    .ta-container .grid { 
+        grid-template-columns: 1fr; 
+        gap: 1rem; 
+    }
+    .ta-container .chart-container { 
+        grid-column: 1 / 2; 
+        margin-bottom: 1rem;
+        min-height: 250px;
+    }
+    .ta-container .indicators-panel { 
+        grid-column: 1 / 2; 
+        grid-row: auto; 
+        max-height: 50vh;
+        position: static;
+    }
+    
+    /* Compact patterns on mobile */
+    .patterns-container {
+        max-height: 200px;
+    }
+    
+    .pattern-entry {
+        padding: 0.25rem;
+        margin: 0.2rem 0;
+        font-size: 0.75em;
+    }
+    
+    .pattern-entry .explanation {
+        font-size: 0.65em;
+        line-height: 1.0;
+    }
 }
 @media (max-width: 768px) {
     .header-content {
@@ -843,52 +1050,179 @@ button.loading::after {
     color: var(--accent-color);
     font-weight: 600;
 }
-#aiAnalysisSection { margin-top: 1.5rem; }
-.ai-analysis-card {
-    background: linear-gradient(135deg, var(--accent-color), var(--accent-hover));
-    color: white;
-    padding: 1.5rem;
-    border-radius: 16px;
-    margin-bottom: 1rem;
-    box-shadow: var(--shadow);
+#aiAnalysisSection { 
+    margin-top: 1.5rem; 
+    margin-bottom: 1.5rem;
 }
+
+.ai-analysis-card {
+    background: linear-gradient(135deg, #4F46E5 0%, #7C3AED 50%, #EC4899 100%);
+    color: white;
+    padding: 2rem;
+    border-radius: 20px;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 10px 30px rgba(79, 70, 229, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    position: relative;
+    overflow: hidden;
+}
+
+.ai-analysis-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.5), transparent);
+}
+
 .ai-analysis-header {
-    margin-bottom: 1rem;
+    margin-bottom: 1.5rem;
     display: flex;
     align-items: center;
-    gap: 0.75rem;
+    justify-content: space-between;
     flex-wrap: wrap;
     color: white;
-    font-size: 1.3rem;
-    font-weight: 600;
+    font-size: 1.4rem;
+    font-weight: 700;
 }
+
 .ai-method-badge {
-    background: rgba(255,255,255,0.25);
-    padding: 0.375rem 0.5rem;
-    border-radius: 12px;
-    font-size: 0.7em;
+    background: rgba(255,255,255,0.2);
+    padding: 0.5rem 1rem;
+    border-radius: 25px;
+    font-size: 0.75em;
     color: white;
     font-weight: 600;
+    border: 1px solid rgba(255,255,255,0.3);
+    backdrop-filter: blur(10px);
 }
+
 .ai-analysis-grid {
     display: grid;
     grid-template-columns: 1fr 2fr;
-    gap: 1.5rem;
-    align-items: center;
+    gap: 2rem;
+    align-items: start;
 }
-.ai-mood-display { text-align: center; }
-.ai-mood-icon { font-size: 3em; margin-bottom: 0.75rem; }
-.ai-mood-label { font-size: 1.5em; font-weight: 800; margin-bottom: 0.5rem; color: white; text-shadow: 2px 2px 4px rgba(0,0,0,0.6); }
-.ai-mood-label.neutral { background: rgba(255,255,255,0.25); padding: 0.375rem 0.75rem; border-radius: 8px; border: 2px solid rgba(255,255,255,0.4); display: inline-block; }
-.ai-mood-label.bullish { color: #4ade80; text-shadow: 2px 2px 4px rgba(0,0,0,0.8); }
-.ai-mood-label.bearish { color: #f87171; text-shadow: 2px 2px 4px rgba(0,0,0,0.8); }
-.ai-confidence { font-size: 0.9em; opacity: 0.9; color: white; font-weight: 600; text-shadow: 1px 1px 2px rgba(0,0,0,0.6); }
-.ai-reasoning-container { display: flex; flex-direction: column; }
-.ai-reasoning { background: rgba(255,255,255,0.15); padding: 1rem; border-radius: 12px; font-size: 0.9em; line-height: 1.5; color: white; border-left: 4px solid rgba(255,255,255,0.3); }
-.ai-explanation-card { background: var(--bg-primary); border-radius: 16px; box-shadow: var(--shadow); margin-top: 1rem; padding: 1.5rem; border: 1px solid var(--border-color); }
-.ai-explanation-header { color: var(--text-primary); margin-bottom: 1rem; display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; font-size: 1.2rem; font-weight: 600; }
-.ai-explain-badge { background: var(--bg-tertiary); color: var(--accent-color); padding: 0.375rem 0.5rem; border-radius: 12px; font-size: 0.7em; font-weight: 600; }
-.ai-explanation-content { background: var(--bg-secondary); padding: 1rem; border-radius: 12px; border-left: 4px solid var(--accent-color); line-height: 1.6; color: var(--text-primary); }
+
+.ai-mood-display { 
+    text-align: center;
+    background: rgba(255,255,255,0.1);
+    padding: 1.5rem;
+    border-radius: 16px;
+    border: 1px solid rgba(255,255,255,0.2);
+    backdrop-filter: blur(10px);
+}
+
+.ai-mood-icon { 
+    font-size: 4em; 
+    margin-bottom: 1rem;
+    filter: drop-shadow(0 4px 8px rgba(0,0,0,0.3));
+}
+
+.ai-mood-label { 
+    font-size: 1.8em; 
+    font-weight: 900; 
+    margin-bottom: 0.75rem; 
+    color: white; 
+    text-shadow: 2px 2px 8px rgba(0,0,0,0.8);
+    letter-spacing: 1px;
+}
+
+.ai-mood-label.neutral { 
+    background: rgba(255,255,255,0.25); 
+    padding: 0.5rem 1rem; 
+    border-radius: 12px; 
+    border: 2px solid rgba(255,255,255,0.4); 
+    display: inline-block;
+    backdrop-filter: blur(5px);
+}
+
+.ai-mood-label.bullish { 
+    color: #34D399; 
+    text-shadow: 2px 2px 8px rgba(0,0,0,0.9);
+}
+
+.ai-mood-label.bearish { 
+    color: #F87171; 
+    text-shadow: 2px 2px 8px rgba(0,0,0,0.9);
+}
+
+.ai-confidence { 
+    font-size: 1.1em; 
+    font-weight: 700; 
+    color: white; 
+    text-shadow: 1px 1px 4px rgba(0,0,0,0.8);
+    background: rgba(255,255,255,0.15);
+    padding: 0.5rem 1rem;
+    border-radius: 25px;
+    display: inline-block;
+    margin-top: 0.5rem;
+}
+
+.ai-reasoning-container { 
+    display: flex; 
+    flex-direction: column; 
+}
+
+.ai-reasoning { 
+    background: rgba(255,255,255,0.15); 
+    padding: 1.5rem; 
+    border-radius: 16px; 
+    font-size: 1rem; 
+    line-height: 1.6; 
+    color: white; 
+    border-left: 4px solid rgba(255,255,255,0.5);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,255,255,0.2);
+}
+.ai-explanation-card { 
+    background: var(--bg-primary); 
+    border-radius: 20px; 
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1); 
+    margin-top: 1.5rem; 
+    padding: 2rem; 
+    border: 1px solid var(--border-color);
+    transition: all 0.3s ease;
+}
+
+.ai-explanation-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 35px rgba(0, 0, 0, 0.15);
+}
+
+.ai-explanation-header { 
+    color: var(--text-primary); 
+    margin-bottom: 1.5rem; 
+    display: flex; 
+    align-items: center; 
+    justify-content: space-between; 
+    flex-wrap: wrap; 
+    font-size: 1.3rem; 
+    font-weight: 700; 
+}
+
+.ai-explain-badge { 
+    background: linear-gradient(135deg, var(--accent-color), var(--accent-hover)); 
+    color: white; 
+    padding: 0.5rem 1rem; 
+    border-radius: 25px; 
+    font-size: 0.75em; 
+    font-weight: 600;
+    border: 1px solid var(--accent-color);
+}
+
+.ai-explanation-content { 
+    background: var(--bg-secondary); 
+    padding: 1.5rem; 
+    border-radius: 16px; 
+    border-left: 4px solid var(--accent-color); 
+    line-height: 1.7; 
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
+}
 .chart-info-box {
     background: var(--bg-secondary);
     padding: 1rem;
@@ -903,10 +1237,113 @@ button.loading::after {
     box-shadow: var(--shadow);
     line-height: 1.6;
 }
-.chart-info-box strong {
-    color: var(--accent-color);
-    font-weight: 700;
-    font-size: 1.05em;
+    .chart-info-box strong {
+        color: var(--accent-color);
+        font-weight: 700;
+        font-size: 1.05em;
+    }
+
+/* Professional animations and transitions */
+.ai-analysis-card, .ta-summary {
+    transition: all 0.3s ease;
+}
+
+.ai-analysis-card:hover, .ta-summary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 15px 40px rgba(79, 70, 229, 0.4);
+}
+
+.ai-mood-icon {
+    transition: transform 0.3s ease;
+}
+
+.ai-mood-icon:hover {
+    transform: scale(1.1) rotate(5deg);
+}
+
+.overall-signal {
+    transition: all 0.3s ease;
+}
+
+.overall-signal:hover {
+    transform: scale(1.05);
+}
+
+/* Mobile responsiveness for enhanced designs */
+@media (max-width: 768px) {
+    .ai-analysis-card {
+        padding: 1.5rem;
+        margin-bottom: 1rem;
+    }
+    
+    .ai-analysis-grid {
+        grid-template-columns: 1fr;
+        gap: 1.5rem;
+    }
+    
+    .ai-analysis-header {
+        font-size: 1.2rem;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 1rem;
+    }
+    
+    .ai-mood-display {
+        padding: 1rem;
+    }
+    
+    .ai-mood-icon {
+        font-size: 3em;
+    }
+    
+    .ai-mood-label {
+        font-size: 1.4em;
+    }
+    
+    .ai-confidence {
+        font-size: 1em;
+    }
+    
+    .ai-reasoning {
+        padding: 1rem;
+        font-size: 0.9em;
+    }
+    
+    .ta-summary {
+        padding: 1.5rem;
+        margin-top: 1rem;
+    }
+    
+    .ta-summary h3 {
+        font-size: 1.2em;
+        margin-bottom: 1rem;
+    }
+    
+    .overall-signal {
+        font-size: 2.2em;
+        padding: 0.75rem 1.5rem;
+        margin: 1rem 0;
+    }
+    
+    .confidence {
+        font-size: 1.1em;
+        padding: 0.5rem 1rem;
+    }
+    
+    .ta-summary > div:last-child {
+        padding: 1rem;
+        margin-top: 1.5rem;
+        text-align: center;
+        font-size: 0.8em;
+    }
+}
+
+/* More compact educational notes */
+.educational-notes {
+    margin-top: 0.75rem;
+    padding: 0.75rem;
+    font-size: 0.85em;
+    line-height: 1.4;
 }
 
 /* Error messages */
@@ -1093,9 +1530,66 @@ button:active {
 
 .grid {
     display: grid;
-    grid-template-columns: 2.5fr 1fr;
+    grid-template-columns: 1fr;
     gap: 1.5rem;
     margin-bottom: 1.5rem;
     align-items: start;
     min-height: 0;
+}
+
+/* Technical Analysis specific grid layout */
+.ta-container .grid {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 1rem;
+    margin-bottom: 1rem;
+    align-items: start;
+    min-height: 0;
+}
+
+/* Chart containers in TA module */
+.ta-container .chart-container {
+    grid-column: 1 / 2;
+    margin-bottom: 0.5rem;
+}
+
+.ta-container .indicators-panel {
+    grid-column: 2 / 3;
+    grid-row: 1 / 3;
+    max-height: 85vh;
+    overflow-y: auto;
+    position: sticky;
+    top: 1rem;
+}
+
+/* Compact patterns section */
+.patterns-container {
+    max-height: 250px;
+    overflow-y: auto;
+    background: var(--bg-tertiary);
+    border-radius: 6px;
+    padding: 0.5rem;
+    margin-top: 0.5rem;
+}
+
+.patterns-container h3 {
+    margin-bottom: 0.5rem;
+    font-size: 0.9rem;
+    color: var(--text-primary);
+    position: sticky;
+    top: 0;
+    background: var(--bg-tertiary);
+    padding: 0.25rem 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+/* More compact chart containers */
+.ta-container .chart-container {
+    min-height: 280px;
+    padding: 0.75rem;
+}
+
+.ta-container .chart-wrapper {
+    height: 220px;
+    min-height: 160px;
 } 
