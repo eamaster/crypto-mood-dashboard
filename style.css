@@ -1016,15 +1016,25 @@ main {
     
     /* Chart Container - Critical Mobile Fix */
     .chart-container {
-        padding: 0.75rem;
-        min-height: 280px;
-        max-height: 400px;
+        padding: 1rem;
+        min-height: 350px !important;
+        max-height: 450px !important;
+        width: 100% !important;
+        margin-bottom: 1.5rem;
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        overflow: visible;
     }
     
     .chart-container canvas {
-        max-height: 300px !important;
+        max-height: 350px !important;
         width: 100% !important;
-        height: auto !important;
+        height: 280px !important;
+        min-height: 250px !important;
+        flex-shrink: 0;
+        box-sizing: border-box;
     }
     
     /* Form Elements - Enhanced Touch Targets */
@@ -1045,6 +1055,37 @@ main {
         background-position: right 0.875rem center;
         background-size: 1rem;
         padding-right: 2.5rem;
+    }
+}
+
+/* Mobile Canvas Chart Fixes - Global for all mobile */
+@media (max-width: 768px) {
+    /* Ensure all chart canvases render properly on mobile */
+    canvas {
+        width: 100% !important;
+        height: auto !important;
+        max-width: calc(100vw - 2rem) !important;
+        display: block !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        border-radius: 6px;
+        box-sizing: border-box;
+    }
+    
+    /* Force chart containers to be properly sized */
+    .chart-container, .ta-container .chart-container {
+        overflow: visible !important;
+        width: 100% !important;
+        max-width: 100vw !important;
+        box-sizing: border-box !important;
+    }
+    
+    /* Ensure chart wrappers don't cause horizontal overflow */
+    .chart-wrapper, .ta-container .chart-wrapper {
+        overflow: visible !important;
+        width: 100% !important;
+        max-width: calc(100vw - 2rem) !important;
+        box-sizing: border-box !important;
     }
 }
 
@@ -1882,29 +1923,28 @@ button.loading::after {
 @media (max-width: 768px) {
     /* Chart Specific Mobile Fixes */
     .chart-wrapper {
-        width: 100%;
-        height: 240px !important;
-        min-height: 200px !important;
-        max-height: 300px !important;
+        width: 100% !important;
+        height: 280px !important;
+        min-height: 250px !important;
+        max-height: 350px !important;
         position: relative;
-        margin: 0.5rem 0;
+        margin: 0.75rem 0;
         background: var(--bg-secondary);
         border: 1px solid var(--border-color);
         border-radius: 8px;
-        padding: 0.25rem;
+        padding: 0.5rem;
         box-sizing: border-box;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        overflow: hidden;
+        display: block;
+        overflow: visible;
+        flex-shrink: 0;
     }
     
     #taChart, #candleChart, #mainChart {
         width: 100% !important;
         height: 100% !important;
-        max-width: 100% !important;
-        max-height: 100% !important;
-        min-height: 180px !important;
+        max-width: calc(100vw - 2rem) !important;
+        max-height: 320px !important;
+        min-height: 220px !important;
         display: block !important;
         background: transparent;
         position: relative;
@@ -1912,18 +1952,25 @@ button.loading::after {
         opacity: 1;
         visibility: visible !important;
         border-radius: 6px;
+        box-sizing: border-box;
     }
     
     /* Chart Info Box - Mobile Optimized */
     .chart-info-box {
         background: var(--bg-secondary);
-        padding: 0.75rem;
+        padding: 1rem;
         border-radius: 8px;
-        margin: 0.5rem 0;
-        font-size: 0.8em;
-        line-height: 1.4;
+        margin: 0.75rem 0;
+        font-size: 0.85em;
+        line-height: 1.5;
         word-break: break-word;
         overflow-wrap: break-word;
+        border: 1px solid var(--border-color);
+        border-left: 4px solid var(--accent-color);
+        box-shadow: var(--shadow);
+        width: 100%;
+        box-sizing: border-box;
+        flex-shrink: 0;
     }
     
     /* AI Analysis Mobile Optimization */
@@ -2496,25 +2543,43 @@ button:active {
     /* TA Chart Containers - Mobile */
     .ta-container .chart-container {
         grid-column: 1 / 2;
-        margin-bottom: 1rem;
-        min-height: 250px;
-        padding: 0.75rem;
-        width: 100%;
-        max-width: 100%;
+        margin-bottom: 1.5rem;
+        min-height: 380px !important;
+        max-height: 480px !important;
+        padding: 1rem;
+        width: 100% !important;
+        max-width: 100vw !important;
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        overflow: visible;
     }
     
     .ta-container .chart-container h3 {
-        font-size: 1rem;
-        margin-bottom: 0.75rem;
+        font-size: 1.1rem;
+        margin-bottom: 1rem;
         text-align: center;
-        padding: 0.5rem;
+        padding: 0.75rem;
+        background: var(--bg-secondary);
+        border-radius: 8px;
+        border-bottom: 2px solid var(--accent-color);
+        flex-shrink: 0;
     }
     
     .ta-container .chart-wrapper {
-        height: 200px;
-        min-height: 180px;
-        max-height: 260px;
-        width: 100%;
+        height: 300px !important;
+        min-height: 280px !important;
+        max-height: 350px !important;
+        width: 100% !important;
+        max-width: calc(100vw - 2rem) !important;
+        box-sizing: border-box;
+        overflow: visible;
+        flex-shrink: 0;
+        padding: 0.5rem;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
     }
     
     /* TA Indicators Panel - Mobile */
@@ -2618,21 +2683,35 @@ button:active {
     
     /* TA Chart Containers - Ultra Mobile */
     .ta-container .chart-container {
-        min-height: 220px;
-        padding: 0.5rem;
-        margin-bottom: 0.75rem;
+        min-height: 320px !important;
+        max-height: 380px !important;
+        padding: 0.75rem;
+        margin-bottom: 1.25rem;
+        width: 100% !important;
+        max-width: 100vw !important;
+        box-sizing: border-box;
     }
     
     .ta-container .chart-container h3 {
-        font-size: 0.9rem;
-        margin-bottom: 0.5rem;
-        padding: 0.375rem;
+        font-size: 1rem;
+        margin-bottom: 0.75rem;
+        padding: 0.5rem;
+        background: var(--bg-secondary);
+        border-radius: 6px;
+        text-align: center;
     }
     
     .ta-container .chart-wrapper {
-        height: 180px;
-        min-height: 160px;
-        max-height: 200px;
+        height: 240px !important;
+        min-height: 220px !important;
+        max-height: 280px !important;
+        width: 100% !important;
+        max-width: calc(100vw - 1.5rem) !important;
+        box-sizing: border-box;
+        padding: 0.375rem;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
     }
     
     /* TA Indicators Panel - Ultra Mobile */
@@ -2660,14 +2739,19 @@ button:active {
     
     /* Chart Info - Ultra Mobile */
     .ta-container .chart-info-box {
-        padding: 0.5rem;
-        margin: 0.375rem 0;
-        font-size: 0.75em;
-        line-height: 1.3;
+        padding: 0.75rem;
+        margin: 0.5rem 0;
+        font-size: 0.8em;
+        line-height: 1.4;
+        width: 100%;
+        max-width: calc(100vw - 1rem);
+        box-sizing: border-box;
+        word-break: break-word;
+        overflow-wrap: break-word;
     }
     
     .ta-container .chart-info-box strong {
-        font-size: 0.85em;
+        font-size: 0.9em;
     }
 }
 
@@ -2723,21 +2807,35 @@ button:active {
     }
     
     .ta-container .chart-container {
-        min-height: 180px;
-        padding: 0.375rem;
-        margin-bottom: 0.5rem;
+        min-height: 280px !important;
+        max-height: 320px !important;
+        padding: 0.5rem;
+        margin-bottom: 0.75rem;
+        width: 100% !important;
+        max-width: 100vw !important;
+        box-sizing: border-box;
     }
     
     .ta-container .chart-container h3 {
-        font-size: 0.85rem;
-        margin-bottom: 0.375rem;
-        padding: 0.25rem;
+        font-size: 0.9rem;
+        margin-bottom: 0.5rem;
+        padding: 0.375rem;
+        background: var(--bg-secondary);
+        border-radius: 4px;
+        text-align: center;
     }
     
     .ta-container .chart-wrapper {
-        height: 160px;
-        min-height: 140px;
-        max-height: 180px;
+        height: 200px !important;
+        min-height: 180px !important;
+        max-height: 220px !important;
+        width: 100% !important;
+        max-width: calc(100vw - 1rem) !important;
+        box-sizing: border-box;
+        padding: 0.25rem;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
     }
     
     .ta-container .indicators-panel {
@@ -2762,13 +2860,43 @@ button:active {
     }
     
     .ta-container .chart-info-box {
-        padding: 0.375rem;
-        margin: 0.25rem 0;
-        font-size: 0.7em;
-        line-height: 1.2;
+        padding: 0.5rem;
+        margin: 0.375rem 0;
+        font-size: 0.75em;
+        line-height: 1.3;
+        width: 100%;
+        max-width: calc(100vw - 0.5rem);
+        box-sizing: border-box;
+        word-break: break-word;
+        overflow-wrap: break-word;
     }
     
     .ta-container .chart-info-box strong {
-        font-size: 0.8em;
+        font-size: 0.85em;
+    }
+    
+    /* Ultra-small mobile canvas fixes */
+    canvas {
+        max-width: calc(100vw - 1rem) !important;
+        height: auto !important;
+        min-height: 160px !important;
+        max-height: 200px !important;
+    }
+    
+    .chart-container, .ta-container .chart-container {
+        min-height: 240px !important;
+        max-height: 280px !important;
+        padding: 0.375rem !important;
+        width: 100% !important;
+        max-width: 100vw !important;
+    }
+    
+    .chart-wrapper, .ta-container .chart-wrapper {
+        height: 180px !important;
+        min-height: 160px !important;
+        max-height: 200px !important;
+        width: 100% !important;
+        max-width: calc(100vw - 0.75rem) !important;
+        padding: 0.125rem !important;
     }
 } 
