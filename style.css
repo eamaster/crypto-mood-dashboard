@@ -2384,7 +2384,7 @@ button:active {
     box-sizing: border-box;
     align-items: stretch;
     justify-content: space-between;
-    min-height: 600px;
+    min-height: 700px;
 }
 
 .ta-chart-column {
@@ -2413,6 +2413,7 @@ button:active {
     flex-direction: column;
     height: 100%;
     justify-content: stretch;
+    min-height: 700px;
 }
 
 /* Enhanced Chart Container */
@@ -2584,6 +2585,10 @@ button:active {
     top: 1rem;
     width: 100%;
     box-sizing: border-box;
+    min-height: 650px;
+    display: flex;
+    flex-direction: column;
+    justify-content: stretch;
     /* Remove max-height and overflow-y to prevent unnecessary scrolling on desktop */
 }
 
@@ -2593,12 +2598,14 @@ button:active {
     border-radius: 8px;
     padding: 0.75rem;
     margin-top: 0;
+    margin-bottom: 0;
     width: 100%;
     box-sizing: border-box;
     flex: 1;
-    min-height: 250px;
+    min-height: 420px;
     display: flex;
     flex-direction: column;
+    justify-content: flex-start;
     /* Remove max-height and overflow - let content flow naturally */
 }
 
@@ -2611,6 +2618,14 @@ button:active {
     background: var(--bg-tertiary);
     padding: 0.25rem 0;
     border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+/* Add flexible spacer to patterns container to fill remaining space */
+.patterns-container::after {
+    content: '';
+    flex: 1;
+    min-height: 50px;
 }
 
 /* More compact chart containers */
