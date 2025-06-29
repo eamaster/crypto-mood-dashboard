@@ -916,6 +916,116 @@ function calculateOverallSignal(signals) {
   else return { signal: 'HOLD', confidence: (100 - confidence).toFixed(1) };
 }
 
+async function handleOHLC(request, env) {
+  try {
+    const url = new URL(request.url);
+    const coinId = url.searchParams.get('coin') || 'bitcoin';
+    const days = parseInt(url.searchParams.get('days')) || 7;
+    
+    if (!SUPPORTED_COINS[coinId]) {
+      return errorResponse(`Unsupported coin: ${coinId}`);
+    }
+    
+    // Get current price from Blockchair
+    const statsResponse = await fetch(`https://api.blockchair.com/${coinId}/stats`, {
+      headers: {
+        'X-API-Key': env.BLOCKCHAIR_API_KEY,
+      },
+    });
+    
+    if (!statsResponse.ok) {
+      throw new Error(`Blockchair API error: ${statsResponse.status}`);
+    }
+    
+    const statsData = await statsResponse.json();
+    
+    if (!statsData.data || !statsData.data.market_price_usd) {
+      throw new Error('Invalid price data from Blockchair');
+    }
+    
+    const currentPrice = statsData.data.market_price_usd;
+    
+    // Generate OHLC data (Open, High, Low, Close)
+    const ohlc = [];
+    const now = Date.now();
+    const millisecondsPerDay = 24 * 60 * 60 * 1000;
+    
+    // Create a seed based on current date for consistency
+    const today = new Date();
+    const dateSeed = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate();
+    
+    // Simple pseudo-random function with seed for consistent results
+    function seededRandom(seed) {
+      const x = Math.sin(seed) * 10000;
+      return x - Math.floor(x);
+    }
+    
+    // Target number of candles (aim for meaningful number)
+    const targetCandles = Math.min(Math.max(days * 2, 10), 30); // 2 candles per day, min 10, max 30
+    const periodSize = days / targetCandles;
+    
+    for (let i = 0; i < targetCandles; i++) {
+      const periodStart = now - ((targetCandles - i) * periodSize * millisecondsPerDay);
+      const timestamp = new Date(periodStart);
+      
+      // Generate base price for this period
+      const coinSeed = coinId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+      const periodNumber = Math.floor(periodStart / millisecondsPerDay);
+      const baseSeed = (dateSeed + coinSeed + periodNumber) % 100000;
+      
+      let basePrice;
+      if (i === targetCandles - 1) {
+        // Last candle uses current price as close
+        basePrice = currentPrice;
+      } else {
+        // Generate base price with trend
+        const baseRandomValue = seededRandom(baseSeed);
+        const baseVariation = (baseRandomValue - 0.5) * 0.12; // ±6% base variation
+        const trendFactor = 1 - ((targetCandles - i) * 0.002); // Slight trend
+        basePrice = currentPrice * (1 + baseVariation) * trendFactor;
+      }
+      
+      // Generate OHLC values around the base price
+      const highSeed = baseSeed + 1;
+      const lowSeed = baseSeed + 2;
+      const openSeed = baseSeed + 3;
+      const closeSeed = baseSeed + 4;
+      
+      const highVariation = seededRandom(highSeed) * 0.03; // Up to 3% above base
+      const lowVariation = seededRandom(lowSeed) * 0.03; // Up to 3% below base
+      const openVariation = (seededRandom(openSeed) - 0.5) * 0.02; // ±1% from base
+      const closeVariation = (seededRandom(closeSeed) - 0.5) * 0.02; // ±1% from base
+      
+      const open = basePrice * (1 + openVariation);
+      const close = i === targetCandles - 1 ? currentPrice : basePrice * (1 + closeVariation);
+      const high = Math.max(open, close) * (1 + highVariation);
+      const low = Math.min(open, close) * (1 - lowVariation);
+      
+      ohlc.push({
+        timestamp: timestamp.toISOString(),
+        open: Math.round(open * 100) / 100,
+        high: Math.round(high * 100) / 100,
+        low: Math.round(low * 100) / 100,
+        close: Math.round(close * 100) / 100,
+        volume: Math.round((seededRandom(baseSeed + 5) * 1000000 + 500000) * 100) / 100 // Simulated volume
+      });
+    }
+    
+    return jsonResponse({
+      coin: coinId,
+      ohlc: ohlc,
+      days: days,
+      symbol: SUPPORTED_COINS[coinId].symbol,
+      candles: ohlc.length,
+      note: 'OHLC data is simulated with consistent daily patterns'
+    });
+    
+  } catch (error) {
+    console.error('Error fetching OHLC:', error);
+    return errorResponse(`Failed to fetch OHLC data: ${error.message}`);
+  }
+}
+
 // =============================================================================
 // MAIN HANDLER
 // =============================================================================
@@ -956,6 +1066,9 @@ export default {
           
         case '/ai-explain':
           return await handleAIExplain(request, env);
+          
+        case '/ohlc':
+          return await handleOHLC(request, env);
           
         default:
           return errorResponse('Not found', 404);
