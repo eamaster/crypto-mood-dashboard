@@ -8,614 +8,6 @@
     <link rel="stylesheet" href="../style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
-    <style>
-        /* Technical Analysis Module specific styles */
-        body {
-            min-height: 100vh;
-        }
-
-        main {
-            padding-top: 1rem;
-        }
-
-        .ta-container {
-            max-width: 1400px;
-            margin: 0 auto;
-        }
-
-        .ta-header {
-            text-align: center;
-            margin-bottom: 2rem;
-        }
-
-        .subtitle {
-            color: var(--text-secondary);
-            font-size: 1.1em;
-            margin-bottom: 1.5rem;
-        }
-
-        .disclaimer {
-            background: linear-gradient(135deg, var(--warning-color), var(--danger-color));
-            color: white;
-            padding: 1rem 1.5rem;
-            border-radius: 12px;
-            margin-bottom: 1.5rem;
-            font-weight: 500;
-            box-shadow: var(--shadow);
-        }
-
-        .controls {
-            background: var(--bg-primary);
-            padding: 1.5rem;
-            border-radius: 12px;
-            box-shadow: var(--shadow);
-            margin-bottom: 2rem;
-            display: flex;
-            gap: 1rem;
-            align-items: center;
-            flex-wrap: wrap;
-            justify-content: flex-start;
-        }
-
-        .control-group {
-            display: flex;
-            flex-direction: column;
-            gap: 0.5rem;
-        }
-
-        .control-group label {
-            font-weight: 600;
-            color: var(--text-secondary);
-            font-size: 0.9em;
-        }
-
-        .button-group {
-            display: flex;
-            gap: 0.75rem;
-            align-items: center;
-            flex-wrap: wrap;
-            margin-left: auto;
-        }
-
-        .grid {
-            display: grid;
-            grid-template-columns: 2fr 1fr;
-            gap: 2rem;
-            margin-bottom: 2rem;
-            /* 🔧 FLEXIBLE: Grid adapts to content height */
-            align-items: start;
-            min-height: 0;
-        }
-
-        .chart-container {
-            background: var(--bg-primary);
-            border-radius: 16px;
-            padding: 2rem;
-            box-shadow: var(--shadow);
-            position: relative;
-            width: 100%;
-            /* 🔧 FLEXIBLE: Container adapts to content size */
-            display: flex;
-            flex-direction: column;
-            align-items: stretch;
-            justify-content: flex-start;
-            min-height: fit-content;
-            height: auto;
-            max-height: none;
-            /* Allow container to grow/shrink with content */
-            flex: 1;
-            overflow: visible;
-        }
-
-        .chart-container h3 {
-            color: var(--text-primary);
-            margin-bottom: 1rem;
-            font-size: 1.4rem;
-            font-weight: 700;
-            font-family: system-ui, -apple-system, sans-serif;
-            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
-            padding: 0.75rem 1.25rem;
-            border-bottom: 3px solid var(--accent-color);
-            background: var(--bg-secondary);
-            border-radius: 12px;
-            margin: -0.5rem -0.5rem 1.5rem -0.5rem;
-            letter-spacing: 0.5px;
-        }
-
-        .chart-wrapper {
-            width: 100%;
-            /* 🔧 FIXED: Stable height for reliable chart display */
-            height: 450px;
-            min-height: 350px;
-            max-height: 650px;
-            position: relative;
-            margin: 1rem 0;
-            background: var(--bg-secondary);
-            border: 2px solid var(--border-color);
-            border-radius: 12px;
-            padding: 15px;
-            box-sizing: border-box;
-            display: block;
-            overflow: hidden;
-        }
-
-        #taChart {
-            /* 🔧 FIXED: Simplified chart canvas styling for reliability */
-            width: 100% !important;
-            height: 420px !important;
-            max-width: 100% !important;
-            min-height: 300px !important;
-            max-height: 600px !important;
-            display: none;
-            background: transparent;
-            position: relative;
-            z-index: 10;
-            /* Ensure proper rendering */
-            opacity: 1;
-            visibility: visible;
-        }
-        
-        #taChart.visible {
-            display: block !important;
-        }
-        
-        .chart-container canvas {
-            visibility: visible !important;
-            border-radius: 8px;
-        }
-
-        .indicators-panel {
-            background: var(--bg-primary);
-            border-radius: 16px;
-            padding: 2rem;
-            box-shadow: var(--shadow);
-        }
-
-        .indicators-panel h3 {
-            color: var(--text-primary);
-            margin-bottom: 1rem;
-            font-size: 1.2rem;
-            font-weight: 600;
-        }
-
-        .indicator {
-            margin-bottom: 1.5rem;
-            padding: 1rem;
-            border: 1px solid var(--border-color);
-            border-radius: 12px;
-            background: var(--bg-secondary);
-        }
-
-        .indicator h3 {
-            color: var(--text-primary);
-            margin-bottom: 0.75rem;
-            font-size: 1.1em;
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-        }
-
-        .indicator-value {
-            font-size: 1.3em;
-            font-weight: 700;
-            margin-bottom: 0.5rem;
-            color: var(--text-primary);
-        }
-
-        .signal {
-            padding: 5px 12px;
-            border-radius: 20px;
-            font-size: 0.9em;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .signal.buy, .signal.bullish {
-            background: var(--success-color);
-            color: white;
-        }
-
-        .signal.sell, .signal.bearish {
-            background: var(--danger-color);
-            color: white;
-        }
-
-        .signal.neutral, .signal.hold {
-            background: var(--text-secondary);
-            color: white;
-        }
-
-        .signal-strength {
-            font-size: 0.8em;
-            color: var(--text-secondary);
-            margin-top: 0.5rem;
-        }
-
-        .explanation {
-            font-size: 0.85em;
-            color: var(--text-secondary);
-            margin-top: 0.75rem;
-            line-height: 1.4;
-        }
-
-        /* 🛠️ FIX: Enhanced loading and error states with better theme consistency */
-        .loading {
-            text-align: center;
-            color: var(--text-primary);
-            font-style: italic;
-            padding: 2rem;
-            background: var(--bg-secondary);
-            border-radius: 12px;
-            border: 2px solid var(--border-color);
-            margin: 1rem 0;
-            box-shadow: var(--shadow);
-        }
-
-        .error {
-            background: var(--danger-color);
-            color: white;
-            padding: 1.25rem;
-            border-radius: 12px;
-            margin: 1rem 0;
-            font-weight: 500;
-            box-shadow: var(--shadow);
-            border: 2px solid rgba(255, 255, 255, 0.2);
-        }
-
-        .ta-summary {
-            background: linear-gradient(135deg, var(--accent-color), var(--accent-hover));
-            color: white;
-            padding: 2rem;
-            border-radius: 16px;
-            margin-top: 2rem;
-            text-align: center;
-            box-shadow: var(--shadow);
-        }
-
-        .ta-summary h3 {
-            margin-bottom: 1rem;
-            font-size: 1.3em;
-        }
-
-        .overall-signal {
-            font-size: 2em;
-            font-weight: 700;
-            margin: 1rem 0;
-        }
-
-        .confidence {
-            font-size: 0.9em;
-            opacity: 0.9;
-        }
-
-        /* 🛠️ FIX: Enhanced mobile responsiveness with improved dark theme support */
-        @media (max-width: 768px) {
-            .grid {
-                grid-template-columns: 1fr;
-                gap: 1.5rem;
-            }
-            
-            .controls {
-                flex-direction: column;
-                align-items: stretch;
-                gap: 1rem;
-                padding: 1.25rem;
-            }
-            
-            .button-group {
-                margin-left: 0;
-                justify-content: center;
-                width: 100%;
-                flex-direction: column;
-                gap: 0.75rem;
-            }
-            
-            .control-group {
-                width: 100%;
-            }
-            
-            .chart-wrapper {
-                /* 🔧 FIXED: Mobile-responsive height */
-                height: 350px;
-                min-height: 300px;
-                max-height: 400px;
-                padding: 12px;
-                margin: 0.75rem 0;
-                border-width: 1px;
-            }
-            
-            #taChart {
-                /* 🔧 FIXED: Mobile chart with stable height */
-                height: 320px !important;
-                min-height: 280px !important;
-                max-height: 370px !important;
-            }
-            
-            .chart-container, .indicators-panel {
-                padding: 1.25rem;
-            }
-            
-            .chart-container {
-                /* 🔧 FLEXIBLE: Mobile container adapts to content */
-                min-height: fit-content;
-                height: auto;
-            }
-            
-            .chart-container h3 {
-                font-size: 1.25rem;
-                font-weight: 700;
-                margin: -0.75rem -0.75rem 1.25rem -0.75rem;
-                padding: 0.75rem 1rem;
-                letter-spacing: 0.3px;
-            }
-            
-            .chart-info-box {
-                padding: 1rem;
-                font-size: 0.85em;
-                margin: 0.75rem 0;
-                border-width: 1px;
-                border-left-width: 4px;
-            }
-        }
-
-        /* 🛠️ FIX: Enhanced Educational Notes with better theme support */
-        .educational-notes {
-            margin-top: 1.5rem;
-            padding: 1.25rem;
-            background: var(--bg-secondary);
-            border: 2px solid var(--border-color);
-            border-radius: 12px;
-            font-size: 0.9em;
-            border-left: 6px solid var(--accent-color);
-            color: var(--text-primary);
-            box-shadow: var(--shadow);
-            line-height: 1.5;
-        }
-
-        .educational-notes strong {
-            color: var(--accent-color);
-            font-weight: 600;
-        }
-
-        /* AI Analysis Section Styles */
-        #aiAnalysisSection {
-            margin-top: 2rem;
-        }
-        
-        .ai-analysis-card {
-            background: linear-gradient(135deg, var(--accent-color), var(--accent-hover));
-            color: white;
-            padding: 2rem;
-            border-radius: 16px;
-            margin-bottom: 1.5rem;
-            box-shadow: var(--shadow);
-        }
-        
-        .ai-analysis-header {
-            margin-bottom: 1.5rem;
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-            flex-wrap: wrap;
-            color: white;
-            font-size: 1.3rem;
-            font-weight: 600;
-        }
-        
-        .ai-method-badge {
-            background: rgba(255,255,255,0.25);
-            padding: 0.5rem 0.75rem;
-            border-radius: 12px;
-            font-size: 0.7em;
-            color: white;
-            font-weight: 600;
-        }
-        
-        .ai-analysis-grid {
-            display: grid;
-            grid-template-columns: 1fr 2fr;
-            gap: 2rem;
-            align-items: center;
-        }
-        
-        .ai-mood-display {
-            text-align: center;
-        }
-        
-        .ai-mood-icon {
-            font-size: 3em;
-            margin-bottom: 1rem;
-        }
-        
-        .ai-mood-label {
-            font-size: 1.5em;
-            font-weight: 800;
-            margin-bottom: 0.5rem;
-            color: white;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.6);
-        }
-        
-        .ai-mood-label.neutral {
-            background: rgba(255,255,255,0.25);
-            padding: 0.5rem 1rem;
-            border-radius: 8px;
-            border: 2px solid rgba(255,255,255,0.4);
-            display: inline-block;
-        }
-        
-        .ai-mood-label.bullish {
-            color: #4ade80;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
-        }
-        
-        .ai-mood-label.bearish {
-            color: #f87171;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
-        }
-        
-        .ai-confidence {
-            font-size: 0.9em;
-            opacity: 0.9;
-            color: white;
-            font-weight: 600;
-            text-shadow: 1px 1px 2px rgba(0,0,0,0.6);
-        }
-        
-        .ai-reasoning-container {
-            display: flex;
-            flex-direction: column;
-        }
-        
-        .ai-reasoning {
-            background: rgba(255,255,255,0.15);
-            padding: 1.5rem;
-            border-radius: 12px;
-            font-size: 0.9em;
-            line-height: 1.5;
-            color: white;
-            border-left: 4px solid rgba(255,255,255,0.3);
-        }
-        
-        /* AI Explanation Section */
-        .ai-explanation-card {
-            background: var(--bg-primary);
-            border-radius: 16px;
-            box-shadow: var(--shadow);
-            margin-top: 1rem;
-            padding: 2rem;
-            border: 1px solid var(--border-color);
-        }
-        
-        .ai-explanation-header {
-            color: var(--text-primary);
-            margin-bottom: 1.5rem;
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-            flex-wrap: wrap;
-            font-size: 1.2rem;
-            font-weight: 600;
-        }
-        
-        .ai-explain-badge {
-            background: var(--bg-tertiary);
-            color: var(--accent-color);
-            padding: 0.5rem 0.75rem;
-            border-radius: 12px;
-            font-size: 0.7em;
-            font-weight: 600;
-        }
-        
-        .ai-explanation-content {
-            background: var(--bg-secondary);
-            padding: 1.5rem;
-            border-radius: 12px;
-            border-left: 4px solid var(--accent-color);
-            line-height: 1.6;
-            color: var(--text-primary);
-        }
-        
-        /* 🛠️ FIX: Enhanced chart theme improvements with better contrast */
-        .chart-info-box {
-            background: var(--bg-secondary);
-            padding: 1.5rem;
-            border-radius: 12px;
-            margin: 1rem 0;
-            font-size: 0.95em;
-            font-weight: 500;
-            font-family: system-ui, -apple-system, sans-serif;
-            color: var(--text-primary);
-            border: 2px solid var(--border-color);
-            border-left: 6px solid var(--accent-color);
-            box-shadow: var(--shadow);
-            line-height: 1.6;
-        }
-        
-        .chart-info-box strong {
-            color: var(--accent-color);
-            font-weight: 700;
-            font-size: 1.05em;
-        }
-
-        /* 🔧 FLEXIBLE: Additional utilities for flexible containers */
-        .flexible-container {
-            display: flex;
-            flex-direction: column;
-            min-height: 0;
-            flex: 1;
-        }
-        
-        .auto-resize {
-            resize: both;
-            overflow: auto;
-            min-width: 300px;
-            min-height: 200px;
-        }
-        
-        /* Container query support for modern browsers */
-        @container (max-width: 500px) {
-            .chart-wrapper {
-                padding: 8px;
-                min-height: 200px;
-            }
-        }
-
-        /* Enhanced mobile responsiveness */
-        @media (max-width: 768px) {
-            .ai-analysis-grid {
-                grid-template-columns: 1fr;
-                gap: 1.5rem;
-                text-align: center;
-            }
-            
-            .ai-analysis-header {
-                flex-direction: column;
-                gap: 0.75rem;
-                text-align: center;
-            }
-            
-            .ai-explanation-header {
-                flex-direction: column;
-                gap: 0.75rem;
-                text-align: center;
-            }
-            
-            .chart-container, .indicators-panel {
-                padding: 1rem;
-            }
-            
-            .ta-container {
-                padding: 0 1rem;
-            }
-            
-            .controls {
-                padding: 1rem;
-            }
-            
-            .ai-analysis-card, .ai-explanation-card {
-                padding: 1.5rem;
-            }
-        }
-
-        @media (max-width: 480px) {
-            .ai-mood-icon {
-                font-size: 2.5em;
-            }
-            
-            .ai-mood-label {
-                font-size: 1.3em;
-            }
-            
-            .ai-analysis-card, .ai-explanation-card {
-                padding: 1rem;
-            }
-            
-            .ta-container {
-                padding: 0 0.5rem;
-            }
-        }
-    </style>
 </head>
 <body>
     <header>
@@ -1082,17 +474,16 @@
                     scales: {
                         x: {
                             type: 'time',
-                            time: {
-                                unit: 'day'
-                            },
+                            time: { unit: 'day' },
                             ticks: {
                                 maxTicksLimit: window.innerWidth < 768 ? 4 : 7,
                                 font: {
-                                    size: window.innerWidth < 768 ? 12 : 14,
-                                    weight: '600',
+                                    size: window.innerWidth < 768 ? 10 : 11,
+                                    weight: '500',
                                     family: 'system-ui, -apple-system, sans-serif'
                                 },
-                                color: textColor
+                                color: textColor,
+                                padding: 2
                             },
                             grid: {
                                 color: gridColor,
@@ -1100,17 +491,18 @@
                             },
                             border: {
                                 color: borderColor,
-                                width: 2
+                                width: 1
                             },
                             title: {
                                 display: true,
                                 text: 'Date',
                                 color: textColor,
                                 font: {
-                                    size: window.innerWidth < 768 ? 14 : 16,
-                                    weight: '700',
+                                    size: window.innerWidth < 768 ? 11 : 12,
+                                    weight: '600',
                                     family: 'system-ui, -apple-system, sans-serif'
-                                }
+                                },
+                                padding: { top: 2, bottom: 2 }
                             }
                         },
                         y: {
@@ -1120,11 +512,12 @@
                                     return '$' + value.toLocaleString();
                                 },
                                 font: {
-                                    size: window.innerWidth < 768 ? 12 : 14,
-                                    weight: '600',
+                                    size: window.innerWidth < 768 ? 10 : 11,
+                                    weight: '500',
                                     family: 'system-ui, -apple-system, sans-serif'
                                 },
-                                color: textColor
+                                color: textColor,
+                                padding: 2
                             },
                             grid: {
                                 color: gridColor,
@@ -1132,17 +525,18 @@
                             },
                             border: {
                                 color: borderColor,
-                                width: 2
+                                width: 1
                             },
                             title: {
                                 display: true,
                                 text: 'Price (USD)',
                                 color: textColor,
                                 font: {
-                                    size: window.innerWidth < 768 ? 14 : 16,
-                                    weight: '700',
+                                    size: window.innerWidth < 768 ? 11 : 12,
+                                    weight: '600',
                                     family: 'system-ui, -apple-system, sans-serif'
-                                }
+                                },
+                                padding: { top: 2, bottom: 2 }
                             }
                         }
                     },
@@ -1151,28 +545,25 @@
                             display: true,
                             text: '📈 Technical Analysis Chart',
                             font: { 
-                                size: window.innerWidth < 768 ? 20 : 24,
+                                size: window.innerWidth < 768 ? 13 : 15,
                                 weight: 'bold',
                                 family: 'system-ui, -apple-system, sans-serif'
                             },
                             color: textColor,
-                            padding: {
-                                top: 15,
-                                bottom: 20
-                            }
+                            padding: { top: 4, bottom: 6 }
                         },
                         legend: {
                             display: true,
                             position: window.innerWidth < 768 ? 'bottom' : 'top',
                             labels: {
                                 font: {
-                                    size: window.innerWidth < 768 ? 13 : 16,
-                                    weight: '600',
+                                    size: window.innerWidth < 768 ? 10 : 11,
+                                    weight: '500',
                                     family: 'system-ui, -apple-system, sans-serif'
                                 },
-                                padding: window.innerWidth < 768 ? 15 : 25,
+                                padding: 8,
                                 usePointStyle: true,
-                                boxWidth: window.innerWidth < 768 ? 12 : 16,
+                                boxWidth: window.innerWidth < 768 ? 8 : 10,
                                 color: textColor
                             }
                         },
@@ -1180,32 +571,29 @@
                             display: window.innerWidth >= 768,
                             text: '📝 Note: Technical indicators start after sufficient data points are collected for accurate calculation',
                             font: { 
-                                size: 14,
+                                size: 10,
                                 style: 'italic',
-                                weight: '500',
+                                weight: '400',
                                 family: 'system-ui, -apple-system, sans-serif'
                             },
                             color: textColor,
-                            padding: { 
-                                top: 5,
-                                bottom: 25 
-                            }
+                            padding: { top: 2, bottom: 6 }
                         },
                         tooltip: {
                             backgroundColor: backgroundColor,
                             titleColor: textColor,
                             bodyColor: textColor,
                             borderColor: borderColor,
-                            borderWidth: 2,
-                            cornerRadius: 8,
+                            borderWidth: 1,
+                            cornerRadius: 6,
                             titleFont: { 
-                                size: window.innerWidth < 768 ? 14 : 16,
-                                weight: '700',
+                                size: window.innerWidth < 768 ? 11 : 12,
+                                weight: '600',
                                 family: 'system-ui, -apple-system, sans-serif'
                             },
                             bodyFont: { 
-                                size: window.innerWidth < 768 ? 13 : 15,
-                                weight: '600',
+                                size: window.innerWidth < 768 ? 10 : 11,
+                                weight: '500',
                                 family: 'system-ui, -apple-system, sans-serif'
                             },
                             callbacks: {
@@ -1222,30 +610,22 @@
                             }
                         }
                     },
-                    // Chart animations (reduced on mobile for performance)
+                    layout: {
+                        padding: { top: 2, bottom: 2, left: 2, right: 2 }
+                    },
                     animation: {
-                        duration: window.innerWidth < 768 ? 200 : 400,
+                        duration: window.innerWidth < 768 ? 100 : 200,
                         easing: 'easeInOutQuart'
                     },
-                    // 🛠️ FIX: Better layout padding for improved containment
-                    layout: {
-                        padding: {
-                            top: window.innerWidth < 768 ? 8 : 15,
-                            bottom: window.innerWidth < 768 ? 8 : 15,
-                            left: window.innerWidth < 768 ? 8 : 15,
-                            right: window.innerWidth < 768 ? 8 : 15
-                        }
-                    },
-                    // Mobile-specific optimizations
                     elements: {
                         point: {
-                            radius: window.innerWidth < 768 ? 2 : 3,
-                            hoverRadius: window.innerWidth < 768 ? 5 : 7,
-                            borderWidth: window.innerWidth < 768 ? 1 : 2
+                            radius: window.innerWidth < 768 ? 1 : 2,
+                            hoverRadius: window.innerWidth < 768 ? 3 : 4,
+                            borderWidth: window.innerWidth < 768 ? 1 : 1
                         },
                         line: {
                             tension: 0.1,
-                            borderWidth: window.innerWidth < 768 ? 2 : 3
+                            borderWidth: window.innerWidth < 768 ? 1 : 2
                         }
                     }
                 }
