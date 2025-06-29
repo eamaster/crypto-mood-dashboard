@@ -664,15 +664,23 @@
             // Add popular coins first - ensuring all user-specified coins are prioritized
             const popularCoins = ['bitcoin', 'ethereum', 'dogecoin', 'cardano', 'solana', 'litecoin', 'bitcoin-cash', 'ripple', 'polkadot', 'chainlink', 'stellar', 'monero', 'tezos', 'eos', 'zcash', 'dash'];
             
+            // First, add popular coins in the correct order
+            popularCoins.forEach(popularCoinId => {
+                const coin = coins.find(c => c.id === popularCoinId);
+                if (coin) {
+                    const option = document.createElement('option');
+                    option.value = coin.id;
+                    option.textContent = `${coin.name} (${coin.symbol.toUpperCase()})`;
+                    elements.coinSelect.appendChild(option);
+                }
+            });
+            
+            // Then add remaining coins
             coins.forEach(coin => {
-                const option = document.createElement('option');
-                option.value = coin.id;
-                option.textContent = `${coin.name} (${coin.symbol.toUpperCase()})`;
-                
-                // Add popular coins to top
-                if (popularCoins.includes(coin.id)) {
-                    elements.coinSelect.insertBefore(option, elements.coinSelect.firstChild);
-                } else {
+                if (!popularCoins.includes(coin.id)) {
+                    const option = document.createElement('option');
+                    option.value = coin.id;
+                    option.textContent = `${coin.name} (${coin.symbol.toUpperCase()})`;
                     elements.coinSelect.appendChild(option);
                 }
             });
