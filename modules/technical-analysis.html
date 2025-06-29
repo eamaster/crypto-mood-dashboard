@@ -606,25 +606,82 @@
         }
 
         function calculateOverallSignal(signals) {
+            console.log('📊 Calculating overall signal from signals:', signals.map(s => `${s.type}: ${s.signal} (${s.strength})`));
+            
             let buyCount = 0;
             let sellCount = 0;
-            let totalStrength = 0;
+            let neutralCount = 0;
+            let totalActionableStrength = 0; // Only BUY/SELL signals
+            let totalStrength = 0; // All signals including NEUTRAL
 
             signals.forEach(signal => {
                 const strengthValue = signal.strength === 'Strong' ? 3 : signal.strength === 'Medium' ? 2 : 1;
                 totalStrength += strengthValue;
 
-                if (signal.signal === 'BUY') buyCount += strengthValue;
-                else if (signal.signal === 'SELL') sellCount += strengthValue;
+                if (signal.signal === 'BUY') {
+                    buyCount += strengthValue;
+                    totalActionableStrength += strengthValue;
+                } else if (signal.signal === 'SELL') {
+                    sellCount += strengthValue;
+                    totalActionableStrength += strengthValue;
+                } else if (signal.signal === 'NEUTRAL') {
+                    neutralCount += strengthValue;
+                }
             });
 
-            const buyPercentage = (buyCount / totalStrength) * 100;
-            const sellPercentage = (sellCount / totalStrength) * 100;
-            const confidence = Math.max(buyPercentage, sellPercentage);
-
-            if (buyPercentage > 60) return { signal: 'BUY', confidence: confidence.toFixed(1) };
-            else if (sellPercentage > 60) return { signal: 'SELL', confidence: confidence.toFixed(1) };
-            else return { signal: 'HOLD', confidence: (100 - confidence).toFixed(1) };
+            // Calculate percentages based on actionable signals only (ignore NEUTRAL for thresholds)
+            let buyPercentage = 0;
+            let sellPercentage = 0;
+            let confidence = 50;
+            
+            if (totalActionableStrength > 0) {
+                buyPercentage = (buyCount / totalActionableStrength) * 100;
+                sellPercentage = (sellCount / totalActionableStrength) * 100;
+            }
+            
+            // Enhanced decision logic with lower thresholds and RSI override
+            let signal;
+            
+            // Special case: Strong RSI signal (oversold/overbought) can override other signals
+            const rsiSignal = signals.find(s => s.type === 'RSI');
+            if (rsiSignal && rsiSignal.strength === 'Strong') {
+                if (rsiSignal.signal === 'BUY' && buyCount >= sellCount) {
+                    signal = 'BUY';
+                    confidence = Math.min(85, 65 + (buyCount - sellCount) * 5);
+                } else if (rsiSignal.signal === 'SELL' && sellCount >= buyCount) {
+                    signal = 'SELL';
+                    confidence = Math.min(85, 65 + (sellCount - buyCount) * 5);
+                } else {
+                    // RSI signal conflicts with other indicators
+                    signal = 'HOLD';
+                    confidence = 55;
+                }
+            } else {
+                // Normal logic with reduced thresholds
+                if (buyPercentage >= 45) { // Reduced from 60% to 45%
+                    signal = 'BUY';
+                    confidence = Math.min(90, 50 + buyPercentage * 0.6);
+                } else if (sellPercentage >= 45) { // Reduced from 60% to 45%
+                    signal = 'SELL';
+                    confidence = Math.min(90, 50 + sellPercentage * 0.6);
+                } else {
+                    signal = 'HOLD';
+                    confidence = Math.max(45, 60 - Math.abs(buyPercentage - sellPercentage));
+                }
+            }
+            
+            const result = {
+                signal: signal,
+                confidence: Math.round(confidence),
+                buyCount: buyCount,
+                sellCount: sellCount,
+                neutralCount: neutralCount,
+                buyPercentage: buyPercentage.toFixed(1),
+                sellPercentage: sellPercentage.toFixed(1)
+            };
+            
+            console.log('📊 Overall signal calculation:', result);
+            return result;
         }
 
         async function fetchPriceData(coinId, days) {
@@ -641,11 +698,12 @@
                     y: item.price
                 }));
                 
-                // Ensure we have enough data for technical analysis
-                if (priceData.length < 20) {
-                    throw new Error(`Insufficient data: only ${priceData.length} points available (need at least 20 for technical indicators)`);
+                // Flexible data requirements - adapt indicators to available data
+                if (priceData.length < 3) {
+                    throw new Error(`Insufficient data: only ${priceData.length} points available (need at least 3 for basic analysis)`);
                 }
                 
+                console.log(`✅ Price data ready: ${priceData.length} points over ${days} days`);
                 return priceData;
             } catch (error) {
                 console.error('Error fetching price data:', error);
@@ -741,12 +799,13 @@
             }
         }
 
-        function displayChart(price, sma20, bb) {
+        function displayChart(price, sma20, bb, smaPeriod = 20) {
             console.log('Creating chart with data:', {
                 pricePoints: price.length,
                 smaPoints: sma20.length,
                 bbUpperPoints: bb.upper.length,
-                bbLowerPoints: bb.lower.length
+                bbLowerPoints: bb.lower.length,
+                smaPeriod: smaPeriod
             });
             
             const canvas = document.getElementById('taChart');
@@ -800,7 +859,7 @@
             // Add SMA if available
             if (sma20.length > 0) {
                 datasets.push({
-                    label: `SMA 20 (${sma20.length} points)`,
+                    label: `SMA ${smaPeriod} (${sma20.length} points)`,
                     data: sma20,
                     borderColor: successColor,
                     borderWidth: 2,
@@ -1702,11 +1761,11 @@
             }, 100);
         }
 
-        function displayIndicators(rsi, sma20, signals) {
+        function displayIndicators(rsi, sma20, signals, smaPeriod = 20, rsiPeriod = 14, bbPeriod = 20) {
             // ✅ FIX: Robust RSI value extraction with proper fallbacks
             const currentRSI = rsi.length > 0 ? rsi[rsi.length - 1].y : null;
             const rsiDisplay = currentRSI !== null ? currentRSI.toFixed(2) : 'N/A';
-            const rsiStatus = currentRSI !== null ? 'Available' : 'Insufficient data (needs 15+ points)';
+            const rsiStatus = currentRSI !== null ? 'Available' : `Insufficient data (needs ${rsiPeriod}+ points)`;
 
             const rsiSignal = signals.find(s => s.type === 'RSI');
             const smaSignal = signals.find(s => s.type === 'SMA');
@@ -1715,7 +1774,7 @@
             // ✅ FIX: Enhanced display with data validation
             document.getElementById('indicators').innerHTML = `
                 <div class="indicator">
-                    <h3>📈 RSI (14)</h3>
+                    <h3>📈 RSI (${rsiPeriod})</h3>
                     <div class="indicator-value">${rsiDisplay}</div>
                     <div class="signal ${rsiSignal.signal.toLowerCase()}">${rsiSignal.signal}</div>
                     <div class="signal-strength">${rsiSignal.strength} Signal</div>
@@ -1724,14 +1783,14 @@
                 </div>
 
                 <div class="indicator">
-                    <h3>📊 Moving Average (20)</h3>
+                    <h3>📊 Moving Average (${smaPeriod})</h3>
                     <div class="signal ${smaSignal.signal.toLowerCase()}">${smaSignal.signal}</div>
                     <div class="signal-strength">${smaSignal.strength} Signal</div>
                     <div class="explanation">${smaSignal.reason}</div>
                 </div>
 
                 <div class="indicator">
-                    <h3>📏 Bollinger Bands</h3>
+                    <h3>📏 Bollinger Bands (${bbPeriod})</h3>
                     <div class="signal ${bbSignal.signal.toLowerCase()}">${bbSignal.signal}</div>
                     <div class="signal-strength">${bbSignal.strength} Signal</div>
                     <div class="explanation">${bbSignal.reason}</div>
@@ -1739,20 +1798,20 @@
 
                 <div class="educational-notes">
                     <strong>📚 Educational Notes:</strong><br>
-                    • <strong>Why indicators start mid-chart:</strong> SMA(20) requires 20 data points, BB bands require SMA calculation<br>
-                    • <strong>RSI interpretation:</strong> < 30 potentially oversold, > 70 potentially overbought<br>
-                    • <strong>SMA signals:</strong> Price above SMA suggests potential uptrend<br>
-                    • <strong>Bollinger Bands:</strong> Price touching bands may indicate reversal opportunities<br>
-                    • <strong>Technical accuracy:</strong> Delayed indicator start ensures mathematical correctness
+                    • <strong>Adaptive Indicators:</strong> Period lengths automatically adjust based on available data<br>
+                    • <strong>RSI(${rsiPeriod}) interpretation:</strong> < 30 potentially oversold, > 70 potentially overbought<br>
+                    • <strong>SMA(${smaPeriod}) signals:</strong> Price above SMA suggests potential uptrend<br>
+                    • <strong>Bollinger Bands(${bbPeriod}):</strong> Price touching bands may indicate reversal opportunities<br>
+                    • <strong>Technical accuracy:</strong> Shorter periods used when limited data available
                 </div>
             `;
         }
 
-        function displayIndicatorsWithPatterns(rsi, sma20, traditionalSignals, candlePatterns) {
+        function displayIndicatorsWithPatterns(rsi, sma20, traditionalSignals, candlePatterns, smaPeriod = 20, rsiPeriod = 14, bbPeriod = 20, dataLength = 0) {
             // Traditional indicators
             const currentRSI = rsi.length > 0 ? rsi[rsi.length - 1].y : null;
             const rsiDisplay = currentRSI !== null ? currentRSI.toFixed(2) : 'N/A';
-            const rsiStatus = currentRSI !== null ? 'Available' : 'Insufficient data (needs 15+ points)';
+            const rsiStatus = currentRSI !== null ? 'Available' : `Insufficient data (needs ${rsiPeriod}+ points)`;
 
             const rsiSignal = traditionalSignals.find(s => s.type === 'RSI');
             const smaSignal = traditionalSignals.find(s => s.type === 'SMA');
@@ -1789,7 +1848,7 @@
 
             document.getElementById('indicators').innerHTML = `
                 <div class="indicator">
-                    <h3>📈 RSI (14)</h3>
+                    <h3>📈 RSI (${rsiPeriod})</h3>
                     <div class="indicator-value">${rsiDisplay}</div>
                     <div class="signal ${rsiSignal.signal.toLowerCase()}">${rsiSignal.signal}</div>
                     <div class="signal-strength">${rsiSignal.strength} Signal</div>
@@ -1798,14 +1857,14 @@
                 </div>
 
                 <div class="indicator">
-                    <h3>📊 Moving Average (20)</h3>
+                    <h3>📊 Moving Average (${smaPeriod})</h3>
                     <div class="signal ${smaSignal.signal.toLowerCase()}">${smaSignal.signal}</div>
                     <div class="signal-strength">${smaSignal.strength} Signal</div>
                     <div class="explanation">${smaSignal.reason}</div>
                 </div>
 
                 <div class="indicator">
-                    <h3>📏 Bollinger Bands</h3>
+                    <h3>📏 Bollinger Bands (${bbPeriod})</h3>
                     <div class="signal ${bbSignal.signal.toLowerCase()}">${bbSignal.signal}</div>
                     <div class="signal-strength">${bbSignal.strength} Signal</div>
                     <div class="explanation">${bbSignal.reason}</div>
@@ -1815,7 +1874,8 @@
 
                 <div class="educational-notes">
                     <strong>📚 Educational Notes:</strong><br>
-                    • <strong>Technical Indicators:</strong> RSI, SMA, and Bollinger Bands provide quantitative analysis<br>
+                    • <strong>Adaptive Indicators:</strong> Period lengths automatically adjust based on available data (${dataLength} points)<br>
+                    • <strong>Technical Indicators:</strong> RSI(${rsiPeriod}), SMA(${smaPeriod}), and BB(${bbPeriod}) provide quantitative analysis<br>
                     • <strong>Candlestick Patterns:</strong> Visual patterns that reveal market psychology and sentiment<br>
                     • <strong>Combined Analysis:</strong> Both technical indicators and candlestick patterns work together for comprehensive market analysis<br>
                     • <strong>Pattern Recognition:</strong> Doji = indecision, Hammer = potential reversal, Engulfing = strong momentum<br>
@@ -1828,16 +1888,28 @@
             const signalClass = overallSignal.signal.toLowerCase();
             const emoji = overallSignal.signal === 'BUY' ? '🚀' : overallSignal.signal === 'SELL' ? '📉' : '⏸️';
 
+            // Build detailed breakdown if available
+            let breakdownHTML = '';
+            if (overallSignal.buyCount !== undefined) {
+                breakdownHTML = `
+                    <div style="margin-top: 10px; font-size: 0.85em; opacity: 0.9;">
+                        Signal Breakdown: ${overallSignal.buyCount} BUY • ${overallSignal.sellCount} SELL • ${overallSignal.neutralCount} NEUTRAL
+                        <br>Actionable Signals: ${overallSignal.buyPercentage}% BUY vs ${overallSignal.sellPercentage}% SELL
+                    </div>
+                `;
+            }
+
             document.getElementById('taSummary').innerHTML = `
                 <div class="ta-summary">
                     <h3>📋 Technical Analysis Summary for ${coin}</h3>
                     <div class="overall-signal">${emoji} ${overallSignal.signal}</div>
                     <div class="confidence">Confidence: ${overallSignal.confidence}%</div>
                     <div style="margin-top: 15px; font-size: 0.9em;">
-                        Based on ${totalSignals} technical indicators
+                        Based on ${totalSignals} technical indicators and patterns
                     </div>
+                    ${breakdownHTML}
                     <div style="margin-top: 15px; font-size: 0.85em; opacity: 0.9; border-top: 1px solid rgba(255,255,255,0.3); padding-top: 15px;">
-                        <strong>⚠️ Remember:</strong> Technical analysis and AI insights are educational tools, not crystal balls. They help identify trends and patterns, but markets can be unpredictable. Technical indicators may start mid-timeframe due to calculation requirements (e.g., SMA needs 20 data points). AI analysis enhances traditional indicators but should not be solely relied upon. This is educational content only, not investment advice. Always do your own research and never invest more than you can afford to lose.
+                        <strong>⚠️ Remember:</strong> Technical analysis and AI insights are educational tools, not crystal balls. They help identify trends and patterns, but markets can be unpredictable. Technical indicators may start mid-timeframe due to calculation requirements. AI analysis enhances traditional indicators but should not be solely relied upon. This is educational content only, not investment advice. Always do your own research and never invest more than you can afford to lose.
                     </div>
                 </div>
             `;
@@ -1912,70 +1984,15 @@
                 document.getElementById('aiExplainBtn').style.display = 'inline-flex';
                 
             } catch (error) {
-                console.error('❌ AI Analysis failed:', error);
-                displayAIAnalysisError(error.message);
+                console.error('❌ AI Analysis API failed, using enhanced local analysis:', error);
+                // Use enhanced local analysis as fallback
+                const localResult = performLocalAIAnalysis(liveCurrentRSI, smaSignal, bbSignal, priceData, coinId, []);
+                displayAIAnalysis(localResult);
+                document.getElementById('aiExplainBtn').style.display = 'inline-flex';
             }
         }
 
-        /**
-         * Display AI analysis results in the UI
-         */
-        function displayAIAnalysis(aiResult) {
-            // Show the AI analysis section
-            document.getElementById('aiAnalysisSection').style.display = 'block';
-            
-            // Update mood icon and label
-            const moodIcons = {
-                'bullish': '🚀',
-                'bearish': '🐻',
-                'neutral': '⚖️'
-            };
-            
-            const aiMoodLabel = document.getElementById('aiMoodLabel');
-            const aiMoodIcon = document.getElementById('aiMoodIcon');
-            
-            // Set icon and text
-            aiMoodIcon.textContent = moodIcons[aiResult.mood] || '🤖';
-            aiMoodLabel.textContent = aiResult.mood.toUpperCase();
-            
-            // ✅ FIX: Apply proper styling classes for better contrast
-            aiMoodLabel.className = ''; // Clear existing classes
-            aiMoodLabel.classList.add(aiResult.mood); // Add mood-specific class
-            
-            // Enhanced contrast for different moods
-            if (aiResult.mood === 'neutral') {
-                // White text with dark background for better contrast on purple
-                aiMoodLabel.style.color = '#ffffff';
-                aiMoodLabel.style.background = 'rgba(255,255,255,0.25)';
-                aiMoodLabel.style.border = '2px solid rgba(255,255,255,0.4)';
-                aiMoodLabel.style.padding = '8px 16px';
-                aiMoodLabel.style.borderRadius = '8px';
-                aiMoodLabel.style.textShadow = '2px 2px 4px rgba(0,0,0,0.8)';
-                aiMoodLabel.style.fontWeight = '800';
-            } else if (aiResult.mood === 'bullish') {
-                aiMoodLabel.style.color = '#4ade80';
-                aiMoodLabel.style.textShadow = '2px 2px 4px rgba(0,0,0,0.8)';
-                aiMoodLabel.style.fontWeight = '800';
-            } else if (aiResult.mood === 'bearish') {
-                aiMoodLabel.style.color = '#f87171';
-                aiMoodLabel.style.textShadow = '2px 2px 4px rgba(0,0,0,0.8)';
-                aiMoodLabel.style.fontWeight = '800';
-            }
-            
-            // Enhanced confidence styling
-            const aiConfidence = document.getElementById('aiConfidence');
-            aiConfidence.textContent = `Confidence: ${aiResult.confidence}%`;
-            aiConfidence.style.color = '#ffffff';
-            aiConfidence.style.fontWeight = '600';
-            aiConfidence.style.textShadow = '1px 1px 2px rgba(0,0,0,0.6)';
-            
-            // Update reasoning
-            document.getElementById('aiReasoning').textContent = aiResult.reasoning;
-            
-            // Update method badge
-            const methodText = aiResult.method === 'cohere-classify-api' ? 'Cohere AI' : 'Rule-based';
-            document.getElementById('aiMethodBadge').textContent = methodText;
-        }
+
 
         /**
          * Display AI analysis error
@@ -2041,9 +2058,12 @@
                 });
                 
                 if (!response.ok) {
-                    // Fallback to regular AI analysis if enhanced endpoint not available
-                    console.log('Enhanced AI endpoint not available, falling back to regular analysis...');
-                    return await performAIAnalysis(priceData, rsi, sma20, bb, traditionalSignals, coinId);
+                    // Use enhanced local analysis if enhanced endpoint not available
+                    console.log('Enhanced AI endpoint not available, using enhanced local analysis...');
+                    const localResult = performLocalAIAnalysis(liveCurrentRSI, smaSignal, bbSignal, priceData, coinId, candlePatterns);
+                    displayAIAnalysis(localResult);
+                    document.getElementById('aiExplainBtn').style.display = 'inline-flex';
+                    return;
                 }
                 
                 const aiResult = await response.json();
@@ -2056,10 +2076,13 @@
                 document.getElementById('aiExplainBtn').style.display = 'inline-flex';
                 
             } catch (error) {
-                console.error('❌ Enhanced AI Analysis failed:', error);
-                // Fallback to regular AI analysis
-                console.log('Falling back to regular AI analysis...');
-                return await performAIAnalysis(priceData, rsi, sma20, bb, traditionalSignals, coinId);
+                console.error('❌ Enhanced AI Analysis failed, using enhanced local analysis:', error);
+                // Use enhanced local analysis with patterns as fallback
+                const liveCurrentPrice = priceData[priceData.length - 1].y;
+                const liveCurrentRSI = rsi.length > 0 ? rsi[rsi.length - 1].y : 50;
+                const localResult = performLocalAIAnalysis(liveCurrentRSI, smaSignal, bbSignal, priceData, coinId, candlePatterns);
+                displayAIAnalysis(localResult);
+                document.getElementById('aiExplainBtn').style.display = 'inline-flex';
             }
         }
 
@@ -2124,8 +2147,174 @@
         }
 
         /**
+         * Generate comprehensive local AI explanation of current market patterns
+         */
+        function generateLocalAIExplanation(analysisData) {
+            console.log('🧠 Generating comprehensive local AI explanation...');
+            
+            if (!analysisData || !analysisData.priceData) {
+                return {
+                    explanation: 'Unable to generate explanation: Analysis data is incomplete. Please run a fresh analysis.',
+                    method: 'error'
+                };
+            }
+            
+            const { priceData, rsi, sma, bb, signals, coin, timeframe, currentPrice, currentRSI, currentSMA, currentBBUpper, currentBBLower, candlePatterns } = analysisData;
+            
+            let explanation = '';
+            
+            // Market Overview
+            explanation += `📊 **COMPREHENSIVE TECHNICAL ANALYSIS EXPLANATION for ${coin.toUpperCase()}**\n\n`;
+            explanation += `**Current Market Snapshot:**\n`;
+            explanation += `• Price: $${currentPrice.toLocaleString()}\n`;
+            explanation += `• Timeframe Analyzed: ${timeframe} days\n`;
+            explanation += `• Total Data Points: ${priceData.length}\n\n`;
+            
+            // RSI Analysis
+            explanation += `**📈 RSI Analysis (Relative Strength Index):**\n`;
+            if (rsi && rsi.length > 0) {
+                explanation += `• Current RSI: ${currentRSI.toFixed(2)}\n`;
+                if (currentRSI < 20) {
+                    explanation += `• **EXTREMELY OVERSOLD**: RSI below 20 suggests the asset is heavily oversold and due for a potential bounce. This is a very strong bullish signal.\n`;
+                } else if (currentRSI < 30) {
+                    explanation += `• **OVERSOLD**: RSI below 30 indicates oversold conditions. Historically, this often precedes price recoveries.\n`;
+                } else if (currentRSI > 80) {
+                    explanation += `• **EXTREMELY OVERBOUGHT**: RSI above 80 suggests the asset is heavily overbought and may face selling pressure.\n`;
+                } else if (currentRSI > 70) {
+                    explanation += `• **OVERBOUGHT**: RSI above 70 indicates overbought conditions. This could signal a potential pullback.\n`;
+                } else if (currentRSI >= 45 && currentRSI <= 55) {
+                    explanation += `• **BALANCED**: RSI around 50 shows neutral momentum with no extreme conditions.\n`;
+                } else {
+                    explanation += `• **NORMAL RANGE**: RSI is within typical trading range, suggesting balanced market conditions.\n`;
+                }
+            } else {
+                explanation += `• RSI calculation pending due to limited data points.\n`;
+            }
+            explanation += '\n';
+            
+            // Moving Average Analysis
+            explanation += `**📊 Moving Average Analysis:**\n`;
+            if (sma && sma.length > 0) {
+                explanation += `• Current SMA: $${currentSMA.toLocaleString()}\n`;
+                const priceVsSMA = ((currentPrice - currentSMA) / currentSMA) * 100;
+                explanation += `• Price vs SMA: ${priceVsSMA >= 0 ? '+' : ''}${priceVsSMA.toFixed(2)}%\n`;
+                
+                if (currentPrice > currentSMA * 1.02) {
+                    explanation += `• **BULLISH TREND**: Price is significantly above the moving average, indicating upward momentum.\n`;
+                } else if (currentPrice < currentSMA * 0.98) {
+                    explanation += `• **BEARISH TREND**: Price is below the moving average, suggesting downward pressure.\n`;
+                } else {
+                    explanation += `• **CONSOLIDATION**: Price is trading near the moving average, indicating potential consolidation phase.\n`;
+                }
+            } else {
+                explanation += `• Moving average calculation pending due to limited data points.\n`;
+            }
+            explanation += '\n';
+            
+            // Bollinger Bands Analysis
+            explanation += `**📏 Bollinger Bands Analysis:**\n`;
+            if (bb && bb.upper.length > 0) {
+                explanation += `• Upper Band: $${currentBBUpper.toLocaleString()}\n`;
+                explanation += `• Lower Band: $${currentBBLower.toLocaleString()}\n`;
+                explanation += `• Band Width: $${(currentBBUpper - currentBBLower).toLocaleString()}\n`;
+                
+                if (currentPrice < currentBBLower) {
+                    explanation += `• **OVERSOLD SIGNAL**: Price is below the lower Bollinger Band, suggesting potential oversold conditions and possible reversal.\n`;
+                } else if (currentPrice > currentBBUpper) {
+                    explanation += `• **OVERBOUGHT SIGNAL**: Price is above the upper Bollinger Band, indicating potential overbought conditions.\n`;
+                } else {
+                    const bandPosition = ((currentPrice - currentBBLower) / (currentBBUpper - currentBBLower)) * 100;
+                    explanation += `• **BAND POSITION**: Price is at ${bandPosition.toFixed(1)}% of the band range, indicating ${bandPosition > 50 ? 'upper' : 'lower'} band pressure.\n`;
+                }
+            } else {
+                explanation += `• Bollinger Bands calculation pending due to limited data points.\n`;
+            }
+            explanation += '\n';
+            
+            // Pattern Analysis
+            if (candlePatterns && candlePatterns.length > 0) {
+                explanation += `**🕯️ Pattern Recognition:**\n`;
+                const bullishPatterns = candlePatterns.filter(p => p.signal === 'BUY');
+                const bearishPatterns = candlePatterns.filter(p => p.signal === 'SELL');
+                const neutralPatterns = candlePatterns.filter(p => p.signal === 'NEUTRAL');
+                
+                explanation += `• **Patterns Detected**: ${candlePatterns.length} total (${bullishPatterns.length} bullish, ${bearishPatterns.length} bearish, ${neutralPatterns.length} neutral)\n`;
+                
+                if (bullishPatterns.length > 0) {
+                    explanation += `• **Bullish Patterns**: ${bullishPatterns.map(p => p.type).join(', ')}\n`;
+                }
+                if (bearishPatterns.length > 0) {
+                    explanation += `• **Bearish Patterns**: ${bearishPatterns.map(p => p.type).join(', ')}\n`;
+                }
+                if (neutralPatterns.length > 0) {
+                    explanation += `• **Neutral Patterns**: ${neutralPatterns.map(p => p.type).join(', ')}\n`;
+                }
+                explanation += '\n';
+            }
+            
+            // Price Trend Analysis
+            if (priceData.length >= 3) {
+                explanation += `**📈 Price Trend Analysis:**\n`;
+                const recentPrices = priceData.slice(-3);
+                const shortTermTrend = ((recentPrices[2].y - recentPrices[0].y) / recentPrices[0].y) * 100;
+                
+                explanation += `• **Short-term Trend**: ${shortTermTrend >= 0 ? '+' : ''}${shortTermTrend.toFixed(2)}%\n`;
+                
+                if (Math.abs(shortTermTrend) > 2) {
+                    explanation += `• **Strong Movement**: ${shortTermTrend > 0 ? 'Significant upward momentum' : 'Significant downward momentum'} detected.\n`;
+                } else if (Math.abs(shortTermTrend) > 0.5) {
+                    explanation += `• **Moderate Movement**: ${shortTermTrend > 0 ? 'Mild upward trend' : 'Mild downward trend'} observed.\n`;
+                } else {
+                    explanation += `• **Sideways Movement**: Price showing minimal directional change, indicating consolidation.\n`;
+                }
+                explanation += '\n';
+            }
+            
+            // Signal Summary
+            explanation += `**🎯 Signal Summary:**\n`;
+            if (signals && signals.length > 0) {
+                const buySignals = signals.filter(s => s.signal === 'BUY');
+                const sellSignals = signals.filter(s => s.signal === 'SELL');
+                const neutralSignals = signals.filter(s => s.signal === 'NEUTRAL');
+                
+                explanation += `• **Buy Signals**: ${buySignals.length} (${buySignals.map(s => s.type).join(', ')})\n`;
+                explanation += `• **Sell Signals**: ${sellSignals.length} (${sellSignals.map(s => s.type).join(', ')})\n`;
+                explanation += `• **Neutral Signals**: ${neutralSignals.length} (${neutralSignals.map(s => s.type).join(', ')})\n`;
+            }
+            explanation += '\n';
+            
+            // Trading Implications
+            explanation += `**💡 Trading Implications:**\n`;
+            if (currentRSI < 30 && currentPrice < currentBBLower) {
+                explanation += `• **Strong Buy Setup**: Both RSI and Bollinger Bands suggest oversold conditions.\n`;
+            } else if (currentRSI > 70 && currentPrice > currentBBUpper) {
+                explanation += `• **Strong Sell Setup**: Both RSI and Bollinger Bands suggest overbought conditions.\n`;
+            } else {
+                explanation += `• **Mixed Signals**: Indicators show conflicting signals, suggesting caution and further analysis.\n`;
+            }
+            
+            explanation += `• **Risk Management**: Always use stop-losses and position sizing appropriate for your risk tolerance.\n`;
+            explanation += `• **Confirmation**: Look for additional confirmations before making trading decisions.\n\n`;
+            
+            // Educational Note
+            explanation += `**📚 Educational Note:**\n`;
+            explanation += `This analysis uses adaptive technical indicators that adjust to available data. `;
+            explanation += `Short timeframes may have fewer data points, affecting indicator reliability. `;
+            explanation += `Always combine technical analysis with fundamental analysis and risk management. `;
+            explanation += `Past performance does not guarantee future results.\n\n`;
+            
+            explanation += `**⚠️ Disclaimer**: This is educational content only, not financial advice. Always do your own research and consult with financial professionals before making investment decisions.`;
+            
+            return {
+                explanation: explanation,
+                method: 'comprehensive-local-analysis',
+                timestamp: new Date().toISOString()
+            };
+        }
+
+        /**
          * Get AI explanation of current pattern
-         * Uses Cohere v2/chat endpoint via worker
+         * Uses local comprehensive analysis with API fallback
          */
         async function getAIExplanation() {
             if (!currentAnalysisData) {
@@ -2141,7 +2330,7 @@
                 document.getElementById('aiExplanationContent').innerHTML = `
                     <div style="display: flex; align-items: center; gap: 10px; color: var(--text-secondary);">
                         <div class="loading-spinner"></div>
-                        Generating AI explanation...
+                        Generating comprehensive AI explanation...
                     </div>
                 `;
                 
@@ -2160,16 +2349,9 @@
                 
                 console.log(`📊 LIVE Chart Values - Price: $${liveCurrentPrice.toLocaleString()}, RSI: ${liveCurrentRSI.toFixed(1)}, SMA: $${liveCurrentSMA.toLocaleString()}, BB: [$${liveCurrentBBLower.toLocaleString()}-$${liveCurrentBBUpper.toLocaleString()}]`);
                 
-                // ✅ FIX: Use LIVE chart values for AI explanation instead of potentially stale stored values
-                const explanationData = {
-                    rsi: currentAnalysisData.rsi,
-                    sma: currentAnalysisData.sma,
-                    bb: currentAnalysisData.bb,
-                    signals: currentAnalysisData.signals,
-                    coin: currentAnalysisData.coin,
-                    timeframe: currentAnalysisData.timeframe,
-                    priceData: currentAnalysisData.priceData,
-                    // Include LIVE price context for accurate AI explanations
+                // Prepare comprehensive data for analysis
+                const comprehensiveData = {
+                    ...currentAnalysisData,
                     currentPrice: liveCurrentPrice,
                     currentRSI: liveCurrentRSI,
                     currentSMA: liveCurrentSMA,
@@ -2177,29 +2359,50 @@
                     currentBBLower: liveCurrentBBLower
                 };
                 
-                console.log('📊 Sending LIVE AI explanation data:', explanationData);
-                
-                // Call AI explanation endpoint
-                const response = await fetch(`${WORKER_URL}/ai-explain`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify(explanationData),
-                });
-                
-                if (!response.ok) {
-                    throw new Error(`AI Explanation API error: ${response.status}`);
+                // Try API first, then use local comprehensive analysis as fallback
+                try {
+                    const explanationData = {
+                        rsi: currentAnalysisData.rsi,
+                        sma: currentAnalysisData.sma,
+                        bb: currentAnalysisData.bb,
+                        signals: currentAnalysisData.signals,
+                        coin: currentAnalysisData.coin,
+                        timeframe: currentAnalysisData.timeframe,
+                        priceData: currentAnalysisData.priceData,
+                        currentPrice: liveCurrentPrice,
+                        currentRSI: liveCurrentRSI,
+                        currentSMA: liveCurrentSMA,
+                        currentBBUpper: liveCurrentBBUpper,
+                        currentBBLower: liveCurrentBBLower
+                    };
+                    
+                    const response = await fetch(`${WORKER_URL}/ai-explain`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify(explanationData),
+                    });
+                    
+                    if (response.ok) {
+                        const aiExplanation = await response.json();
+                        console.log('🧠 AI API Explanation result:', aiExplanation);
+                        displayAIExplanation(aiExplanation);
+                        return;
+                    } else {
+                        throw new Error(`API error: ${response.status}`);
+                    }
+                } catch (apiError) {
+                    console.log('🧠 AI API not available, using comprehensive local analysis:', apiError.message);
+                    
+                    // Use comprehensive local analysis
+                    const localExplanation = generateLocalAIExplanation(comprehensiveData);
+                    console.log('🧠 Local Explanation generated:', localExplanation);
+                    displayAIExplanation(localExplanation);
                 }
                 
-                const aiExplanation = await response.json();
-                console.log('🧠 AI Explanation result:', aiExplanation);
-                
-                // Display explanation
-                displayAIExplanation(aiExplanation);
-                
             } catch (error) {
-                console.error('❌ AI Explanation failed:', error);
+                console.error('❌ AI Explanation completely failed:', error);
                 displayAIExplanationError(error.message);
             }
         }
@@ -2208,16 +2411,36 @@
          * Display AI explanation results
          */
         function displayAIExplanation(aiExplanation) {
-            // Format the explanation with proper line breaks
-            const formattedExplanation = aiExplanation.explanation
-                .replace(/\n\n/g, '</p><p>')
-                .replace(/\n/g, '<br>');
+            // Format the explanation with proper line breaks and markdown-style formatting
+            let formattedExplanation = aiExplanation.explanation
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') // Bold text
+                .replace(/\n\n/g, '</p><p>') // Paragraph breaks
+                .replace(/\n/g, '<br>') // Line breaks
+                .replace(/•/g, '&bull;'); // Bullet points
             
-            document.getElementById('aiExplanationContent').innerHTML = `<p>${formattedExplanation}</p>`;
+            document.getElementById('aiExplanationContent').innerHTML = `<div style="line-height: 1.6;">${formattedExplanation}</div>`;
             
-            // Update method badge
-            const methodText = aiExplanation.method === 'cohere-chat-api' ? 'Cohere AI' : 'Rule-based';
+            // Update method badge with better descriptions
+            let methodText;
+            switch (aiExplanation.method) {
+                case 'cohere-chat-api':
+                    methodText = 'Cohere AI';
+                    break;
+                case 'comprehensive-local-analysis':
+                    methodText = 'AI-Enhanced Local';
+                    break;
+                case 'rule-based':
+                    methodText = 'Rule-based';
+                    break;
+                case 'error':
+                    methodText = 'Error';
+                    break;
+                default:
+                    methodText = 'Local Analysis';
+            }
             document.getElementById('explainMethodBadge').textContent = methodText;
+            
+            console.log('✅ AI explanation displayed successfully with method:', methodText);
         }
 
         /**
@@ -2355,11 +2578,20 @@
                     fetchOHLCData(coinId, timeframe)
                 ]);
                 
-                // Calculate indicators
-                console.log('Calculating technical indicators...');
-                const sma20 = calculateSMA(priceData, 20);
-                const rsi = calculateRSI(priceData);
-                const bb = calculateBollingerBands(priceData);
+                // Calculate indicators with adaptive periods based on available data
+                console.log('Calculating adaptive technical indicators...');
+                
+                // Determine appropriate periods based on data length
+                const dataLength = priceData.length;
+                const smaPeriod = Math.min(Math.max(Math.floor(dataLength * 0.7), 3), 20); // Use 70% of data or minimum 3, max 20
+                const rsiPeriod = Math.min(Math.max(Math.floor(dataLength * 0.5), 3), 14); // Use 50% of data or minimum 3, max 14
+                const bbPeriod = smaPeriod; // Use same period as SMA
+                
+                console.log(`📊 Adaptive periods: SMA=${smaPeriod}, RSI=${rsiPeriod}, BB=${bbPeriod} (based on ${dataLength} data points)`);
+                
+                const sma20 = calculateSMA(priceData, smaPeriod);
+                const rsi = calculateRSI(priceData, rsiPeriod);
+                const bb = calculateBollingerBands(priceData, bbPeriod);
                 
                 // Analyze candlestick patterns (use price data if no OHLC)
                 console.log('Analyzing candlestick patterns...');
@@ -2383,7 +2615,7 @@
                 
                 // Display both charts
                 console.log('Creating charts...');
-                displayChart(priceData, sma20, bb);
+                displayChart(priceData, sma20, bb, smaPeriod);
                 
                 // Always display OHLC section, create fallback if needed
                 if (ohlcData && ohlcData.length > 0) {
@@ -2395,7 +2627,7 @@
                 }
                 
                 // Update indicators display to include candlestick patterns
-                displayIndicatorsWithPatterns(rsi, sma20, traditionalSignals, candlePatterns);
+                displayIndicatorsWithPatterns(rsi, sma20, traditionalSignals, candlePatterns, smaPeriod, rsiPeriod, bbPeriod, dataLength);
                 displaySummary(overallSignal, allSignals.length, coinId.toUpperCase());
                 
                 // Final backup check to ensure charts are visible
@@ -2671,6 +2903,171 @@
                 console.log('🧹 TA Chart Manager cleaned up on page unload');
             }
         });
+
+        /**
+         * Local rule-based AI analysis with improved logic
+         * More accurate than the basic worker fallback
+         */
+        function performLocalAIAnalysis(rsi, smaSignal, bbSignal, priceData, coinId, patterns) {
+            console.log('🤖 Performing enhanced local AI analysis...');
+            
+            let bullishScore = 0;
+            let bearishScore = 0;
+            let confidence = 50;
+            let reasoning = '';
+            
+            // Enhanced RSI scoring with extreme conditions
+            if (rsi < 20) {
+                bullishScore += 3; // Extremely oversold - very bullish
+                reasoning += `Extremely oversold RSI (${rsi.toFixed(1)}) suggests strong buying opportunity. `;
+            } else if (rsi < 30) {
+                bullishScore += 2.5; // Oversold - bullish
+                reasoning += `Oversold RSI (${rsi.toFixed(1)}) indicates potential upward reversal. `;
+            } else if (rsi > 80) {
+                bearishScore += 3; // Extremely overbought - very bearish
+                reasoning += `Extremely overbought RSI (${rsi.toFixed(1)}) suggests strong selling pressure. `;
+            } else if (rsi > 70) {
+                bearishScore += 2.5; // Overbought - bearish
+                reasoning += `Overbought RSI (${rsi.toFixed(1)}) indicates potential downward reversal. `;
+            } else if (rsi >= 45 && rsi <= 55) {
+                bullishScore += 0.5; // Neutral momentum
+                reasoning += `Neutral RSI (${rsi.toFixed(1)}) suggests balanced momentum. `;
+            }
+            
+            // SMA scoring
+            if (smaSignal === 'BUY') {
+                bullishScore += 1.5;
+                reasoning += 'Price above moving average supports uptrend. ';
+            } else if (smaSignal === 'SELL') {
+                bearishScore += 1.5;
+                reasoning += 'Price below moving average indicates downtrend. ';
+            }
+            
+            // Bollinger Bands scoring
+            if (bbSignal === 'BUY') {
+                bullishScore += 1;
+                reasoning += 'Price near lower Bollinger Band suggests oversold condition. ';
+            } else if (bbSignal === 'SELL') {
+                bearishScore += 1;
+                reasoning += 'Price near upper Bollinger Band suggests overbought condition. ';
+            }
+            
+            // Price trend analysis
+            if (priceData.length >= 3) {
+                const recentPrices = priceData.slice(-3);
+                const trend = (recentPrices[2].y - recentPrices[0].y) / recentPrices[0].y;
+                if (trend > 0.02) {
+                    bullishScore += 1.5;
+                    reasoning += `Strong upward price trend (+${(trend * 100).toFixed(1)}%). `;
+                } else if (trend > 0.005) {
+                    bullishScore += 0.5;
+                    reasoning += `Mild upward price trend (+${(trend * 100).toFixed(1)}%). `;
+                } else if (trend < -0.02) {
+                    bearishScore += 1.5;
+                    reasoning += `Strong downward price trend (${(trend * 100).toFixed(1)}%). `;
+                } else if (trend < -0.005) {
+                    bearishScore += 0.5;
+                    reasoning += `Mild downward price trend (${(trend * 100).toFixed(1)}%). `;
+                }
+            }
+            
+            // Pattern analysis boost
+            if (patterns && patterns.length > 0) {
+                const bullishPatterns = patterns.filter(p => p.signal === 'BUY').length;
+                const bearishPatterns = patterns.filter(p => p.signal === 'SELL').length;
+                bullishScore += bullishPatterns * 0.5;
+                bearishScore += bearishPatterns * 0.5;
+                reasoning += `${bullishPatterns} bullish and ${bearishPatterns} bearish patterns detected. `;
+            }
+            
+            // Determine mood with improved thresholds
+            let mood;
+            if (bullishScore > bearishScore + 0.5) { // Reduced threshold for more sensitivity
+                mood = 'bullish';
+                confidence = Math.min(95, 55 + (bullishScore - bearishScore) * 12);
+            } else if (bearishScore > bullishScore + 0.5) {
+                mood = 'bearish';
+                confidence = Math.min(95, 55 + (bearishScore - bullishScore) * 12);
+            } else {
+                mood = 'neutral';
+                confidence = 45 + Math.abs(bullishScore - bearishScore) * 8;
+            }
+            
+            const result = {
+                mood: mood,
+                confidence: Math.round(confidence),
+                reasoning: reasoning.trim() || `Balanced analysis: ${bullishScore.toFixed(1)} bullish vs ${bearishScore.toFixed(1)} bearish signals`,
+                method: 'enhanced-local-analysis',
+                bullishScore: bullishScore.toFixed(1),
+                bearishScore: bearishScore.toFixed(1),
+                coin: coinId,
+                timestamp: new Date().toISOString()
+            };
+            
+            console.log('🤖 Enhanced Local AI Analysis:', result);
+            return result;
+        }
+
+        /**
+         * Display AI analysis results in the UI
+         */
+        function displayAIAnalysis(aiResult) {
+            // Show the AI analysis section
+            document.getElementById('aiAnalysisSection').style.display = 'block';
+            
+            // Update mood icon and label
+            const moodIcons = {
+                'bullish': '🚀',
+                'bearish': '🐻',
+                'neutral': '⚖️'
+            };
+            
+            const aiMoodLabel = document.getElementById('aiMoodLabel');
+            const aiMoodIcon = document.getElementById('aiMoodIcon');
+            
+            // Set icon and text
+            aiMoodIcon.textContent = moodIcons[aiResult.mood] || '🤖';
+            aiMoodLabel.textContent = aiResult.mood.toUpperCase();
+            
+            // ✅ FIX: Apply proper styling classes for better contrast
+            aiMoodLabel.className = ''; // Clear existing classes
+            aiMoodLabel.classList.add(aiResult.mood); // Add mood-specific class
+            
+            // Enhanced contrast for different moods
+            if (aiResult.mood === 'neutral') {
+                // White text with dark background for better contrast on purple
+                aiMoodLabel.style.color = '#ffffff';
+                aiMoodLabel.style.background = 'rgba(255,255,255,0.25)';
+                aiMoodLabel.style.border = '2px solid rgba(255,255,255,0.4)';
+                aiMoodLabel.style.padding = '8px 16px';
+                aiMoodLabel.style.borderRadius = '8px';
+                aiMoodLabel.style.textShadow = '2px 2px 4px rgba(0,0,0,0.8)';
+                aiMoodLabel.style.fontWeight = '800';
+            } else if (aiResult.mood === 'bullish') {
+                aiMoodLabel.style.color = '#4ade80';
+                aiMoodLabel.style.textShadow = '2px 2px 4px rgba(0,0,0,0.8)';
+                aiMoodLabel.style.fontWeight = '800';
+            } else if (aiResult.mood === 'bearish') {
+                aiMoodLabel.style.color = '#f87171';
+                aiMoodLabel.style.textShadow = '2px 2px 4px rgba(0,0,0,0.8)';
+                aiMoodLabel.style.fontWeight = '800';
+            }
+            
+            // Enhanced confidence styling
+            const aiConfidence = document.getElementById('aiConfidence');
+            aiConfidence.textContent = `Confidence: ${aiResult.confidence}%`;
+            aiConfidence.style.color = '#ffffff';
+            aiConfidence.style.fontWeight = '600';
+            aiConfidence.style.textShadow = '1px 1px 2px rgba(0,0,0,0.6)';
+            
+            // Update reasoning
+            document.getElementById('aiReasoning').textContent = aiResult.reasoning;
+            
+            // Update method badge
+            const methodText = aiResult.method === 'cohere-classify-api' ? 'Cohere AI' : 
+                              aiResult.method === 'enhanced-local-analysis' ? 'Enhanced Local' : 'Rule-based';
+            document.getElementById('aiMethodBadge').textContent = methodText;
+        }
     </script>
 </body>
 </html> 
