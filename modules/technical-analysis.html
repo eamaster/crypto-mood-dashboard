@@ -159,7 +159,9 @@
                 message.includes('content script') ||
                 message.includes('Receiving end does not exist') ||
                 message.includes('message channel closed') ||
-                message.includes('listener indicated an asynchronous response')) {
+                message.includes('listener indicated an asynchronous response') ||
+                message.includes('Could not establish connection') ||
+                message.includes('Extension context invalidated')) {
                 return; // Ignore extension errors
             }
             originalError.apply(console, args);
@@ -169,7 +171,8 @@
         console.warn = function(...args) {
             const message = args.join(' ');
             if (message.includes('runtime.lastError') || 
-                message.includes('extension')) {
+                message.includes('extension') ||
+                message.includes('content script')) {
                 return; // Ignore extension warnings
             }
             originalWarn.apply(console, args);
@@ -759,8 +762,9 @@
                     const priceRange = high - low;
                     const bodySize = Math.abs(close - open);
                     
-                    // Only include periods with meaningful price movement
-                    if (priceRange > 0 && (bodySize > priceRange * 0.05 || priceRange > open * 0.001)) {
+                    // More lenient criteria for OHLC inclusion - ensure we get some candles
+                    const minMovement = Math.max(open * 0.0001, 0.01); // 0.01% or $0.01 minimum
+                    if (priceRange >= 0 && (bodySize >= minMovement || priceRange >= minMovement || high !== low || close !== open)) {
                         const candle = {
                             x: periodData[Math.floor(periodData.length / 2)].x, // Use middle timestamp
                             o: parseFloat(open.toFixed(2)),
@@ -786,7 +790,7 @@
                             });
                         }
                     } else {
-                        console.log(`Skipping period with insufficient movement: range=${priceRange.toFixed(2)}, body=${bodySize.toFixed(2)}`);
+                        console.log(`Skipping period with insufficient movement: range=${priceRange.toFixed(2)}, body=${bodySize.toFixed(2)}, minRequired=${minMovement.toFixed(4)}`);
                     }
                 }
                 
