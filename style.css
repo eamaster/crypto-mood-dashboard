@@ -1980,11 +1980,11 @@ button.loading::after {
     overflow-wrap: break-word;
 }
 
-.chart-info-box strong {
-    color: var(--accent-color);
-    font-weight: 700;
-    font-size: 1.05em;
-}
+    .chart-info-box strong {
+        color: var(--accent-color);
+        font-weight: 700;
+        font-size: 1.05em;
+    }
 
 /* Responsive Chart Info Boxes for TA Module */
 .ta-responsive-chart-container .chart-info-box {
@@ -2369,7 +2369,7 @@ button:active {
     max-width: 100%;
     margin: 0 auto;
     padding: 0 0.75rem;
-    width: 100%;
+        width: 100%;
     box-sizing: border-box;
 }
 
@@ -2473,7 +2473,7 @@ button:active {
     opacity: 1 !important;
     border-radius: 6px;
     box-sizing: border-box;
-}
+    }
     
 .ta-header {
     text-align: center;
@@ -2596,7 +2596,7 @@ button:active {
     width: 100%;
     box-sizing: border-box;
     flex: 1;
-    min-height: 250px;
+    min-height: 300px;
     display: flex;
     flex-direction: column;
     /* Remove max-height and overflow - let content flow naturally */
