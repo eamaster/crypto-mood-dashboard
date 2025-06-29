@@ -31,8 +31,8 @@
         }
     };
     
-    // Rate limiting - max 1 request per endpoint per 10 seconds
-    const RATE_LIMIT_MS = 10000;
+    // Rate limiting - max 1 request per endpoint per 3 seconds (more reasonable for dashboard)
+    const RATE_LIMIT_MS = 3000;
     
     // Cloudflare Worker endpoint
     // Update this to your deployed worker URL
@@ -78,8 +78,13 @@
             return false;
         }
         
-        const now = Date.now();
+        // Skip rate limiting if this is the first fetch (initial load)
         const lastFetch = state.lastFetchTimes[endpoint] || 0;
+        if (lastFetch === 0) {
+            return false; // Allow initial fetch
+        }
+        
+        const now = Date.now();
         return (now - lastFetch) < RATE_LIMIT_MS;
     }
     
@@ -258,7 +263,7 @@
     
     async function fetchCurrentPrice(coinId) {
         if (isRateLimited('price')) {
-            console.log('Price fetch rate limited');
+            console.log('Price fetch rate limited, using cached data if available');
             return null;
         }
         
@@ -783,6 +788,12 @@
     
     async function updateDashboard(coinId = state.selectedCoin) {
         console.log(`🔄 Updating complete dashboard for ${coinId}`);
+        console.log('📊 Rate limit status:', {
+            price: isRateLimited('price'),
+            chart: isRateLimited('chart'), 
+            news: isRateLimited('news'),
+            lastFetchTimes: state.lastFetchTimes
+        });
         
         try {
             // Fetch all data in parallel for consistent snapshot
@@ -798,12 +809,14 @@
                     return null;
                 }),
                 fetchCoinNews(coinId).catch(err => {
-                    console.log('News fetch failed:', err.message);
+                    console.error('News fetch failed:', err.message);
+                    showError(elements.moodError, `News unavailable: ${err.message}`);
                     return [];
                 })
             ]);
             
             // Analyze sentiment from headlines
+            console.log(`📰 Analyzing sentiment for ${headlines.length} headlines...`);
             const sentimentData = await analyzeSentiment(headlines);
             logSentimentDebug(sentimentData, headlines);
             
@@ -870,11 +883,13 @@
     // =============================================================================
     
     async function initializeDashboard() {
-        console.log('Initializing Crypto Mood Dashboard...');
+        console.log('🚀 Initializing Crypto Mood Dashboard...');
+        console.log('🔗 Worker URL:', WORKER_URL);
+        console.log('⏱️  Rate limit:', RATE_LIMIT_MS, 'ms');
         
         try {
             // No need to initialize sentiment analyzer - handled by worker
-            console.log('Dashboard initializing with Cloudflare Worker backend');
+            console.log('🔄 Dashboard initializing with Cloudflare Worker backend');
             
             // Load theme preference
             const savedTheme = localStorage.getItem('cryptoDashboardTheme');
@@ -890,15 +905,21 @@
             elements.themeToggle.addEventListener('click', handleThemeToggle);
             
             // Populate coin selector
+            console.log('📋 Populating coin selector...');
             await populateCoinSelect();
             
-            // Initial dashboard update
+            // Initial dashboard update  
+            console.log('🔄 Performing initial dashboard update...');
             await updateDashboard();
             
-            console.log('Dashboard initialization complete');
+            console.log('✅ Dashboard initialization complete');
             
         } catch (error) {
-            console.error('Error initializing dashboard:', error);
+            console.error('❌ Error initializing dashboard:', error);
+            // Show error in UI for better visibility
+            showError(elements.priceError, 'Dashboard initialization failed');
+            showError(elements.moodError, 'Dashboard initialization failed');
+            showError(elements.chartError, 'Dashboard initialization failed');
         }
     }
     
