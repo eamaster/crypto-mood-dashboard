@@ -1082,32 +1082,10 @@
     window.addEventListener('orientationchange', () => {
         setTimeout(() => {
             handleResize();
-            
-            // Force button layout recalculation on mobile
-            if (window.innerWidth <= 768) {
-                console.log('📱 Orientation change detected, updating mobile layout...');
-                
-                // Force CSS grid recalculation for button groups
-                const buttonGroups = document.querySelectorAll('.button-group');
-                buttonGroups.forEach(group => {
-                    // Temporarily change display to force reflow
-                    group.style.display = 'none';
-                    group.offsetHeight; // Trigger reflow
-                    group.style.display = 'grid';
-                    
-                    // Ensure all buttons have proper width
-                    const buttons = group.querySelectorAll('button');
-                    buttons.forEach(button => {
-                        button.style.width = '100%';
-                        button.style.boxSizing = 'border-box';
-                    });
-                });
-                
-                // Force a dashboard refresh to ensure proper mobile layout
-                if (state.selectedCoin) {
-                    console.log('🔄 Refreshing dashboard for orientation change...');
-                    updateDashboard(state.selectedCoin);
-                }
+            // Force a dashboard refresh to ensure proper mobile layout
+            if (window.innerWidth <= 768 && state.selectedCoin) {
+                console.log('🔄 Orientation change detected, refreshing dashboard...');
+                updateDashboard(state.selectedCoin);
             }
         }, 500); // Delay to allow orientation change to complete
     });
