@@ -2802,8 +2802,13 @@
             handleOrientationChange() {
                 clearTimeout(this.orientationTimeout);
                 this.orientationTimeout = setTimeout(() => {
-                    console.log('📱 Orientation changed, optimizing charts...');
+                    console.log('📱 Orientation changed, optimizing charts and buttons...');
                     this.resizeAllCharts();
+                    
+                    // Handle button layout for mobile
+                    if (window.innerWidth <= 768) {
+                        this.optimizeButtonsForMobile();
+                    }
                     
                     // Force re-render after orientation change
                     this.charts.forEach((chart, chartId) => {
@@ -2816,6 +2821,38 @@
                         }
                     });
                 }, 500);
+            }
+            
+            optimizeButtonsForMobile() {
+                console.log('📱 TA Module: Optimizing button layout for mobile...');
+                
+                // Force button layout recalculation
+                const buttonGroups = document.querySelectorAll('.button-group');
+                buttonGroups.forEach(group => {
+                    // Temporarily change display to force reflow
+                    group.style.display = 'none';
+                    group.offsetHeight; // Trigger reflow
+                    group.style.display = 'grid';
+                    group.style.width = '100%';
+                    group.style.gridTemplateColumns = '1fr 1fr';
+                    
+                    // Ensure all buttons have proper width and grid positioning
+                    const buttons = group.querySelectorAll('button');
+                    buttons.forEach(button => {
+                        button.style.width = '100%';
+                        button.style.boxSizing = 'border-box';
+                        button.style.minWidth = 'auto';
+                        
+                        // Force full-width buttons to span properly
+                        if (button.classList.contains('ta-button') || 
+                            (button.onclick && button.onclick.toString().includes('location.href'))) {
+                            button.style.gridColumn = '1 / -1';
+                            console.log('📱 Set full-width for button:', button.textContent);
+                        }
+                    });
+                });
+                
+                console.log('✅ TA Module: Button layout optimized for mobile');
             }
             
             optimizeForMobile() {
@@ -2837,6 +2874,9 @@
                     wrapper.style.maxWidth = 'calc(100vw - 1rem)';
                     wrapper.style.overflow = 'visible';
                 });
+                
+                // Optimize button layout for mobile
+                this.optimizeButtonsForMobile();
             }
             
             initialize() {
