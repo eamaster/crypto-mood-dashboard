@@ -133,6 +133,35 @@
         
         let chartInstance = null;
         
+        // Enhanced validation functions
+        function validatePriceData(data) {
+            if (!data || !Array.isArray(data)) return false;
+            return data.every(point => 
+                point && 
+                typeof point.timestamp === 'string' && 
+                typeof point.price === 'number' && 
+                point.price > 0
+            );
+        }
+        
+        function validateNewsData(data) {
+            if (!data || !Array.isArray(data)) return false;
+            return data.every(article => 
+                article && 
+                typeof article === 'object' && 
+                (typeof article.title === 'string' || typeof article === 'string') &&
+                (article.title || article).length > 0
+            );
+        }
+        
+        function validateSentimentData(data) {
+            if (!data || typeof data !== 'object') return false;
+            if (typeof data.score !== 'number' || data.score < -5 || data.score > 5) return false;
+            if (!data.category || !['bullish', 'bearish', 'neutral'].includes(data.category)) return false;
+            if (typeof data.confidence !== 'number' || data.confidence < 0 || data.confidence > 1) return false;
+            return true;
+        }
+        
         async function fetchMoodImpactData() {
             const coinId = document.getElementById('coinId').value.trim() || 'bitcoin';
             const loadingDiv = document.getElementById('loading');
@@ -141,7 +170,7 @@
             const newsPreview = document.getElementById('newsPreview');
             
             try {
-                console.log('Starting fetchMoodImpactData for:', coinId);
+                console.log('Starting enhanced fetchMoodImpactData for:', coinId);
                 
                 // Show loading, hide other elements
                 loadingDiv.style.display = 'block';
@@ -155,8 +184,8 @@
                     chartInstance = null;
                 }
                 
-                console.log('Fetching price data and news...');
-                // Fetch price data and news in parallel with individual error handling
+                console.log('Fetching real price data and news with validation...');
+                // Fetch price data and news in parallel with enhanced error handling
                 const [priceData, newsData] = await Promise.all([
                     fetchPriceData(coinId),
                     fetchNewsData(coinId).catch(err => {
@@ -164,18 +193,38 @@
                         return []; // Return empty array on news error to continue with price-only chart
                     })
                 ]);
-                console.log('📈 Price data received:', priceData.length, 'points');
+                
+                console.log('📈 Real price data received:', priceData.length, 'points from CoinGecko');
                 console.log('📰 News data received:', newsData.length, 'headlines');
                 
-                // Analyze sentiment
-                console.log('Analyzing sentiment...');
-                const sentimentData = await analyzeSentimentData(newsData);
-                console.log('Sentiment analysis result:', sentimentData);
+                // Validate data before processing
+                if (!validatePriceData(priceData)) {
+                    throw new Error('Invalid price data received - cannot create chart');
+                }
                 
-                // Create combined chart
+                if (newsData.length > 0 && !validateNewsData(newsData)) {
+                    console.warn('Invalid news data received, proceeding with empty news array');
+                    newsData.length = 0; // Clear invalid news data
+                }
+                
+                // Analyze sentiment with enhanced validation
+                console.log('Analyzing sentiment with improved confidence calculations...');
+                const sentimentData = await analyzeSentimentData(newsData);
+                console.log('Enhanced sentiment analysis result:', sentimentData);
+                
+                // Validate sentiment data
+                if (!validateSentimentData(sentimentData)) {
+                    console.warn('Invalid sentiment data, using neutral fallback');
+                    sentimentData.score = 0;
+                    sentimentData.category = 'neutral';
+                    sentimentData.confidence = 0;
+                    sentimentData.method = 'fallback';
+                }
+                
+                // Create enhanced chart with real data
                 createMoodImpactChart(priceData, sentimentData, coinId);
                 
-                // Update UI
+                // Update UI with enhanced information
                 updateSentimentSummary(sentimentData);
                 updateNewsPreview(newsData);
                 
@@ -195,7 +244,7 @@
             const response = await fetch(`${WORKER_URL}/history?coin=${coinId}&days=7`);
             
             if (!response.ok) {
-                throw new Error(`Failed to fetch price data for ${coinId}`);
+                throw new Error(`Failed to fetch real price data for ${coinId}: HTTP ${response.status}`);
             }
             
             const data = await response.json();
@@ -205,8 +254,15 @@
             }
             
             if (!data.prices || data.prices.length === 0) {
-                throw new Error(`No price data found for ${coinId}`);
+                throw new Error(`No real price data found for ${coinId}`);
             }
+            
+            // Validate the data structure
+            if (!validatePriceData(data.prices)) {
+                throw new Error('Invalid price data format received from CoinGecko');
+            }
+            
+            console.log(`✅ Real market data from ${data.source || 'CoinGecko'}: ${data.prices.length} price points`);
             
             return data.prices.map(item => ({
                 x: new Date(item.timestamp),
@@ -216,7 +272,7 @@
         
         async function fetchNewsData(coinId) {
             try {
-                console.log(`📰 Fetching news for ${coinId}...`);
+                console.log(`📰 Fetching enhanced news for ${coinId}...`);
                 const response = await fetch(`${WORKER_URL}/news?coin=${coinId}`);
                 
                 if (!response.ok) {
@@ -225,7 +281,7 @@
                 }
                 
                 const data = await response.json();
-                console.log('📰 News API response:', data);
+                console.log('📰 Enhanced News API response:', data);
                 
                 if (data.error) {
                     console.error('News API error:', data.error);
@@ -237,17 +293,22 @@
                     return []; // Return empty array if no news found
                 }
                 
-                console.log(`✅ Successfully fetched ${data.headlines.length} headlines for ${coinId}`);
+                // Validate news data
+                if (!validateNewsData(data.headlines)) {
+                    throw new Error('Invalid news data format received');
+                }
+                
+                console.log(`✅ Successfully fetched ${data.headlines.length} validated headlines for ${coinId} from ${data.source || 'NewsAPI'}`);
                 return data.headlines;
                 
             } catch (error) {
-                console.error('❌ News fetch failed:', error.message);
+                console.error('❌ Enhanced news fetch failed:', error.message);
                 throw error; // Re-throw to show error in UI instead of silent failure
             }
         }
         
         async function analyzeSentimentData(headlines) {
-            console.log(`🧠 Starting sentiment analysis for ${headlines.length} headlines...`);
+            console.log(`🧠 Starting enhanced sentiment analysis for ${headlines.length} headlines...`);
             
             if (headlines.length === 0) {
                 console.warn('⚠️ No headlines to analyze, returning neutral sentiment');
@@ -255,12 +316,15 @@
                     score: 0,
                     category: 'neutral',
                     emoji: '😐',
-                    count: 0
+                    count: 0,
+                    confidence: 0,
+                    method: 'no-data',
+                    note: 'No headlines available for analysis'
                 };
             }
             
             try {
-                console.log('🔗 Calling sentiment analysis API...');
+                console.log('🔗 Calling enhanced sentiment analysis API...');
                 const response = await fetch(`${WORKER_URL}/sentiment`, {
                     method: 'POST',
                     headers: {
@@ -276,10 +340,15 @@
                 }
                 
                 const data = await response.json();
-                console.log('🧠 Sentiment analysis response:', data);
+                console.log('🧠 Enhanced sentiment analysis response:', data);
                 
                 if (data.error) {
                     throw new Error(data.error);
+                }
+                
+                // Validate sentiment response
+                if (!validateSentimentData(data)) {
+                    throw new Error('Invalid sentiment data received from server');
                 }
                 
                 let emoji;
@@ -296,20 +365,24 @@
                     category: data.category || 'neutral',
                     emoji: emoji,
                     count: data.total || data.analyzed || headlines.length,
-                    confidence: data.confidence,
-                    method: data.method
+                    confidence: data.confidence || 0,
+                    method: data.method || 'unknown',
+                    breakdown: data.breakdown || null,
+                    metrics: data.metrics || null
                 };
                 
-                console.log('✅ Sentiment analysis complete:', result);
+                console.log('✅ Enhanced sentiment analysis complete:', result);
                 return result;
                 
             } catch (error) {
-                console.error('❌ Error analyzing sentiment:', error);
+                console.error('❌ Error in enhanced sentiment analysis:', error);
                 return {
                     score: 0,
                     category: 'neutral',
                     emoji: '😐',
                     count: headlines.length,
+                    confidence: 0,
+                    method: 'error',
                     error: error.message
                 };
             }

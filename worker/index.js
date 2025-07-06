@@ -1,6 +1,6 @@
 // =============================================================================
 // Crypto Mood Dashboard - Cloudflare Worker
-// Handles API calls to Blockchair, @https://newsapi.org/, and Cohere AI
+// Handles API calls to CoinGecko, NewsAPI.org, and Cohere AI
 // =============================================================================
 
 // CORS headers for frontend requests
@@ -26,24 +26,78 @@ function errorResponse(message, status = 400) {
   return jsonResponse({ error: message }, status);
 }
 
-// Supported cryptocurrencies mapping (Blockchair supported coins)
+// CoinGecko API configuration
+const COINGECKO_API_BASE = 'https://api.coingecko.com/api/v3';
+const COINGECKO_RATE_LIMIT_DELAY = 1000; // 1 second between requests
+
+// Supported cryptocurrencies mapping (CoinGecko IDs)
 const SUPPORTED_COINS = {
-  'bitcoin': { id: 'bitcoin', name: 'Bitcoin', symbol: 'BTC' },
-  'ethereum': { id: 'ethereum', name: 'Ethereum', symbol: 'ETH' },
-  'litecoin': { id: 'litecoin', name: 'Litecoin', symbol: 'LTC' },
-  'bitcoin-cash': { id: 'bitcoin-cash', name: 'Bitcoin Cash', symbol: 'BCH' },
-  'cardano': { id: 'cardano', name: 'Cardano', symbol: 'ADA' },
-  'ripple': { id: 'ripple', name: 'Ripple', symbol: 'XRP' },
-  'dogecoin': { id: 'dogecoin', name: 'Dogecoin', symbol: 'DOGE' },
-  'polkadot': { id: 'polkadot', name: 'Polkadot', symbol: 'DOT' },
-  'chainlink': { id: 'chainlink', name: 'Chainlink', symbol: 'LINK' },
-  'stellar': { id: 'stellar', name: 'Stellar', symbol: 'XLM' },
-  'monero': { id: 'monero', name: 'Monero', symbol: 'XMR' },
-  'tezos': { id: 'tezos', name: 'Tezos', symbol: 'XTZ' },
-  'eos': { id: 'eos', name: 'EOS', symbol: 'EOS' },
-  'zcash': { id: 'zcash', name: 'Zcash', symbol: 'ZEC' },
-  'dash': { id: 'dash', name: 'Dash', symbol: 'DASH' },
+  'bitcoin': { id: 'bitcoin', name: 'Bitcoin', symbol: 'BTC', coingecko_id: 'bitcoin' },
+  'ethereum': { id: 'ethereum', name: 'Ethereum', symbol: 'ETH', coingecko_id: 'ethereum' },
+  'litecoin': { id: 'litecoin', name: 'Litecoin', symbol: 'LTC', coingecko_id: 'litecoin' },
+  'bitcoin-cash': { id: 'bitcoin-cash', name: 'Bitcoin Cash', symbol: 'BCH', coingecko_id: 'bitcoin-cash' },
+  'cardano': { id: 'cardano', name: 'Cardano', symbol: 'ADA', coingecko_id: 'cardano' },
+  'ripple': { id: 'ripple', name: 'Ripple', symbol: 'XRP', coingecko_id: 'ripple' },
+  'dogecoin': { id: 'dogecoin', name: 'Dogecoin', symbol: 'DOGE', coingecko_id: 'dogecoin' },
+  'polkadot': { id: 'polkadot', name: 'Polkadot', symbol: 'DOT', coingecko_id: 'polkadot' },
+  'chainlink': { id: 'chainlink', name: 'Chainlink', symbol: 'LINK', coingecko_id: 'chainlink' },
+  'stellar': { id: 'stellar', name: 'Stellar', symbol: 'XLM', coingecko_id: 'stellar' },
+  'monero': { id: 'monero', name: 'Monero', symbol: 'XMR', coingecko_id: 'monero' },
+  'tezos': { id: 'tezos', name: 'Tezos', symbol: 'XTZ', coingecko_id: 'tezos' },
+  'eos': { id: 'eos', name: 'EOS', symbol: 'EOS', coingecko_id: 'eos' },
+  'zcash': { id: 'zcash', name: 'Zcash', symbol: 'ZEC', coingecko_id: 'zcash' },
+  'dash': { id: 'dash', name: 'Dash', symbol: 'DASH', coingecko_id: 'dash' },
+  'solana': { id: 'solana', name: 'Solana', symbol: 'SOL', coingecko_id: 'solana' },
 };
+
+// Rate limiting for CoinGecko API
+let lastCoinGeckoRequest = 0;
+
+async function rateLimitedFetch(url, options = {}) {
+  const now = Date.now();
+  const timeSinceLastRequest = now - lastCoinGeckoRequest;
+  
+  if (timeSinceLastRequest < COINGECKO_RATE_LIMIT_DELAY) {
+    const waitTime = COINGECKO_RATE_LIMIT_DELAY - timeSinceLastRequest;
+    await new Promise(resolve => setTimeout(resolve, waitTime));
+  }
+  
+  lastCoinGeckoRequest = Date.now();
+  return fetch(url, options);
+}
+
+// Data validation helpers
+function validatePriceData(data) {
+  if (!data || typeof data !== 'object') return false;
+  if (typeof data.usd !== 'number' || data.usd <= 0) return false;
+  // usd_24h_change can be null, so we allow that
+  if (data.usd_24h_change !== null && typeof data.usd_24h_change !== 'number') return false;
+  return true;
+}
+
+function validateHistoryData(data) {
+  if (!data || !data.prices || !Array.isArray(data.prices)) return false;
+  if (data.prices.length === 0) return false;
+  
+  // Check if all price points are valid
+  return data.prices.every(point => 
+    Array.isArray(point) && 
+    point.length === 2 && 
+    typeof point[0] === 'number' && 
+    typeof point[1] === 'number' && 
+    point[1] > 0
+  );
+}
+
+function validateNewsData(data) {
+  if (!data || !data.articles || !Array.isArray(data.articles)) return false;
+  return data.articles.every(article => 
+    article && 
+    typeof article === 'object' && 
+    typeof article.title === 'string' && 
+    article.title.length > 0
+  );
+}
 
 // =============================================================================
 // API HANDLERS
@@ -69,48 +123,39 @@ async function handlePrice(request, env) {
       return errorResponse(`Unsupported coin: ${coinId}`);
     }
     
-    // Fetch current price from Blockchair
-    const response = await fetch(`https://api.blockchair.com/${coinId}/stats`, {
-      headers: {
-        'X-API-Key': env.BLOCKCHAIR_API_KEY,
-      },
-    });
+    const coingeckoId = SUPPORTED_COINS[coinId].coingecko_id;
+    
+    // Fetch current price from CoinGecko
+    const response = await rateLimitedFetch(
+      `${COINGECKO_API_BASE}/simple/price?ids=${coingeckoId}&vs_currencies=usd&include_24hr_change=true&include_market_cap=true&include_24hr_vol=true`
+    );
     
     if (!response.ok) {
-      throw new Error(`Blockchair API error: ${response.status}`);
+      throw new Error(`CoinGecko API error: ${response.status}`);
     }
     
     const data = await response.json();
     
-    if (!data.data || !data.data.market_price_usd) {
-      throw new Error('Invalid price data from Blockchair');
+    if (!data[coingeckoId]) {
+      throw new Error(`No price data found for ${coinId}`);
     }
     
-    // Calculate 24h change using consistent daily simulation
-    const currentPrice = data.data.market_price_usd;
+    const coinData = data[coingeckoId];
     
-    // Generate consistent 24h change based on date and coin (not random)
-    const today = new Date();
-    const dateSeed = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate();
-    const coinSeed = coinId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-    const seed = (dateSeed + coinSeed) % 100000;
-    
-    // Simple seeded pseudo-random function for consistency
-    function seededRandom(seed) {
-      const x = Math.sin(seed) * 10000;
-      return x - Math.floor(x);
+    // Validate price data
+    if (!validatePriceData(coinData)) {
+      throw new Error('Invalid price data received from CoinGecko');
     }
-    
-    // Generate consistent daily 24h change (±5% typical range)
-    const randomValue = seededRandom(seed);
-    const change24h = (randomValue - 0.5) * 10; // ±5% range
     
     return jsonResponse({
       coin: coinId,
-      price: currentPrice,
-      change24h: change24h,
+      price: coinData.usd,
+      change24h: coinData.usd_24h_change || 0,
+      market_cap: coinData.usd_market_cap || null,
+      volume_24h: coinData.usd_24h_vol || null,
       symbol: SUPPORTED_COINS[coinId].symbol,
       timestamp: new Date().toISOString(),
+      source: 'coingecko'
     });
     
   } catch (error) {
@@ -123,83 +168,43 @@ async function handleHistory(request, env) {
   try {
     const url = new URL(request.url);
     const coinId = url.searchParams.get('coin') || 'bitcoin';
-    const days = parseInt(url.searchParams.get('days')) || 7;
+    const days = Math.min(parseInt(url.searchParams.get('days')) || 7, 30); // Max 30 days
     
     if (!SUPPORTED_COINS[coinId]) {
       return errorResponse(`Unsupported coin: ${coinId}`);
     }
     
-    // Since Blockchair doesn't have a simple historical price endpoint,
-    // we'll generate consistent historical data based on current price
-    const statsResponse = await fetch(`https://api.blockchair.com/${coinId}/stats`, {
-      headers: {
-        'X-API-Key': env.BLOCKCHAIR_API_KEY,
-      },
-    });
+    const coingeckoId = SUPPORTED_COINS[coinId].coingecko_id;
     
-    if (!statsResponse.ok) {
-      throw new Error(`Blockchair API error: ${statsResponse.status}`);
+    // Fetch historical price data from CoinGecko
+    const response = await rateLimitedFetch(
+      `${COINGECKO_API_BASE}/coins/${coingeckoId}/market_chart?vs_currency=usd&days=${days}&interval=daily`
+    );
+    
+    if (!response.ok) {
+      throw new Error(`CoinGecko API error: ${response.status}`);
     }
     
-    const statsData = await statsResponse.json();
+    const data = await response.json();
     
-    if (!statsData.data || !statsData.data.market_price_usd) {
-      throw new Error('Invalid price data from Blockchair');
+    // Validate historical data
+    if (!validateHistoryData(data)) {
+      throw new Error('Invalid historical data received from CoinGecko');
     }
     
-    const currentPrice = statsData.data.market_price_usd;
-    
-    // Generate deterministic historical price data (consistent for same coin/day)
-    const prices = [];
-    const now = Date.now();
-    const millisecondsPerDay = 24 * 60 * 60 * 1000;
-    
-    // Create a seed based on current date (not time) for consistency within the day
-    const today = new Date();
-    const dateSeed = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate();
-    
-    // Simple pseudo-random function with seed for consistent results
-    function seededRandom(seed) {
-      const x = Math.sin(seed) * 10000;
-      return x - Math.floor(x);
-    }
-    
-    for (let i = days - 1; i >= 0; i--) {
-      const timestamp = now - (i * millisecondsPerDay);
-      const date = new Date(timestamp);
-      
-      let price;
-      
-      // For today (i = 0), use the exact current price to match /price endpoint
-      if (i === 0) {
-        price = currentPrice;
-      } else {
-        // For historical days, generate simulated data
-        const coinSeed = coinId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-        const dayNumber = Math.floor(timestamp / millisecondsPerDay);
-        const seed = (dateSeed + coinSeed + dayNumber) % 100000;
-        
-        // Generate consistent price variation (±8% from current price)
-        const randomValue = seededRandom(seed);
-        const variation = (randomValue - 0.5) * 0.16; // ±8% variation
-        
-        // Add some trend simulation (slight downward trend for older data)
-        const trendFactor = 1 - (i * 0.005); // Slight downward trend
-        price = currentPrice * (1 + variation) * trendFactor;
-      }
-      
-      prices.push({
+    // Transform data to expected format
+    const prices = data.prices.map(([timestamp, price]) => ({
         timestamp: new Date(timestamp).toISOString(),
         price: Math.round(price * 100) / 100, // Round to 2 decimal places
-      });
-    }
+    }));
     
     return jsonResponse({
       coin: coinId,
       prices: prices,
       days: days,
       symbol: SUPPORTED_COINS[coinId].symbol,
-      note: 'Historical data is simulated with consistent daily patterns'
+      source: 'coingecko',
+      note: 'Real market data from CoinGecko'
     });
     
   } catch (error) {
@@ -213,13 +218,29 @@ async function handleNews(request, env) {
     const url = new URL(request.url);
     const coinName = url.searchParams.get('coin') || 'bitcoin';
     
-    // Fetch news from @https://newsapi.org/ using the Everything endpoint
-    const searchQuery = `${coinName} cryptocurrency OR ${coinName} crypto`;
+    // Validate API key
+    if (!env.NEWSAPI_KEY) {
+      throw new Error('NewsAPI key not configured');
+    }
+    
+    // Create more specific search queries for better results
+    const coinInfo = SUPPORTED_COINS[coinName];
+    const searchTerms = [
+      coinInfo ? coinInfo.name : coinName,
+      coinInfo ? coinInfo.symbol : coinName.toUpperCase(),
+      'cryptocurrency',
+      'crypto'
+    ];
+    
+    const searchQuery = searchTerms.join(' OR ');
+    
+    // Fetch news from NewsAPI.org with improved parameters
     const response = await fetch(
-      `https://newsapi.org/v2/everything?q=${encodeURIComponent(searchQuery)}&language=en&sortBy=publishedAt&pageSize=20&apiKey=${env.NEWSAPI_KEY}`,
+      `https://newsapi.org/v2/everything?q=${encodeURIComponent(searchQuery)}&language=en&sortBy=publishedAt&pageSize=20&from=${getDateDaysAgo(1)}&apiKey=${env.NEWSAPI_KEY}`,
       {
         headers: {
-          'User-Agent': 'Crypto-Mood-Dashboard/1.0 (https://hesam.me/crypto-mood-dashboard)'
+          'User-Agent': 'Crypto-Mood-Dashboard/1.0',
+          'Accept': 'application/json'
         }
       }
     );
@@ -230,46 +251,66 @@ async function handleNews(request, env) {
         const errorBody = await response.json();
         errorDetails = errorBody.message ? ` - ${errorBody.message}` : '';
       } catch (e) {
-        // Ignore JSON parse errors
+        errorDetails = ` - HTTP ${response.status}`;
       }
-      throw new Error(`@https://newsapi.org/ API error: ${response.status}${errorDetails}`);
+      throw new Error(`NewsAPI error: ${response.status}${errorDetails}`);
     }
     
     const data = await response.json();
     
     if (data.status === 'error') {
-      throw new Error(`@https://newsapi.org/ error: ${data.message}`);
+      throw new Error(`NewsAPI error: ${data.message}`);
     }
     
-    if (!data.articles || !Array.isArray(data.articles)) {
+    // Validate news data
+    if (!validateNewsData(data)) {
+      console.warn('Invalid news data structure received');
       return jsonResponse({
         coin: coinName,
         headlines: [],
         total: 0,
+        error: 'Invalid news data format'
       });
     }
     
-    // Transform news data to match existing format
-    const headlines = data.articles.map(article => ({
-      title: article.title,
-      description: article.description,
+    // Filter and clean news data
+    const headlines = data.articles
+      .filter(article => 
+        article.title && 
+        article.title.length > 10 && 
+        !article.title.includes('[Removed]') &&
+        !article.title.toLowerCase().includes('advertisement')
+      )
+      .map(article => ({
+        title: article.title.trim(),
+        description: article.description ? article.description.trim() : '',
       url: article.url,
       source: article.source?.name || 'Unknown',
       published: article.publishedAt,
-      author: article.author,
-      urlToImage: article.urlToImage,
-    }));
+        author: article.author || null,
+        urlToImage: article.urlToImage || null,
+      }))
+      .slice(0, 15); // Limit to 15 best headlines
     
     return jsonResponse({
       coin: coinName,
       headlines: headlines,
       total: data.totalResults || headlines.length,
+      source: 'newsapi',
+      query: searchQuery
     });
     
   } catch (error) {
     console.error('Error fetching news:', error);
     return errorResponse(`Failed to fetch news: ${error.message}`);
   }
+}
+
+// Helper function to get date N days ago
+function getDateDaysAgo(days) {
+  const date = new Date();
+  date.setDate(date.getDate() - days);
+  return date.toISOString().split('T')[0];
 }
 
 async function handleSentiment(request, env) {
@@ -281,12 +322,15 @@ async function handleSentiment(request, env) {
     const body = await request.json();
     const headlines = body.headlines || [];
     
+    // Validate input
     if (!Array.isArray(headlines) || headlines.length === 0) {
       return jsonResponse({
         score: 0,
         category: 'neutral',
         confidence: 0,
         total: 0,
+        method: 'no-data',
+        note: 'No headlines provided for analysis'
       });
     }
     
@@ -305,11 +349,22 @@ async function handleSentiment(request, env) {
 }
 
 async function analyzeSentimentWithCohere(headlines, env) {
-  // Limit to 10 headlines for better statistical significance
-  const textsToAnalyze = headlines.map(h => h.title || h).slice(0, 10);
+  // Validate Cohere API key
+  if (!env.COHERE_API_KEY) {
+    throw new Error('Cohere API key not configured');
+  }
   
-  console.log('Cohere API Key available:', !!env.COHERE_API_KEY);
-  console.log('Texts to analyze:', textsToAnalyze);
+  // Limit to 10 headlines for better processing
+  const textsToAnalyze = headlines
+    .map(h => h.title || h)
+    .filter(text => text && text.length > 5)
+    .slice(0, 10);
+  
+  if (textsToAnalyze.length === 0) {
+    throw new Error('No valid headlines to analyze');
+  }
+  
+  console.log('Cohere analysis for:', textsToAnalyze.length, 'headlines');
   
   // Create prompt for sentiment analysis using Chat API
   const prompt = `Analyze the sentiment of these cryptocurrency news headlines and classify each as "positive", "negative", or "neutral":
@@ -317,12 +372,13 @@ async function analyzeSentimentWithCohere(headlines, env) {
 ${textsToAnalyze.map((text, i) => `${i + 1}. ${text}`).join('\n')}
 
 Respond with ONLY a JSON array in this exact format:
-[{"text": "headline 1", "sentiment": "positive"}, {"text": "headline 2", "sentiment": "negative"}, ...]
+[{"text": "headline 1", "sentiment": "positive", "confidence": 0.8}, {"text": "headline 2", "sentiment": "negative", "confidence": 0.9}]
 
 Use these criteria:
-- "positive": bullish, optimistic, gains, growth, adoption, institutional investment
-- "negative": bearish, crashes, bans, hacks, fears, regulatory concerns  
-- "neutral": stable, mixed, updates, general news without clear sentiment`;
+- "positive": bullish, optimistic, gains, growth, adoption, institutional investment, partnerships, upgrades
+- "negative": bearish, crashes, bans, hacks, fears, regulatory concerns, sell-offs, decline
+- "neutral": stable, mixed, updates, general news without clear sentiment
+- Include confidence (0.0-1.0) based on how certain you are about the sentiment`;
 
   // Make request to Cohere Chat API v2
   const response = await fetch('https://api.cohere.com/v2/chat', {
@@ -340,37 +396,33 @@ Use these criteria:
         }
       ],
       temperature: 0.3,
-      max_tokens: 1000
+      max_tokens: 1500
     }),
   });
   
   if (!response.ok) {
-    // Get the actual error response
     let errorDetails = 'Unknown error';
     try {
       const errorBody = await response.text();
       errorDetails = errorBody;
-      console.log('Cohere Chat API error response:', errorDetails);
     } catch (e) {
-      console.log('Could not parse error response');
+      errorDetails = `HTTP ${response.status}`;
     }
     
     if (response.status === 429) {
-      throw new Error('Rate limit exceeded - using fallback');
+      throw new Error('Rate limit exceeded');
     }
-    throw new Error(`Cohere Chat API error: ${response.status} - ${errorDetails}`);
+    throw new Error(`Cohere API error: ${response.status} - ${errorDetails}`);
   }
   
   const data = await response.json();
-  console.log('Cohere Chat API success:', data);
   
   // Parse the response
   let sentimentResults = [];
   try {
     const messageContent = data.message?.content?.[0]?.text || '';
-    console.log('Raw AI response:', messageContent);
     
-    // Try to extract JSON from the response
+    // Extract JSON from response
     const jsonMatch = messageContent.match(/\[.*\]/s);
     if (jsonMatch) {
       sentimentResults = JSON.parse(jsonMatch[0]);
@@ -379,56 +431,17 @@ Use these criteria:
     }
   } catch (parseError) {
     console.log('Failed to parse AI response:', parseError.message);
-    throw new Error('Invalid response format from Cohere Chat API');
+    throw new Error('Invalid response format from Cohere');
   }
   
-  // Calculate sentiment scores
-  let positiveCount = 0;
-  let negativeCount = 0;
-  let neutralCount = 0;
-  
-  sentimentResults.forEach(result => {
-    const sentiment = result.sentiment?.toLowerCase();
-    if (sentiment === 'positive') {
-      positiveCount++;
-    } else if (sentiment === 'negative') {
-      negativeCount++;
-    } else {
-      neutralCount++;
-    }
-  });
-  
-  const analyzed = sentimentResults.length;
-  const total = headlines.length;
-  
-  // Calculate overall sentiment score (-5 to +5 scale)
-  const positiveRatio = positiveCount / analyzed;
-  const negativeRatio = negativeCount / analyzed;
-  const score = (positiveRatio - negativeRatio) * 5;
-  
-  let category = 'neutral';
-  if (score > 1) {
-    category = 'bullish';
-  } else if (score < -1) {
-    category = 'bearish';
-  }
-  
-  // Estimate confidence based on how decisive the sentiment distribution is
-  const maxRatio = Math.max(positiveRatio, negativeRatio, neutralCount / analyzed);
-  const confidence = maxRatio;
+  // Calculate improved sentiment metrics
+  const results = calculateImprovedSentimentMetrics(sentimentResults, headlines.length);
   
   return jsonResponse({
-    score: Math.round(score * 100) / 100,
-    category,
-    confidence: Math.round(confidence * 100) / 100,
-    total: total,
-    analyzed: analyzed,
+    ...results,
     method: 'cohere-chat-api',
-    breakdown: {
-      positive: positiveCount,
-      negative: negativeCount,
-      neutral: neutralCount
-    }
+    analyzed: sentimentResults.length,
+    total: headlines.length
   });
 }
 
@@ -438,7 +451,8 @@ function analyzeSentimentWithKeywords(headlines) {
     'up', 'high', 'moon', 'pump', 'breakthrough', 'adoption', 'institutional',
     'investment', 'buy', 'support', 'strong', 'growth', 'increase', 'positive',
     'optimistic', 'confidence', 'milestone', 'achievement', 'success', 'upgrade',
-    'partnership', 'expansion', 'innovation', 'record', 'all-time', 'ath'
+    'partnership', 'expansion', 'innovation', 'record', 'all-time', 'ath',
+    'boost', 'advance', 'progress', 'breakthrough', 'approve', 'approved'
   ];
   
   const negativeKeywords = [
@@ -446,53 +460,112 @@ function analyzeSentimentWithKeywords(headlines) {
     'decline', 'plunge', 'collapse', 'sell', 'selling', 'pressure', 'fear',
     'panic', 'concern', 'worry', 'risk', 'volatile', 'uncertainty', 'loss',
     'losses', 'negative', 'pessimistic', 'regulation', 'ban', 'hack', 'attack',
-    'fraud', 'scam', 'bubble', 'warning', 'alert', 'crisis', 'problem'
+    'fraud', 'scam', 'bubble', 'warning', 'alert', 'crisis', 'problem',
+    'reject', 'rejected', 'struggle', 'suffer', 'plummet', 'crash'
   ];
   
-  let positiveCount = 0;
-  let negativeCount = 0;
-  let neutralCount = 0;
+  const sentimentResults = [];
   
   headlines.forEach(headline => {
     const text = (headline.title || headline).toLowerCase();
-    const hasPositive = positiveKeywords.some(keyword => text.includes(keyword));
-    const hasNegative = negativeKeywords.some(keyword => text.includes(keyword));
+    const positiveMatches = positiveKeywords.filter(keyword => text.includes(keyword));
+    const negativeMatches = negativeKeywords.filter(keyword => text.includes(keyword));
     
-    if (hasPositive && !hasNegative) {
+    let sentiment = 'neutral';
+    let confidence = 0.5; // Default neutral confidence
+    
+    if (positiveMatches.length > negativeMatches.length) {
+      sentiment = 'positive';
+      confidence = Math.min(0.9, 0.6 + (positiveMatches.length * 0.1));
+    } else if (negativeMatches.length > positiveMatches.length) {
+      sentiment = 'negative';
+      confidence = Math.min(0.9, 0.6 + (negativeMatches.length * 0.1));
+    } else if (positiveMatches.length > 0 || negativeMatches.length > 0) {
+      confidence = 0.3; // Low confidence for mixed signals
+    }
+    
+    sentimentResults.push({
+      text: headline.title || headline,
+      sentiment: sentiment,
+      confidence: confidence,
+      matches: {
+        positive: positiveMatches,
+        negative: negativeMatches
+      }
+    });
+  });
+  
+  // Calculate improved sentiment metrics
+  const results = calculateImprovedSentimentMetrics(sentimentResults, headlines.length);
+  
+  return jsonResponse({
+    ...results,
+    method: 'keyword-analysis',
+    analyzed: sentimentResults.length,
+    total: headlines.length
+  });
+}
+
+function calculateImprovedSentimentMetrics(sentimentResults, totalHeadlines) {
+  let positiveCount = 0;
+  let negativeCount = 0;
+  let neutralCount = 0;
+  let totalConfidence = 0;
+  let weightedScore = 0;
+  
+  sentimentResults.forEach(result => {
+    const sentiment = result.sentiment?.toLowerCase();
+    const confidence = result.confidence || 0.5;
+    
+    totalConfidence += confidence;
+    
+    if (sentiment === 'positive') {
       positiveCount++;
-    } else if (hasNegative && !hasPositive) {
+      weightedScore += confidence * 2; // Positive contributes +2 weighted by confidence
+    } else if (sentiment === 'negative') {
       negativeCount++;
+      weightedScore -= confidence * 2; // Negative contributes -2 weighted by confidence
     } else {
       neutralCount++;
+      // Neutral contributes 0 to weighted score
     }
   });
   
-  const total = headlines.length;
-  const positiveRatio = positiveCount / total;
-  const negativeRatio = negativeCount / total;
+  const analyzed = sentimentResults.length;
+  const avgConfidence = analyzed > 0 ? totalConfidence / analyzed : 0;
   
-  // Calculate sentiment score (-5 to +5 scale)
-  const score = (positiveRatio - negativeRatio) * 5;
+  // Calculate score on -5 to +5 scale, weighted by confidence
+  const maxPossibleScore = analyzed * 2; // Maximum positive score
+  const score = maxPossibleScore > 0 ? (weightedScore / maxPossibleScore) * 5 : 0;
   
+  // Determine category with improved thresholds
   let category = 'neutral';
-  if (score > 1) {
+  if (score >= 0.5) {
     category = 'bullish';
-  } else if (score < -1) {
+  } else if (score <= -0.5) {
     category = 'bearish';
   }
   
-  return jsonResponse({
+  // Improved confidence calculation
+  // High confidence if: strong sentiment direction + high individual confidences
+  const sentimentStrength = Math.abs(score) / 5; // 0-1 scale
+  const overallConfidence = Math.min(0.95, avgConfidence * sentimentStrength + 0.3);
+  
+  return {
     score: Math.round(score * 100) / 100,
     category,
-    confidence: Math.max(positiveRatio, negativeRatio, neutralCount / total),
-    total: total,
+    confidence: Math.round(overallConfidence * 100) / 100,
     breakdown: {
       positive: positiveCount,
       negative: negativeCount,
-      neutral: neutralCount,
+      neutral: neutralCount
     },
-    method: 'keyword-analysis'
-  });
+    metrics: {
+      average_individual_confidence: Math.round(avgConfidence * 100) / 100,
+      sentiment_strength: Math.round(sentimentStrength * 100) / 100,
+      weighted_score: Math.round(weightedScore * 100) / 100
+    }
+  };
 }
 
 // =============================================================================

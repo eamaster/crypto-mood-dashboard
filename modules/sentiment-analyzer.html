@@ -132,6 +132,22 @@ Positive regulatory developments worldwide</textarea>
         // Update this to your deployed worker URL
         const WORKER_URL = 'https://crypto-mood-dashboard.smah0085.workers.dev';
         
+        // Enhanced validation functions
+        function validateSentimentResponse(data) {
+            if (!data || typeof data !== 'object') return false;
+            if (typeof data.score !== 'number' || data.score < -5 || data.score > 5) return false;
+            if (!data.category || !['bullish', 'bearish', 'neutral'].includes(data.category)) return false;
+            if (typeof data.confidence !== 'number' || data.confidence < 0 || data.confidence > 1) return false;
+            return true;
+        }
+        
+        function validateHeadlines(headlines) {
+            if (!headlines || !Array.isArray(headlines)) return false;
+            return headlines.every(headline => 
+                typeof headline === 'string' && headline.trim().length > 0
+            );
+        }
+        
         // Sample data for different sentiment types
         const samples = {
             bullish: [
@@ -178,7 +194,7 @@ Positive regulatory developments worldwide</textarea>
                 return;
             }
             
-            // Split text into lines (headlines)
+            // Split text into lines (headlines) and validate
             const headlines = text.split('\n').filter(line => line.trim());
             
             if (headlines.length === 0) {
@@ -186,11 +202,17 @@ Positive regulatory developments worldwide</textarea>
                 return;
             }
             
+            // Validate headlines format
+            if (!validateHeadlines(headlines)) {
+                resultsDiv.innerHTML = '<div class="sentiment-card bearish"><div class="sentiment-score">❌ Error</div><div class="sentiment-label">Invalid Input</div><div class="sentiment-details">Please ensure all headlines are valid text strings.</div></div>';
+                return;
+            }
+            
             try {
-                console.log(`🧠 Analyzing ${headlines.length} headlines...`);
-                resultsDiv.innerHTML = '<div class="sentiment-card">⏳ Analyzing sentiment...</div>';
+                console.log(`🧠 Analyzing ${headlines.length} headlines with enhanced backend...`);
+                resultsDiv.innerHTML = '<div class="sentiment-card">⏳ Analyzing sentiment with enhanced AI...</div>';
                 
-                // Call worker for sentiment analysis
+                // Call enhanced worker for sentiment analysis
                 const response = await fetch(`${WORKER_URL}/sentiment`, {
                     method: 'POST',
                     headers: {
@@ -202,18 +224,23 @@ Positive regulatory developments worldwide</textarea>
                 });
                 
                 if (!response.ok) {
-                    console.error(`Sentiment API HTTP error: ${response.status}`);
+                    console.error(`Enhanced Sentiment API HTTP error: ${response.status}`);
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
                 
                 const data = await response.json();
-                console.log('🧠 Sentiment analysis response:', data);
+                console.log('🧠 Enhanced sentiment analysis response:', data);
                 
                 if (data.error) {
                     throw new Error(data.error);
                 }
                 
-                // Determine sentiment category
+                // Validate response data
+                if (!validateSentimentResponse(data)) {
+                    throw new Error('Invalid sentiment analysis response received');
+                }
+                
+                // Determine sentiment category and display
                 let sentimentCategory, sentimentEmoji, sentimentClass;
                 if (data.category === 'bullish') {
                     sentimentCategory = 'Bullish';
@@ -229,7 +256,7 @@ Positive regulatory developments worldwide</textarea>
                     sentimentClass = 'neutral';
                 }
                 
-                // Display results
+                // Enhanced results display with new metrics
                 resultsDiv.innerHTML = `
                     <div class="sentiment-card ${sentimentClass}">
                         <div class="sentiment-score">${sentimentEmoji} ${data.score.toFixed(2)}</div>
@@ -237,7 +264,7 @@ Positive regulatory developments worldwide</textarea>
                         <div class="sentiment-details">
                             Average Score: ${data.score.toFixed(2)} • 
                             Confidence: ${(data.confidence * 100).toFixed(1)}% • 
-                            ${data.total} headline${data.total === 1 ? '' : 's'} analyzed
+                            ${data.total || data.analyzed || headlines.length} headline${(data.total || data.analyzed || headlines.length) === 1 ? '' : 's'} analyzed
                         </div>
                     </div>
                     
@@ -251,7 +278,7 @@ Positive regulatory developments worldwide</textarea>
                     </div>
                     
                     <div class="headlines-analysis">
-                        <h3>Analysis Breakdown:</h3>
+                        <h3>Enhanced Analysis Breakdown:</h3>
                         <div style="display: flex; gap: 20px; justify-content: center; margin: 15px 0;">
                             <div style="text-align: center;">
                                 <div style="font-size: 24px; font-weight: bold; color: #28a745;">
@@ -274,13 +301,23 @@ Positive regulatory developments worldwide</textarea>
                         </div>
                     </div>
                     
+                    ${data.metrics ? `
+                    <div style="margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 5px; font-size: 14px;">
+                        <strong>Advanced Metrics:</strong><br>
+                        Individual Confidence: ${(data.metrics.average_individual_confidence * 100).toFixed(1)}%<br>
+                        Sentiment Strength: ${(data.metrics.sentiment_strength * 100).toFixed(1)}%<br>
+                        Weighted Score: ${data.metrics.weighted_score.toFixed(2)}<br>
+                    </div>
+                    ` : ''}
+                    
                     <div style="margin-top: 20px; padding: 15px; background: #e9ecef; border-radius: 5px; font-size: 14px;">
-                        <strong>Sentiment Scale:</strong><br>
+                        <strong>Enhanced Sentiment Scale:</strong><br>
                         🐂 Bullish: Score > +1 (Very Positive)<br>
                         😐 Neutral: Score -1 to +1 (Balanced)<br>
                         🐻 Bearish: Score < -1 (Very Negative)<br><br>
-                        <strong>Analysis Method:</strong> ${data.method === 'cohere-chat-api' ? 'Cohere AI v2 (Advanced NLP)' : data.method === 'keyword-analysis' ? 'Keyword-based Analysis' : 'Automatic Selection'}<br>
-                        <strong>Note:</strong> ${data.method === 'cohere-chat-api' ? 'Advanced AI classification with confidence levels' : 'Keyword matching with predetermined sentiment words'}. 
+                        <strong>Analysis Method:</strong> ${getMethodDisplay(data.method)}<br>
+                        <strong>Data Source:</strong> Real-time analysis with ${data.method === 'cohere-chat-api' ? 'Cohere AI v2' : 'Enhanced Keyword Analysis'}<br>
+                        <strong>Note:</strong> ${getMethodNote(data.method)}. 
                         Scores range from -5 (very bearish) to +5 (very bullish).
                     </div>
                 `;
@@ -297,13 +334,33 @@ Positive regulatory developments worldwide</textarea>
             }
         }
         
+        function getMethodDisplay(method) {
+            switch(method) {
+                case 'cohere-chat-api': return 'Cohere AI v2 (Advanced NLP)';
+                case 'keyword-analysis': return 'Enhanced Keyword Analysis';
+                case 'no-data': return 'No Data Available';
+                case 'error': return 'Analysis Error';
+                default: return 'Automatic Selection';
+            }
+        }
+        
+        function getMethodNote(method) {
+            switch(method) {
+                case 'cohere-chat-api': return 'Advanced AI classification with confidence levels and context understanding';
+                case 'keyword-analysis': return 'Enhanced keyword matching with improved sentiment scoring and confidence metrics';
+                case 'no-data': return 'No headlines available for analysis';
+                case 'error': return 'Error occurred during analysis';
+                default: return 'System automatically selected the best available analysis method';
+            }
+        }
+        
         function escapeHtml(text) {
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
         }
         
-        // Auto-analyze on page load
+        // Auto-analyze on page load with enhanced sample
         window.addEventListener('load', analyzeSentiment);
     </script>
 </body>

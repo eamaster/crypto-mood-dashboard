@@ -1,7 +1,7 @@
 // =============================================================================
 // Crypto Mood Dashboard - Main Script
-// Integrates price fetching, chart display, news analysis, and sentiment scoring
-// Now powered by Cloudflare Worker backend
+// Integrates real price data, enhanced news analysis, and improved sentiment scoring
+// Now powered by Cloudflare Worker backend with CoinGecko and improved validation
 // =============================================================================
 
 (function() {
@@ -28,14 +28,19 @@
             lastUpdateTime: null,
             consecutiveErrors: 0,
             maxErrors: 3
+        },
+        dataValidation: {
+            lastPriceUpdate: null,
+            lastNewsUpdate: null,
+            priceDataValid: false,
+            newsDataValid: false
         }
     };
     
-    // Rate limiting - max 1 request per endpoint per 3 seconds (more reasonable for dashboard)
+    // Rate limiting - max 1 request per endpoint per 3 seconds
     const RATE_LIMIT_MS = 3000;
     
     // Cloudflare Worker endpoint
-    // Update this to your deployed worker URL
     const WORKER_URL = 'https://crypto-mood-dashboard.smah0085.workers.dev';
     
     // =============================================================================
@@ -69,7 +74,7 @@
     };
     
     // =============================================================================
-    // UTILITY FUNCTIONS
+    // ENHANCED UTILITY FUNCTIONS
     // =============================================================================
     
     function isRateLimited(endpoint) {
@@ -93,6 +98,9 @@
     }
     
     function formatCurrency(amount) {
+        if (typeof amount !== 'number' || isNaN(amount)) {
+            return '$0.00';
+        }
         return amount.toLocaleString('en-US', {
             style: 'currency',
             currency: 'USD'
@@ -100,6 +108,9 @@
     }
     
     function formatPercentage(value) {
+        if (typeof value !== 'number' || isNaN(value)) {
+            return '0.00%';
+        }
         const sign = value >= 0 ? '+' : '';
         return `${sign}${value.toFixed(2)}%`;
     }
@@ -118,6 +129,107 @@
     
     function hideError(element) {
         element.style.display = 'none';
+    }
+    
+    // Enhanced validation functions
+    function validatePriceData(data) {
+        if (!data || typeof data !== 'object') {
+            console.warn('Invalid price data: not an object');
+            return false;
+        }
+        
+        if (typeof data.price !== 'number' || data.price <= 0) {
+            console.warn('Invalid price data: price not a positive number');
+            return false;
+        }
+        
+        if (typeof data.change24h !== 'number') {
+            console.warn('Invalid price data: change24h not a number');
+            return false;
+        }
+        
+        if (!data.symbol || typeof data.symbol !== 'string') {
+            console.warn('Invalid price data: missing or invalid symbol');
+            return false;
+        }
+        
+        return true;
+    }
+    
+    function validateHistoryData(data) {
+        if (!data || !Array.isArray(data)) {
+            console.warn('Invalid history data: not an array');
+            return false;
+        }
+        
+        if (data.length === 0) {
+            console.warn('Invalid history data: empty array');
+            return false;
+        }
+        
+        return data.every((point, index) => {
+            if (!point || typeof point !== 'object') {
+                console.warn(`Invalid history point at index ${index}: not an object`);
+                return false;
+            }
+            
+            if (!point.x || isNaN(new Date(point.x).getTime())) {
+                console.warn(`Invalid history point at index ${index}: invalid timestamp`);
+                return false;
+            }
+            
+            if (typeof point.y !== 'number' || point.y <= 0) {
+                console.warn(`Invalid history point at index ${index}: invalid price`);
+                return false;
+            }
+            
+            return true;
+        });
+    }
+    
+    function validateNewsData(data) {
+        if (!data || !Array.isArray(data)) {
+            console.warn('Invalid news data: not an array');
+            return false;
+        }
+        
+        return data.every((article, index) => {
+            if (!article || typeof article !== 'object') {
+                console.warn(`Invalid news article at index ${index}: not an object`);
+                return false;
+            }
+            
+            if (!article.title || typeof article.title !== 'string' || article.title.length < 5) {
+                console.warn(`Invalid news article at index ${index}: invalid title`);
+                return false;
+            }
+            
+            return true;
+        });
+    }
+    
+    function validateSentimentData(data) {
+        if (!data || typeof data !== 'object') {
+            console.warn('Invalid sentiment data: not an object');
+            return false;
+        }
+        
+        if (typeof data.score !== 'number' || data.score < -5 || data.score > 5) {
+            console.warn('Invalid sentiment data: score not in valid range');
+            return false;
+        }
+        
+        if (!data.category || !['bullish', 'bearish', 'neutral'].includes(data.category)) {
+            console.warn('Invalid sentiment data: invalid category');
+            return false;
+        }
+        
+        if (typeof data.confidence !== 'number' || data.confidence < 0 || data.confidence > 1) {
+            console.warn('Invalid sentiment data: confidence not in valid range');
+            return false;
+        }
+        
+        return true;
     }
     
     // =============================================================================
@@ -186,7 +298,7 @@
                 news: 0
             };
             
-            // Update the dashboard with current coin - this ensures all components update consistently
+            // Update the dashboard with current coin
             await updateDashboard(state.selectedCoin);
             
             // Update timestamp
@@ -234,7 +346,7 @@
     });
     
     // =============================================================================
-    // API FUNCTIONS
+    // ENHANCED API FUNCTIONS WITH VALIDATION
     // =============================================================================
     
     async function fetchCoinsList() {
@@ -252,8 +364,25 @@
             }
             
             const coins = await response.json();
-            state.coins = coins;
-            return coins;
+            
+            // Validate coins data
+            if (!Array.isArray(coins)) {
+                throw new Error('Invalid coins data: not an array');
+            }
+            
+            // Validate each coin
+            const validCoins = coins.filter(coin => {
+                if (!coin || typeof coin !== 'object') return false;
+                if (!coin.id || !coin.name || !coin.symbol) return false;
+                return true;
+            });
+            
+            if (validCoins.length === 0) {
+                throw new Error('No valid coins found');
+            }
+            
+            state.coins = validCoins;
+            return validCoins;
             
         } catch (error) {
             console.error('Error fetching coins list:', error);
@@ -281,13 +410,27 @@
                 throw new Error(data.error);
             }
             
+            // Validate price data
+            if (!validatePriceData(data)) {
+                throw new Error('Invalid price data received from server');
+            }
+            
+            // Update validation state
+            state.dataValidation.priceDataValid = true;
+            state.dataValidation.lastPriceUpdate = new Date();
+            
             return {
                 price: data.price,
-                change24h: data.change24h || 0
+                change24h: data.change24h || 0,
+                market_cap: data.market_cap || null,
+                volume_24h: data.volume_24h || null,
+                symbol: data.symbol,
+                source: data.source || 'unknown'
             };
             
         } catch (error) {
             console.error('Error fetching price:', error);
+            state.dataValidation.priceDataValid = false;
             throw new Error('Failed to fetch current price');
         }
     }
@@ -316,10 +459,18 @@
                 throw new Error(`No price history found for ${coinId}`);
             }
             
-            return data.prices.map(item => ({
+            // Transform and validate history data
+            const historyData = data.prices.map(item => ({
                 x: new Date(item.timestamp),
                 y: item.price
             }));
+            
+            if (!validateHistoryData(historyData)) {
+                throw new Error('Invalid price history data received from server');
+            }
+            
+            console.log(`📈 Fetched ${historyData.length} price points from ${data.source || 'unknown source'}`);
+            return historyData;
             
         } catch (error) {
             console.error('Error fetching price history:', error);
@@ -345,14 +496,26 @@
             
             if (data.error) {
                 console.error('News API error:', data.error);
+                state.dataValidation.newsDataValid = false;
                 return [];
             }
             
             if (!data.headlines || data.headlines.length === 0) {
-                return []; // Return empty array if no news
+                console.warn(`No news headlines found for ${coinId}`);
+                state.dataValidation.newsDataValid = false;
+                return [];
             }
             
-            return data.headlines.map(article => ({
+            // Validate news data
+            if (!validateNewsData(data.headlines)) {
+                throw new Error('Invalid news data received from server');
+            }
+            
+            // Update validation state
+            state.dataValidation.newsDataValid = true;
+            state.dataValidation.lastNewsUpdate = new Date();
+            
+            const processedHeadlines = data.headlines.map(article => ({
                 title: article.title,
                 description: article.description,
                 url: article.url,
@@ -360,19 +523,31 @@
                 published: new Date(article.published)
             }));
             
+            console.log(`📰 Fetched ${processedHeadlines.length} news headlines from ${data.source || 'unknown source'}`);
+            return processedHeadlines;
+            
         } catch (error) {
             console.error('Error fetching news:', error);
-            return []; // Return empty array on error
+            state.dataValidation.newsDataValid = false;
+            return [];
         }
     }
     
     // =============================================================================
-    // SENTIMENT ANALYSIS
+    // ENHANCED SENTIMENT ANALYSIS
     // =============================================================================
     
     async function analyzeSentiment(headlines) {
         if (!headlines || headlines.length === 0) {
-            return { score: 0, category: 'neutral', emoji: '😐', count: 0 };
+            return { 
+                score: 0, 
+                category: 'neutral', 
+                emoji: '😐', 
+                count: 0,
+                confidence: 0,
+                method: 'no-data',
+                note: 'No headlines available for analysis'
+            };
         }
         
         try {
@@ -396,6 +571,11 @@
                 throw new Error(data.error);
             }
             
+            // Validate sentiment data
+            if (!validateSentimentData(data)) {
+                throw new Error('Invalid sentiment data received from server');
+            }
+            
             let emoji;
             if (data.category === 'bullish') {
                 emoji = '🐂';
@@ -405,107 +585,171 @@
                 emoji = '😐';
             }
             
-            return {
+            const result = {
                 score: data.score,
                 category: data.category,
                 emoji: emoji,
-                count: data.analyzed || data.total,
+                count: data.analyzed || data.total || headlines.length,
                 confidence: data.confidence,
                 breakdown: data.breakdown,
-                method: data.method
+                method: data.method,
+                metrics: data.metrics || null
             };
+            
+            console.log(`🧠 Sentiment analysis complete: ${result.category} (${result.score.toFixed(2)}) with ${(result.confidence * 100).toFixed(0)}% confidence`);
+            return result;
             
         } catch (error) {
             console.error('Error analyzing sentiment:', error);
-            return { score: 0, category: 'neutral', emoji: '😐', count: headlines.length };
+            return { 
+                score: 0, 
+                category: 'neutral', 
+                emoji: '😐', 
+                count: headlines.length,
+                confidence: 0,
+                method: 'error',
+                error: error.message
+            };
         }
     }
     
-    // Add sentiment debugging function
+    // Enhanced sentiment debugging function
     function logSentimentDebug(sentimentData, headlines) {
-        console.log('📊 Sentiment Analysis Debug:');
+        console.log('📊 Enhanced Sentiment Analysis Debug:');
         console.log('  Headlines analyzed:', headlines.length);
         console.log('  Sentiment score:', sentimentData.score);
         console.log('  Category:', sentimentData.category);
         console.log('  Confidence:', sentimentData.confidence);
         console.log('  Method:', sentimentData.method);
+        
         if (sentimentData.breakdown) {
             console.log('  Breakdown:', sentimentData.breakdown);
+        }
+        
+        if (sentimentData.metrics) {
+            console.log('  Advanced metrics:', sentimentData.metrics);
+        }
+        
+        if (sentimentData.error) {
+            console.log('  Error:', sentimentData.error);
         }
     }
     
     // =============================================================================
-    // UI UPDATE FUNCTIONS
+    // ENHANCED UI UPDATE FUNCTIONS
     // =============================================================================
     
     function updatePriceWidget(priceData, coinId) {
-        if (!priceData) return;
+        if (!priceData || !validatePriceData(priceData)) {
+            console.warn('Invalid price data for widget update');
+            return;
+        }
         
-        const { price, change24h } = priceData;
+        const { price, change24h, market_cap, volume_24h, symbol, source } = priceData;
         
-        // Get coin symbol from coins list
+        // Get coin info from coins list
         const coin = state.coins.find(c => c.id === coinId);
-        const symbol = coin ? coin.symbol.toUpperCase() : coinId.toUpperCase();
+        const displaySymbol = coin ? coin.symbol.toUpperCase() : symbol || coinId.toUpperCase();
         
         const priceValueEl = elements.priceWidget.querySelector('.price-value');
         const priceChangeEl = elements.priceWidget.querySelector('.price-change');
         const priceSymbolEl = elements.priceWidget.querySelector('.price-symbol');
         
-        priceValueEl.textContent = formatCurrency(price);
-        priceChangeEl.textContent = formatPercentage(change24h);
-        priceSymbolEl.textContent = symbol;
+        if (priceValueEl) priceValueEl.textContent = formatCurrency(price);
+        if (priceChangeEl) priceChangeEl.textContent = formatPercentage(change24h);
+        if (priceSymbolEl) priceSymbolEl.textContent = displaySymbol;
         
         // Update change color
-        priceChangeEl.className = 'price-change';
-        if (change24h > 0) {
-            priceChangeEl.classList.add('positive');
-        } else if (change24h < 0) {
-            priceChangeEl.classList.add('negative');
+        if (priceChangeEl) {
+            priceChangeEl.className = 'price-change';
+            if (change24h > 0) {
+                priceChangeEl.classList.add('positive');
+            } else if (change24h < 0) {
+                priceChangeEl.classList.add('negative');
+            }
+        }
+        
+        // Add data source indicator
+        if (source) {
+            const sourceEl = elements.priceWidget.querySelector('.price-source');
+            if (sourceEl) {
+                sourceEl.textContent = `Data: ${source}`;
+                sourceEl.style.display = 'block';
+            }
         }
         
         hideError(elements.priceError);
+        console.log(`💰 Price widget updated: ${displaySymbol} ${formatCurrency(price)} (${formatPercentage(change24h)}) from ${source || 'unknown'}`);
     }
     
     function updateMoodWidget(sentimentData, headlines) {
+        if (!sentimentData || !validateSentimentData(sentimentData)) {
+            console.warn('Invalid sentiment data for widget update');
+            return;
+        }
+        
         const moodBadgeEl = elements.moodWidget.querySelector('.mood-badge');
         const moodScoreEl = elements.moodWidget.querySelector('.mood-score');
         const moodSourceEl = elements.moodWidget.querySelector('.mood-source');
         
-        moodBadgeEl.textContent = `${sentimentData.emoji} ${sentimentData.category.charAt(0).toUpperCase() + sentimentData.category.slice(1)}`;
-        moodBadgeEl.className = `mood-badge ${sentimentData.category}`;
+        if (moodBadgeEl) {
+            moodBadgeEl.textContent = `${sentimentData.emoji} ${sentimentData.category.charAt(0).toUpperCase() + sentimentData.category.slice(1)}`;
+            moodBadgeEl.className = `mood-badge ${sentimentData.category}`;
+        }
         
-        // Enhanced score display with breakdown
+        // Enhanced score display with breakdown and confidence
         let scoreText = `Score: ${sentimentData.score.toFixed(2)}`;
         if (sentimentData.breakdown) {
             scoreText += ` (${sentimentData.breakdown.positive}+ ${sentimentData.breakdown.negative}- ${sentimentData.breakdown.neutral}=)`;
         }
-        moodScoreEl.textContent = scoreText;
+        if (moodScoreEl) moodScoreEl.textContent = scoreText;
         
+        // Enhanced source information
         let sourceText = `Based on ${sentimentData.count} headlines`;
         if (sentimentData.method) {
-            sourceText += ` • ${sentimentData.method === 'cohere-chat-api' ? 'AI Analysis' : 'Keyword Analysis'}`;
+            const methodDisplay = sentimentData.method === 'cohere-chat-api' ? 'AI Analysis' : 
+                                 sentimentData.method === 'keyword-analysis' ? 'Keyword Analysis' : 
+                                 sentimentData.method === 'no-data' ? 'No Data' : 'Unknown';
+            sourceText += ` • ${methodDisplay}`;
         }
-        if (sentimentData.confidence) {
+        if (sentimentData.confidence && sentimentData.confidence > 0) {
             sourceText += ` • ${(sentimentData.confidence * 100).toFixed(0)}% confidence`;
         }
-        moodSourceEl.textContent = sourceText;
+        if (sentimentData.error) {
+            sourceText += ` • Error: ${sentimentData.error}`;
+        }
         
-        // Update news container
-        if (headlines && headlines.length > 0) {
+        if (moodSourceEl) moodSourceEl.textContent = sourceText;
+        
+        // Update news container with validation
+        if (headlines && headlines.length > 0 && validateNewsData(headlines)) {
             elements.newsContainer.innerHTML = headlines.slice(0, 5).map((item, index) => `
                 <div class="news-item">
                     <strong>${index + 1}.</strong> ${escapeHtml(item.title)}
+                    <div class="news-source">${escapeHtml(item.source || 'Unknown')}</div>
                 </div>
             `).join('');
         } else {
-            elements.newsContainer.innerHTML = '<div class="news-item">No recent headlines found</div>';
+            elements.newsContainer.innerHTML = '<div class="news-item">No recent news headlines available for sentiment analysis.</div>';
         }
         
         hideError(elements.moodError);
+        console.log(`🧠 Mood widget updated: ${sentimentData.category} (${sentimentData.score.toFixed(2)}) from ${sentimentData.count} headlines`);
     }
     
     function updateChart(priceHistory, sentimentData, coinId) {
-        if (!priceHistory || priceHistory.length === 0) return;
+        // Enhanced validation for chart data
+        if (!priceHistory || !validateHistoryData(priceHistory)) {
+            console.warn('Invalid price history data for chart');
+            showError(elements.chartError, 'Invalid price history data');
+            return;
+        }
+        
+        if (!sentimentData || !validateSentimentData(sentimentData)) {
+            console.warn('Invalid sentiment data for chart');
+            showError(elements.chartError, 'Invalid sentiment data');
+            return;
+        }
         
         // Destroy existing chart
         if (state.chartInstance) {
@@ -513,20 +757,17 @@
             state.chartInstance = null;
         }
         
-        const ctx = elements.mainChart.getContext('2d');
+        // Get coin symbol with validation
+        const coin = state.coins.find(c => c.id === coinId);
+        const symbol = coin ? coin.symbol.toUpperCase() : coinId.toUpperCase();
         
-        // Mobile responsive settings
-        const isMobile = window.innerWidth <= 768;
-        const isSmallMobile = window.innerWidth <= 480;
-        
-        // Prepare sentiment bar data for last day
-        const lastDate = priceHistory[priceHistory.length - 1].x;
+        // Create sentiment bar data - position it at the last date
         const sentimentBarData = [{
-            x: lastDate,
+            x: priceHistory[priceHistory.length - 1].x,
             y: sentimentData.score
         }];
         
-        // Determine sentiment bar color
+        // Determine sentiment color based on category
         let sentimentColor;
         if (sentimentData.category === 'bullish') {
             sentimentColor = 'rgba(40, 167, 69, 0.8)';
@@ -536,9 +777,19 @@
             sentimentColor = 'rgba(108, 117, 125, 0.8)';
         }
         
-        const coin = state.coins.find(c => c.id === coinId);
-        const symbol = coin ? coin.symbol.toUpperCase() : coinId.toUpperCase();
+        // Check if Chart.js is available
+        if (typeof Chart === 'undefined') {
+            throw new Error('Chart.js library is not available');
+        }
         
+        // Responsive configuration
+        const isMobile = window.innerWidth <= 768;
+        const isSmallMobile = window.innerWidth <= 480;
+        
+        // Chart context
+        const ctx = elements.mainChart.getContext('2d');
+        
+        // Create enhanced chart with validation indicators
         state.chartInstance = new Chart(ctx, {
             type: 'line',
             data: {
@@ -556,7 +807,7 @@
                         pointHoverRadius: isMobile ? 4 : 6
                     },
                     {
-                        label: 'Today\'s Sentiment',
+                        label: `Today's Sentiment (${sentimentData.method || 'Unknown'})`,
                         data: sentimentBarData,
                         type: 'bar',
                         backgroundColor: sentimentColor,
@@ -570,8 +821,6 @@
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                resizeDelay: 100,
-                devicePixelRatio: window.devicePixelRatio || 1,
                 interaction: {
                     mode: 'index',
                     intersect: false,
@@ -582,7 +831,7 @@
                         time: {
                             unit: 'day',
                             displayFormats: {
-                                day: isSmallMobile ? 'M/d' : 'MMM dd'
+                                day: isSmallMobile ? 'MM/dd' : 'MMM dd'
                             }
                         },
                         title: {
@@ -593,9 +842,9 @@
                             }
                         },
                         ticks: {
-                            maxTicksLimit: isSmallMobile ? 3 : isMobile ? 5 : 7,
+                            maxTicksLimit: isMobile ? 4 : 7,
                             font: {
-                                size: isSmallMobile ? 9 : isMobile ? 10 : 11
+                                size: isMobile ? 9 : 11
                             }
                         }
                     },
@@ -605,24 +854,31 @@
                         position: 'left',
                         title: {
                             display: !isSmallMobile,
-                            text: isMobile ? 'Price' : 'Price (USD)',
+                            text: 'Price (USD)',
                             font: {
                                 size: isMobile ? 10 : 12
                             }
                         },
                         ticks: {
                             callback: function(value) {
-                                return isMobile ? `$${(value/1000).toFixed(0)}k` : formatCurrency(value);
+                                if (isMobile) {
+                                    if (value >= 1000000) {
+                                        return '$' + (value/1000000).toFixed(1) + 'M';
+                                    } else if (value >= 1000) {
+                                        return '$' + (value/1000).toFixed(1) + 'K';
+                                    }
+                                    return '$' + value.toFixed(0);
+                                }
+                                return formatCurrency(value);
                             },
                             font: {
-                                size: isSmallMobile ? 9 : isMobile ? 10 : 11
-                            },
-                            maxTicksLimit: isMobile ? 5 : 7
+                                size: isMobile ? 9 : 11
+                            }
                         }
                     },
                     sentiment: {
                         type: 'linear',
-                        display: !isSmallMobile,
+                        display: true,
                         position: 'right',
                         title: {
                             display: !isSmallMobile,
@@ -638,17 +894,16 @@
                         },
                         ticks: {
                             callback: function(value) {
-                                if (isMobile) {
-                                    return value > 1 ? '+' : value < -1 ? '-' : '0';
+                                if (isSmallMobile) {
+                                    return value;
                                 }
-                                if (value > 1) return `${value} (Bullish)`;
-                                if (value < -1) return `${value} (Bearish)`;
-                                return `${value} (Neutral)`;
+                                if (value > 1) return value + ' (Bull)';
+                                if (value < -1) return value + ' (Bear)';
+                                return value + ' (Neutral)';
                             },
                             font: {
-                                size: isSmallMobile ? 9 : isMobile ? 10 : 11
-                            },
-                            maxTicksLimit: isMobile ? 3 : 5
+                                size: isMobile ? 9 : 11
+                            }
                         }
                     }
                 },
@@ -688,7 +943,7 @@
                                 if (context.dataset.label.includes('Price')) {
                                     return `Price: ${formatCurrency(context.parsed.y)}`;
                                 } else {
-                                    return `Sentiment: ${context.parsed.y.toFixed(2)} (${sentimentData.category})`;
+                                    return `Sentiment: ${context.parsed.y.toFixed(2)} (${sentimentData.category}, ${(sentimentData.confidence * 100).toFixed(0)}% confidence)`;
                                 }
                             }
                         }
@@ -722,7 +977,7 @@
                         try {
                             state.chartInstance.resize();
                             state.chartInstance.update('none');
-                            console.log('📊 Main dashboard chart initialized and resized');
+                            console.log(`📊 Enhanced chart initialized: ${symbol} with ${priceHistory.length} price points and ${sentimentData.method || 'unknown'} sentiment`);
                         } catch (error) {
                             console.error('Error during chart initialization:', error);
                         }
