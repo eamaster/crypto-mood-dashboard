@@ -128,20 +128,30 @@
     </div>
 
     <script>
-        // Update this to your deployed worker URL
-        const WORKER_URL = 'https://crypto-mood-dashboard.smah0085.workers.dev';
+        // Using Coingecko API directly
+        const COINGECKO_API = 'https://api.coingecko.com/api/v3';
+        // News API is disabled for now since it requires a working endpoint
+        const ENABLE_NEWS = false;
         
         let chartInstance = null;
         
         // Enhanced validation functions
         function validatePriceData(data) {
-            if (!data || !Array.isArray(data)) return false;
-            return data.every(point => 
-                point && 
-                typeof point.timestamp === 'string' && 
-                typeof point.price === 'number' && 
-                point.price > 0
-            );
+            if (!data || !Array.isArray(data)) {
+                console.error('Price data is not an array:', data);
+                return false;
+            }
+            return data.every(point => {
+                const isValid = point && 
+                    point.x instanceof Date && 
+                    typeof point.y === 'number' && 
+                    point.y > 0;
+                
+                if (!isValid) {
+                    console.warn('Invalid price point:', point);
+                }
+                return isValid;
+            });
         }
         
         function validateNewsData(data) {
@@ -198,8 +208,10 @@
                 console.log('📰 News data received:', newsData.length, 'headlines');
                 
                 // Validate data before processing
+                console.log('Validating price data:', priceData);
                 if (!validatePriceData(priceData)) {
-                    throw new Error('Invalid price data received - cannot create chart');
+                    console.error('Price data validation failed:', priceData);
+                    throw new Error('Invalid price data format - check console for details');
                 }
                 
                 if (newsData.length > 0 && !validateNewsData(newsData)) {
@@ -241,44 +253,53 @@
         }
         
         async function fetchPriceData(coinId) {
-            const response = await fetch(`${WORKER_URL}/history?coin=${coinId}&days=7`);
-            
-            if (!response.ok) {
-                throw new Error(`Failed to fetch real price data for ${coinId}: HTTP ${response.status}`);
+            try {
+                // Try Coingecko API directly first
+                console.log(`📈 Fetching price data for ${coinId} from CoinGecko...`);
+                const response = await fetch(
+                    `${COINGECKO_API}/coins/${coinId}/market_chart?vs_currency=usd&days=7&interval=daily`
+                );
+                
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch price data: HTTP ${response.status}`);
+                }
+                
+                const data = await response.json();
+                console.log('📊 Raw price data from CoinGecko:', data);
+                
+                if (!data.prices || !Array.isArray(data.prices)) {
+                    throw new Error('Invalid price data format from API');
+                }
+                
+                // Format the data for the chart
+                const chartData = data.prices.map(([timestamp, price]) => {
+                    const date = new Date(timestamp);
+                    return {
+                        x: date,
+                        y: price,
+                        // Keep original timestamp for debugging
+                        timestamp: date.toISOString(),
+                        price: price
+                    };
+                });
+                
+                console.log(`✅ Fetched ${chartData.length} price points for ${coinId}`, chartData);
+                return chartData;
+            } catch (error) {
+                console.error('Error in fetchPriceData:', error);
+                throw new Error(`Failed to fetch price data for ${coinId}: ${error.message}`);
             }
-            
-            const data = await response.json();
-            
-            if (data.error) {
-                throw new Error(data.error);
-            }
-            
-            if (!data.prices || data.prices.length === 0) {
-                throw new Error(`No real price data found for ${coinId}`);
-            }
-            
-            // Validate the data structure
-            if (!validatePriceData(data.prices)) {
-                throw new Error('Invalid price data format received from CoinGecko');
-            }
-            
-            console.log(`✅ Real market data from ${data.source || 'CoinGecko'}: ${data.prices.length} price points`);
-            
-            return data.prices.map(item => ({
-                x: new Date(item.timestamp),
-                y: item.price
-            }));
         }
         
         async function fetchNewsData(coinId) {
+            if (!ENABLE_NEWS) {
+                console.log('ℹ️ News fetching is currently disabled');
+                return [];
+            }
+            
             try {
-                console.log(`📰 Fetching enhanced news for ${coinId}...`);
-                const response = await fetch(`${WORKER_URL}/news?coin=${coinId}`);
-                
-                if (!response.ok) {
-                    console.error(`News API HTTP error: ${response.status}`);
-                    throw new Error(`Failed to fetch news for ${coinId} (HTTP ${response.status})`);
-                }
+                console.log(`📰 News feature is currently disabled`);
+                return [];
                 
                 const data = await response.json();
                 console.log('📰 Enhanced News API response:', data);
