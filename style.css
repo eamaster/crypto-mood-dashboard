@@ -159,78 +159,124 @@ main {
 /* Controls section */
 .controls {
     background: var(--bg-primary);
-    padding: 1rem 1.5rem;
+    padding: 1rem 1.5rem; /* Default padding */
     border-radius: 12px;
     box-shadow: var(--shadow);
     margin-bottom: 1rem;
+    display: flex;
+    flex-direction: column; /* Default to column for mobile-first */
+    gap: 1rem; /* Space between main controls and status */
 }
 
-.controls-layout {
+.controls-main {
     display: flex;
-    flex-direction: column;
-    gap: 0;
+    flex-direction: column; /* Default to column for mobile-first */
+    gap: 1rem; /* Space between coin selector and buttons on mobile */
+    align-items: stretch; /* Stretch items by default */
 }
 
-.controls-row {
+.coin-selector-group {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 1.5rem;
-    flex-wrap: wrap;
-    min-height: 60px;
-}
-
-.controls-left {
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-    flex: 1;
-    min-width: 300px;
-    justify-content: center;
-}
-
-.controls-right {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    flex-shrink: 0;
-    min-width: 200px;
-    height: 100%;
-}
-
-.coin-selector {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    flex-wrap: wrap;
-    margin-bottom: 0.5rem;
-}
-
-.button-group {
-    display: flex;
+    flex-direction: column; /* Label above select on mobile */
     gap: 0.5rem;
-    align-items: center;
-    flex-wrap: wrap;
+    align-items: stretch;
 }
 
-.coin-selector label {
+.coin-selector-group label {
     font-weight: 600;
     color: var(--text-secondary);
-    white-space: nowrap;
-    min-width: max-content;
     font-size: 0.9rem;
+    margin-bottom: 0.25rem; /* From old .coin-selector label */
 }
 
-.dashboard-status {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    align-items: flex-end;
-    text-align: right;
-    justify-content: center;
-    min-width: 200px;
-    height: 100%;
+.coin-selector-group select {
+    width: 100%; /* Full width on mobile */
 }
+
+.action-buttons-group {
+    display: flex;
+    flex-direction: column; /* Buttons stack on mobile */
+    gap: 0.75rem; /* Space between buttons */
+    align-items: stretch;
+}
+
+.action-buttons-group button {
+    width: 100%; /* Full width buttons on mobile */
+    justify-content: center; /* Center text in buttons */
+}
+
+.controls-status {
+    display: flex;
+    flex-direction: column; /* Stack status items on mobile */
+    gap: 0.75rem;
+    align-items: center; /* Center align status items on mobile */
+    text-align: center;
+    padding-top: 0.5rem; /* Add some separation */
+    border-top: 1px solid var(--border-color); /* Separator for mobile */
+}
+
+/* Tablet and Desktop Overrides for Controls */
+@media (min-width: 768px) {
+    .controls {
+        flex-direction: row;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1.5rem; /* Space between main and status */
+    }
+
+    .controls-main {
+        flex-direction: row;
+        align-items: center;
+        gap: 1.5rem; /* Space between coin selector and buttons */
+        flex-grow: 1; /* Allow main controls to take available space */
+        flex-wrap: wrap; /* Allow wrapping if space is tight */
+    }
+
+    .coin-selector-group {
+        flex-direction: row;
+        align-items: center;
+        gap: 0.75rem; /* Space between label and select */
+    }
+
+    .coin-selector-group label {
+        margin-bottom: 0; /* Reset mobile margin */
+        white-space: nowrap; /* Prevent label from wrapping */
+    }
+
+    .coin-selector-group select {
+        width: auto; /* Auto width for select, can be constrained by parent */
+        min-width: 200px; /* Ensure it has some base width */
+        max-width: 300px; /* Prevent it from becoming too large */
+    }
+
+    .action-buttons-group {
+        flex-direction: row; /* Buttons side-by-side */
+        gap: 0.75rem;
+        align-items: center; /* Vertically center buttons */
+    }
+
+    .action-buttons-group button {
+        width: auto; /* Auto width for buttons */
+    }
+
+    .controls-status {
+        flex-direction: column; /* Keep status items stacked */
+        align-items: flex-end; /* Align to the right */
+        text-align: right;
+        padding-top: 0; /* Remove mobile padding */
+        border-top: none; /* Remove mobile border */
+        gap: 0.5rem; /* Adjust gap for stacked items */
+        flex-shrink: 0; /* Prevent status from shrinking too much */
+    }
+}
+
+@media (min-width: 1024px) {
+    .controls {
+        padding: 1.25rem 2rem; /* More padding on larger screens */
+    }
+    /* Further adjustments for very large screens if needed */
+}
+
 
 .last-updated {
     font-size: 0.85rem;
@@ -822,9 +868,12 @@ main {
         gap: 0.75rem;
     }
     
-    .controls {
-        padding: 1.25rem;
-    }
+    /* .controls padding is handled by new min-width: 1024px rule,
+       or default if screen is < 1024px but >= 768px,
+       or mobile-first default if < 768px.
+       The old rule here might conflict or be redundant.
+       Removing for now, can be re-added if specific max-width styling is needed.
+    */
     
     .dashboard-grid {
         grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
@@ -877,118 +926,13 @@ main {
         padding: 0.75rem;
     }
     
-    /* Controls Section - Complete Redesign */
-    .controls {
-        padding: 1rem;
-        margin-bottom: 1rem;
-    }
-    
-    .controls-layout {
-        display: flex;
-        flex-direction: column;
-        gap: 1rem;
-    }
-    
-    .controls-row {
-        flex-direction: column;
-        align-items: stretch;
-        gap: 1rem;
-        min-height: auto;
-    }
-    
-    .controls-left {
-        width: 100%;
-        min-width: auto;
-        gap: 1rem;
-        order: 1;
-    }
-    
-    .controls-right {
-        width: 100%;
-        min-width: auto;
-        height: auto;
-        order: 2;
-        justify-content: center;
-        align-items: center;
-    }
-    
-    /* Coin Selector Improvements */
-    .coin-selector {
-        flex-direction: column;
-        align-items: stretch;
-        gap: 0.75rem;
-        width: 100%;
-        margin-bottom: 0;
-    }
-    
-    .coin-selector label {
-        text-align: left;
-        font-size: 0.95rem;
-        font-weight: 600;
-        color: var(--text-primary);
-        margin-bottom: 0.25rem;
-    }
-    
-    /* Button Group - Enhanced Mobile Layout */
-    .button-group {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 0.75rem;
-        width: 100%;
-        margin-top: 0.5rem;
-    }
-    
-    .button-group button {
-        min-width: auto;
-        width: 100%;
-        padding: 0.875rem 0.75rem;
-        font-size: 0.9rem;
-        font-weight: 600;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        min-height: 44px; /* Ensure touch target */
-    }
-    
-    /* Technical Analysis and Analyze buttons span full width */
-    .ta-button,
-    .analyze-button {
-        grid-column: 1 / -1;
-        margin-top: 0.5rem;
-    }
-    
-    /* Dashboard Status - Mobile Optimized */
-    .dashboard-status {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        text-align: center;
-        width: 100%;
-        gap: 0.75rem;
-        background: var(--bg-secondary);
-        padding: 0.875rem;
-        border-radius: 8px;
-        border: 1px solid var(--border-color);
-    }
-    
-    .last-updated {
-        font-size: 0.85rem;
-        color: var(--text-secondary);
-        font-weight: 500;
-        white-space: normal;
-        line-height: 1.3;
-    }
-    
-    .real-time-status {
-        font-size: 0.8rem;
-        padding: 0.5rem 0.875rem;
-        white-space: normal;
-        text-align: center;
-        max-width: 100%;
-        border-radius: 6px;
-        word-break: break-word;
-        line-height: 1.3;
-    }
+    /* Controls Section styling is now handled by the mobile-first approach (base styles)
+       and the (min-width: 768px) media query for larger screens.
+       The specific overrides for .controls, .controls-layout, .controls-row,
+       .controls-left, .controls-right, .coin-selector, .button-group, .dashboard-status
+       that were previously here for (max-width: 768px) are removed to avoid conflicts
+       and rely on the new structure.
+    */
     
     /* Dashboard Grid - Mobile First */
     .dashboard-grid {
@@ -1178,43 +1122,10 @@ main {
         padding: 0.5rem;
     }
     
-    /* Controls - Ultra Compact */
-    .controls {
-        padding: 0.875rem;
-        margin-bottom: 0.75rem;
-    }
-    
-    .coin-selector label {
-        font-size: 0.9rem;
-    }
-    
-    /* Single column button layout */
-    .button-group {
-        grid-template-columns: 1fr;
-        gap: 0.5rem;
-        margin-top: 0.75rem;
-    }
-    
-    .button-group button {
-        padding: 1rem 0.75rem;
-        font-size: 0.85rem;
-        min-height: 48px; /* Larger touch target */
-    }
-    
-    /* Dashboard Status - Minimal */
-    .dashboard-status {
-        padding: 0.75rem;
-        gap: 0.5rem;
-    }
-    
-    .last-updated {
-        font-size: 0.8rem;
-    }
-    
-    .real-time-status {
-        font-size: 0.75rem;
-        padding: 0.5rem 0.75rem;
-    }
+    /* Controls section styles for max-width: 480px are now handled by mobile-first base styles.
+       Removing .controls, .coin-selector label, .button-group, .dashboard-status, etc.
+       specific overrides from this media query.
+    */
     
     /* Dashboard Grid - Minimal spacing */
     .dashboard-grid {
@@ -1337,58 +1248,11 @@ main {
         max-width: 100%;
     }
     
-    /* Controls - Ultra compact */
-    .controls {
-        padding: 0.625rem;
-        margin-bottom: 0.5rem;
-        width: 100%;
-        max-width: 100%;
-    }
-    
-    .coin-selector {
-        gap: 0.5rem;
-        margin-bottom: 0.5rem;
-    }
-    
-    .coin-selector label {
-        font-size: 0.85rem;
-        line-height: 1.2;
-    }
-    
-    /* Ultra-compact buttons */
-    .button-group {
-        grid-template-columns: 1fr;
-        gap: 0.375rem;
-        margin-top: 0.5rem;
-        width: 100%;
-    }
-    
-    .button-group button {
-        padding: 0.75rem 0.5rem;
-        font-size: 0.8rem;
-        min-height: 44px;
-        width: 100%;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-    
-    /* Dashboard status - minimal */
-    .dashboard-status {
-        padding: 0.5rem;
-        gap: 0.375rem;
-        font-size: 0.75rem;
-        width: 100%;
-        max-width: 100%;
-    }
-    
-    .last-updated, .real-time-status {
-        font-size: 0.7rem;
-        line-height: 1.2;
-        word-break: break-word;
-        text-align: center;
-    }
-    
+    /* Controls section styles for max-width: 320px are now handled by mobile-first base styles.
+       Removing .controls, .coin-selector, .coin-selector label, .button-group, .dashboard-status,
+       .last-updated, .real-time-status specific overrides from this media query.
+    */
+
     /* Dashboard grid - minimal spacing */
     .dashboard-grid {
         gap: 0.5rem;

@@ -22,31 +22,25 @@
 
     <main>
         <section class="controls">
-            <div class="controls-layout">
-                <div class="controls-row">
-                    <div class="controls-left">
-                        <div class="coin-selector">
-                            <label for="coinSelect">Select Cryptocurrency:</label>
-                            <select id="coinSelect">
-                                <option value="bitcoin">Loading coins...</option>
-                            </select>
-                        </div>
-                        <div class="button-group">
-                            <button id="refreshBtn">🔄 Refresh</button>
-                            <button id="realTimeBtn">📡 Start Real-Time (5min)</button>
-                            <button onclick="location.href='modules/technical-analysis.html'" class="ta-button">🔍 Technical Analysis</button>
-                        </div>
-                    </div>
-                    <div class="controls-right">
-                        <div class="dashboard-status">
-                            <div class="last-updated">
-                                Last updated: <span id="lastUpdated">Never</span>
-                            </div>
-                            <div id="realTimeStatus" style="display: none;" class="real-time-status">
-                                <span id="statusIcon">🔴</span> <span id="statusText">Real-time updates stopped</span>
-                            </div>
-                        </div>
-                    </div>
+            <div class="controls-main">
+                <div class="coin-selector-group">
+                    <label for="coinSelect">Select Cryptocurrency:</label>
+                    <select id="coinSelect">
+                        <option value="bitcoin">Loading coins...</option>
+                    </select>
+                </div>
+                <div class="action-buttons-group">
+                    <button id="refreshBtn">🔄 Refresh</button>
+                    <button id="realTimeBtn">📡 Start Real-Time (5min)</button>
+                    <button onclick="location.href='modules/technical-analysis.html'" class="ta-button">🔍 Technical Analysis</button>
+                </div>
+            </div>
+            <div class="controls-status">
+                <div class="last-updated">
+                    Last updated: <span id="lastUpdated">Never</span>
+                </div>
+                <div id="realTimeStatus" style="display: none;" class="real-time-status">
+                    <span id="statusIcon">🔴</span> <span id="statusText">Real-time updates stopped</span>
                 </div>
             </div>
         </section>
