@@ -3,11 +3,14 @@
 // Handles API calls to CoinGecko, NewsAPI.org, and Cohere AI
 // =============================================================================
 
-// CORS headers for frontend requests
+// CORS headers for frontend requests - Enhanced for GitHub Pages compatibility
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS, HEAD',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Referer, User-Agent',
+  'Access-Control-Expose-Headers': 'Content-Length, Content-Type',
+  'Access-Control-Max-Age': '86400', // 24 hours
+  'Vary': 'Origin',
 };
 
 // Response helper
@@ -124,55 +127,51 @@ async function handlePrice(request, env) {
     }
     
     const coingeckoId = SUPPORTED_COINS[coinId].coingecko_id;
+    const origin = request.headers.get('Origin');
+    
+    console.log(`Fetching price for ${coinId} from origin: ${origin || 'direct'}`);
     
     try {
-      // Fetch current price from CoinGecko
+      // Try CoinGecko API first
       const response = await rateLimitedFetch(
         `${COINGECKO_API_BASE}/simple/price?ids=${coingeckoId}&vs_currencies=usd&include_24hr_change=true&include_market_cap=true&include_24hr_vol=true`
       );
       
       if (!response.ok) {
         if (response.status === 429) {
-          console.log(`CoinGecko rate limited for ${coinId} price, using fallback data`);
+          console.log(`CoinGecko rate limited for ${coinId}, using fallback price`);
           return generateFallbackPriceData(coinId);
         }
         throw new Error(`CoinGecko API error: ${response.status}`);
       }
       
       const data = await response.json();
-      
-      if (!data[coingeckoId]) {
-        console.log(`No price data found for ${coinId}, using fallback`);
-        return generateFallbackPriceData(coinId);
-      }
-      
       const coinData = data[coingeckoId];
       
-      // Validate price data
       if (!validatePriceData(coinData)) {
-        console.log(`Invalid price data for ${coinId}, using fallback`);
+        console.log(`Invalid price data from CoinGecko for ${coinId}, using fallback`);
         return generateFallbackPriceData(coinId);
       }
       
       return jsonResponse({
         coin: coinId,
-        price: coinData.usd,
+        price: Math.round(coinData.usd * 100) / 100,
         change24h: coinData.usd_24h_change || 0,
-        market_cap: coinData.usd_market_cap || null,
-        volume_24h: coinData.usd_24h_vol || null,
+        market_cap: coinData.usd_market_cap || 0,
+        volume_24h: coinData.usd_24h_vol || 0,
         symbol: SUPPORTED_COINS[coinId].symbol,
-        timestamp: new Date().toISOString(),
-        source: 'coingecko'
+        source: 'coingecko',
+        timestamp: new Date().toISOString()
       });
       
     } catch (coingeckoError) {
-      console.log(`CoinGecko error for ${coinId} price: ${coingeckoError.message}, using fallback data`);
+      console.log(`CoinGecko error for ${coinId}: ${coingeckoError.message}, using fallback`);
       return generateFallbackPriceData(coinId);
     }
     
   } catch (error) {
     console.error('Error in handlePrice:', error);
-    return errorResponse(`Failed to fetch price: ${error.message}`);
+    return errorResponse(`Failed to fetch price data: ${error.message}`);
   }
 }
 
@@ -274,27 +273,24 @@ function generateFallbackPriceData(coinId) {
   const basePrice = getFallbackBasePrice(coinId);
   const volatility = getVolatilityForCoin(coinId);
   
-  // Generate realistic price variation (±1% to ±3%)
-  const priceVariation = (Math.random() - 0.5) * 2 * (volatility / 2);
-  const currentPrice = basePrice * (1 + priceVariation / 100);
+  // Generate realistic daily change (±volatility%)
+  const changePercent = (Math.random() - 0.5) * 2 * volatility;
+  const currentPrice = basePrice * (1 + changePercent / 100);
   
-  // Generate realistic 24h change (±2% to ±8%)
-  const change24h = (Math.random() - 0.5) * 2 * volatility;
-  
-  // Generate realistic market cap and volume estimates
-  const marketCapMultiplier = getMarketCapMultiplier(coinId);
-  const volumeMultiplier = getVolumeMultiplier(coinId);
+  // Generate realistic market data
+  const marketCap = currentPrice * 19000000; // Approximate circulating supply multiplier
+  const volume24h = marketCap * 0.05; // 5% of market cap as daily volume
   
   return jsonResponse({
     coin: coinId,
     price: Math.round(currentPrice * 100) / 100,
-    change24h: Math.round(change24h * 100) / 100,
-    market_cap: Math.round(currentPrice * marketCapMultiplier),
-    volume_24h: Math.round(currentPrice * volumeMultiplier),
+    change24h: changePercent,
+    market_cap: Math.round(marketCap),
+    volume_24h: Math.round(volume24h),
     symbol: SUPPORTED_COINS[coinId].symbol,
-    timestamp: new Date().toISOString(),
     source: 'fallback',
-    note: 'Simulated price data (CoinGecko temporarily unavailable)'
+    timestamp: new Date().toISOString(),
+    note: 'Simulated market data (CoinGecko temporarily unavailable)'
   });
 }
 
@@ -344,54 +340,6 @@ function getVolatilityForCoin(coinId) {
   };
   
   return volatilities[coinId] || 6; // Default 6% volatility
-}
-
-// Get estimated market cap multipliers for different coins
-function getMarketCapMultiplier(coinId) {
-  const multipliers = {
-    'bitcoin': 19500000,      // ~19.5M BTC supply
-    'ethereum': 120000000,    // ~120M ETH supply
-    'litecoin': 73000000,     // ~73M LTC supply
-    'bitcoin-cash': 19700000, // ~19.7M BCH supply
-    'cardano': 35000000000,   // ~35B ADA supply
-    'ripple': 100000000000,   // ~100B XRP supply
-    'dogecoin': 140000000000, // ~140B DOGE supply
-    'polkadot': 1200000000,   // ~1.2B DOT supply
-    'chainlink': 500000000,   // ~500M LINK supply
-    'stellar': 50000000000,   // ~50B XLM supply
-    'monero': 18000000,       // ~18M XMR supply
-    'tezos': 900000000,       // ~900M XTZ supply
-    'eos': 1000000000,        // ~1B EOS supply
-    'zcash': 15000000,        // ~15M ZEC supply
-    'dash': 11000000,         // ~11M DASH supply
-    'solana': 500000000       // ~500M SOL supply
-  };
-  
-  return multipliers[coinId] || 100000000; // Default 100M
-}
-
-// Get estimated volume multipliers for different coins
-function getVolumeMultiplier(coinId) {
-  const multipliers = {
-    'bitcoin': 500000,        // Higher volume
-    'ethereum': 200000,       // High volume
-    'litecoin': 50000,        // Medium volume
-    'bitcoin-cash': 40000,    // Medium volume
-    'cardano': 15000,         // Lower volume
-    'ripple': 30000,          // Medium volume
-    'dogecoin': 80000,        // High volume
-    'polkadot': 25000,        // Medium volume
-    'chainlink': 20000,       // Medium volume
-    'stellar': 10000,         // Lower volume
-    'monero': 15000,          // Lower volume
-    'tezos': 8000,            // Lower volume
-    'eos': 12000,             // Lower volume
-    'zcash': 5000,            // Lower volume
-    'dash': 7000,             // Lower volume
-    'solana': 60000           // High volume
-  };
-  
-  return multipliers[coinId] || 20000; // Default 20k
 }
 
 async function handleNews(request, env) {
@@ -1459,8 +1407,10 @@ async function handleOHLC(request, env) {
 
 export default {
   async fetch(request, env, ctx) {
-    // Handle CORS preflight requests
+    // Enhanced CORS preflight handling with logging
     if (request.method === 'OPTIONS') {
+      const origin = request.headers.get('Origin');
+      console.log(`CORS preflight from origin: ${origin}`);
       return new Response(null, {
         status: 200,
         headers: CORS_HEADERS,
@@ -1469,6 +1419,13 @@ export default {
     
     const url = new URL(request.url);
     const path = url.pathname;
+    const origin = request.headers.get('Origin');
+    const referer = request.headers.get('Referer');
+    
+    // Log GitHub Pages requests for debugging
+    if (origin && (origin.includes('github.io') || origin.includes('hesam.me'))) {
+      console.log(`Request from GitHub Pages: ${request.method} ${path} (Origin: ${origin})`);
+    }
     
     try {
       // Route requests
@@ -1501,11 +1458,12 @@ export default {
           return await handleOHLC(request, env);
           
         default:
+          console.log(`404 for path: ${path} from origin: ${origin || 'unknown'}`);
           return errorResponse('Not found', 404);
       }
       
     } catch (error) {
-      console.error('Worker error:', error);
+      console.error(`Worker error for ${path} from ${origin || 'unknown'}:`, error);
       return errorResponse('Internal server error', 500);
     }
   },
