@@ -1,12 +1,28 @@
 {
 	"/": [
-		"src/routes/+page.js"
+		"src/routes/+page.js",
+		"src/routes/+layout.js",
+		"src/routes/+layout.js"
 	],
-	"/modules": [],
-	"/modules/coin-news": [],
-	"/modules/mood-impact-chart": [],
-	"/modules/price-chart": [],
-	"/modules/price-fetcher": [],
-	"/modules/sentiment-analyzer": [],
-	"/modules/technical-analysis": []
+	"/modules": [
+		"src/routes/+layout.js"
+	],
+	"/modules/coin-news": [
+		"src/routes/+layout.js"
+	],
+	"/modules/mood-impact-chart": [
+		"src/routes/+layout.js"
+	],
+	"/modules/price-chart": [
+		"src/routes/+layout.js"
+	],
+	"/modules/price-fetcher": [
+		"src/routes/+layout.js"
+	],
+	"/modules/sentiment-analyzer": [
+		"src/routes/+layout.js"
+	],
+	"/modules/technical-analysis": [
+		"src/routes/+layout.js"
+	]
 }
