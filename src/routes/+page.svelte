@@ -68,9 +68,9 @@
 	function getMoodBadge(category) {
 		switch (category) {
 			case 'bullish':
-				return '📈 Bullish';
+				return '🐂 Bullish';
 			case 'bearish':
-				return '📉 Bearish';
+				return '🐻 Bearish';
 			default:
 				return '😐 Neutral';
 		}
