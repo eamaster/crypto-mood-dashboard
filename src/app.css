@@ -397,6 +397,7 @@ main {
 /* Chart card */
 .chart-card {
     grid-column: 1 / -1; /* Full width */
+    grid-row: 3 / 4; /* Force it to be in the third row */
 }
 
 .chart-container {
@@ -620,6 +621,11 @@ button:active {
     .dashboard-status {
         align-items: center;
         text-align: center;
+    }
+    
+    /* Ensure chart card flows naturally on mobile */
+    .chart-card {
+        grid-row: auto;
     }
 }
 

@@ -283,6 +283,7 @@
 	.chart-container {
 		height: 400px;
 		margin: 1rem 0;
+		width: 100%;
 	}
 	
 	.loading {
