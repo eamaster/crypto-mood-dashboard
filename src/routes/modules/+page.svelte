@@ -1,5 +1,6 @@
 <script>
 	import { goto } from '$app/navigation';
+	import { base } from '$app/paths';
 
 	const modules = [
 		{
@@ -71,7 +72,7 @@
 	}
 
 	function goBackToDashboard() {
-		goto('../');
+		goto(base);
 	}
 </script>
 
