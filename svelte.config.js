@@ -10,8 +10,11 @@ const config = {
 			fallback: 'index.html',
 			precompress: false,
 			strict: true
-		})
-		// Removed base path - site will work at root domain hesam.me
+		}),
+		// Add base path for deployment at subdirectory
+		paths: {
+			base: '/crypto-mood-dashboard'
+		}
 	}
 };
 
