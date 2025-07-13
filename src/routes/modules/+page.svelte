@@ -71,7 +71,7 @@
 	}
 
 	function goBackToDashboard() {
-		goto('/');
+		goto('../');
 	}
 </script>
 
