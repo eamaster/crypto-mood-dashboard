@@ -41,7 +41,7 @@
 		
 		selectedCoin = newCoin;
 		try {
-			await cryptoStore.setCoin(newCoin);
+		await cryptoStore.setCoin(newCoin);
 		} catch (error) {
 			console.error('❌ Failed to change coin:', error);
 		}
@@ -50,11 +50,11 @@
 	async function handleRefresh() {
 		isRefreshing = true;
 		try {
-			await cryptoStore.setCoin($cryptoStore.selectedCoin);
+		await cryptoStore.setCoin($cryptoStore.selectedCoin);
 		} catch (error) {
 			console.error('❌ Failed to refresh data:', error);
 		} finally {
-			isRefreshing = false;
+		isRefreshing = false;
 		}
 	}
 

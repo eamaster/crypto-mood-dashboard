@@ -27,15 +27,15 @@
 			error
 		});
 	}
-
+	
 	$: if (browser && historyData.length > 0 && !loading && !error) {
 		(async () => {
 			await tick();
 			logState('Reactive chart init');
-			initializeChart();
+		initializeChart();
 		})();
 	}
-
+	
 	onMount(async () => {
 		if (browser && historyData.length > 0 && !loading && !error) {
 			await tick();
