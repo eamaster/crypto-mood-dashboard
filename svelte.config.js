@@ -10,11 +10,8 @@ const config = {
 			fallback: 'index.html',
 			precompress: false,
 			strict: true
-		}),
-		paths: {
-			// Configure base path for GitHub Pages subpath deployment
-			base: process.env.NODE_ENV === 'production' ? '/crypto-mood-dashboard' : ''
-		}
+		})
+		// Removed base path - site will work at root domain hesam.me
 	}
 };
 
