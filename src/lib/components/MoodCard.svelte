@@ -1,4 +1,5 @@
 <script>
+	import DataCard from './DataCard.svelte';
 	// Props for mood data
 	export let badge = '😐 Neutral';
 	export let score = 0;
@@ -21,130 +22,40 @@
 	}
 </script>
 
-<div class="card mood-card">
-	<h2>🧠 Market Mood</h2>
-	
-	{#if loading}
-		<div class="loading">
-			<div class="spinner"></div>
-			Loading sentiment data...
-		</div>
-	{:else if error}
-		<div class="error-message">
-			<div class="error-icon">⚠️</div>
-			<div class="error-text">
-				<strong>Sentiment data unavailable</strong>
-				<div class="error-details">
-					{#if error.includes('NewsAPI key')}
-						News service temporarily unavailable. Using fallback analysis.
-					{:else if error.includes('429')}
-						Rate limit exceeded. Please try again in a few minutes.
-					{:else if error.includes('fetch')}
-						Network error. Please check your internet connection.
-					{:else}
-						{error}
+<DataCard title="🧠 Market Mood" {loading} {error}>
+	<div class="mood-widget">
+		<div class="mood-badge {category}">{badge}</div>
+		<div class="mood-score">Score: {formatScore(score)}</div>
+		<div class="mood-source">{source}</div>
+	</div>
+
+	{#if newsItems.length > 0}
+		<div class="news-container">
+			<h3>Recent Headlines</h3>
+			{#each newsItems.slice(0, 5) as newsItem}
+				<div class="news-item">
+					<div class="news-title">{truncateTitle(newsItem.title)}</div>
+					{#if newsItem.publishedAt}
+						<div class="news-date">
+							{new Date(newsItem.publishedAt).toLocaleDateString()}
+						</div>
 					{/if}
 				</div>
-			</div>
+			{/each}
+			{#if newsItems.length > 5}
+				<div class="news-more">
+					+{newsItems.length - 5} more headlines analyzed
+				</div>
+			{/if}
 		</div>
 	{:else}
-		<div class="mood-widget">
-			<div class="mood-badge {category}">{badge}</div>
-			<div class="mood-score">Score: {formatScore(score)}</div>
-			<div class="mood-source">{source}</div>
+		<div class="no-news">
+			📰 No recent headlines available
 		</div>
-		
-		{#if newsItems.length > 0}
-			<div class="news-container">
-				<h3>Recent Headlines</h3>
-				{#each newsItems.slice(0, 5) as newsItem}
-					<div class="news-item">
-						<div class="news-title">{truncateTitle(newsItem.title)}</div>
-						{#if newsItem.publishedAt}
-							<div class="news-date">
-								{new Date(newsItem.publishedAt).toLocaleDateString()}
-							</div>
-						{/if}
-					</div>
-				{/each}
-				{#if newsItems.length > 5}
-					<div class="news-more">
-						+{newsItems.length - 5} more headlines analyzed
-					</div>
-				{/if}
-			</div>
-		{:else}
-			<div class="no-news">
-				📰 No recent headlines available
-			</div>
-		{/if}
 	{/if}
-</div>
+</DataCard>
 
 <style>
-	.loading {
-		display: flex;
-		justify-content: center;
-		align-items: center;
-		padding: 2rem;
-		font-size: 1.1rem;
-		color: var(--text-secondary);
-		flex-direction: column;
-		gap: 1rem;
-	}
-
-	.spinner {
-		width: 24px;
-		height: 24px;
-		border: 3px solid var(--border-color);
-		border-top: 3px solid var(--accent-color);
-		border-radius: 50%;
-		animation: spin 1s linear infinite;
-	}
-
-	@keyframes spin {
-		0% { transform: rotate(0deg); }
-		100% { transform: rotate(360deg); }
-	}
-	
-	.error-message {
-		display: flex;
-		align-items: flex-start;
-		gap: 0.75rem;
-		padding: 1.5rem;
-		background-color: #fef2f2;
-		border: 1px solid #fecaca;
-		border-radius: 8px;
-		color: #991b1b;
-		margin: 1rem 0;
-	}
-	
-	.dark-theme .error-message {
-		background-color: #431a1a;
-		border-color: #7f2020;
-		color: #fca5a5;
-	}
-	
-	.error-icon {
-		font-size: 1.2rem;
-		flex-shrink: 0;
-	}
-	
-	.error-text {
-		flex: 1;
-	}
-	
-	.error-text strong {
-		display: block;
-		margin-bottom: 0.5rem;
-		font-weight: 600;
-	}
-	
-	.error-details {
-		font-size: 0.9rem;
-		opacity: 0.8;
-	}
-	
 	.mood-widget {
 		text-align: center;
 		padding: 1rem;
