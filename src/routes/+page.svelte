@@ -311,7 +311,7 @@
 	}
 
 	function navigateToTechnicalAnalysis() {
-		goto('/modules/technical-analysis');
+		goto('modules/technical-analysis');
 	}
 </script>
 

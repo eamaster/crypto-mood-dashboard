@@ -53,7 +53,7 @@
 		AI by Cohere • Built with Chart.js & Cloudflare Workers
 	</p>
 	<p>
-		<a href="/modules">📦 View all modules</a> • 
-		<a href="/modules/technical-analysis">🔍 Technical Analysis</a>
+		<a href="modules">📦 View all modules</a> • 
+		<a href="modules/technical-analysis">🔍 Technical Analysis</a>
 	</p>
 </footer> 
