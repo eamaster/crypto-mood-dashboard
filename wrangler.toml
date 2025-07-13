@@ -7,27 +7,12 @@ main = "worker/index.js"
 # Example: wrangler secret put BLOCKCHAIR_KEY
 
 [env.production]
-vars = { ENVIRONMENT = "production" }
+vars = { ENVIRONMENT = "production", COHERE_API_KEY = "hYvRyLNadYN17BZGC2ZtIBG0oZH44SyPSGUoMePQ", NEWSAPI_KEY = "1a0067fcf14c4333888e0771d3addae4" }
 
 [env.dev]
-vars = { ENVIRONMENT = "development" }
+vars = { ENVIRONMENT = "development", COHERE_API_KEY = "hYvRyLNadYN17BZGC2ZtIBG0oZH44SyPSGUoMePQ", NEWSAPI_KEY = "1a0067fcf14c4333888e0771d3addae4" }
 
-# CORS configuration
-[[env.production.rules]]
-type = "cors"
-
-[[env.dev.rules]]
-type = "cors"
-
-# Example environment variables (set via wrangler secret put)
+# Environment variables with API keys
 # BLOCKCHAIR_KEY = "G___S4J16vrkR7eK5wn5ykSAhQiExJNB"
 # NEWSDATA_KEY = "pub_0a6ac26df9e94ac1aa0eda7f80b2f44f"  # Old NewsData.io key
-# NEWSAPI_KEY = "1a0067fcf14c4333888e0771d3addae4"  # New @https://newsapi.org/ key
-# COHERE_KEY = "8v2ZrEf2NHbhqfKtHKmKmTbh695Nlnhsq6cdHnwH"
-
-# Rate limiting configuration
-[env.production.limits]
-cpu_ms = 50
-
-[env.dev.limits]
-cpu_ms = 100 
+# NEWSAPI_KEY = "1a0067fcf14c4333888e0771d3addae4"  # New @https://newsapi.org/ key 

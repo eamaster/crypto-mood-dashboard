@@ -1,0 +1,1 @@
+export { default as component } from "../../../../src/routes/modules/mood-impact-chart/+page.svelte";

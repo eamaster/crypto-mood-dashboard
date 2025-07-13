@@ -176,41 +176,133 @@ async function handleHistory(request, env) {
     
     const coingeckoId = SUPPORTED_COINS[coinId].coingecko_id;
     
-    // Fetch historical price data from CoinGecko
-    const response = await rateLimitedFetch(
-      `${COINGECKO_API_BASE}/coins/${coingeckoId}/market_chart?vs_currency=usd&days=${days}&interval=daily`
-    );
-    
-    if (!response.ok) {
-      throw new Error(`CoinGecko API error: ${response.status}`);
+    try {
+      // Fetch historical price data from CoinGecko
+      const response = await rateLimitedFetch(
+        `${COINGECKO_API_BASE}/coins/${coingeckoId}/market_chart?vs_currency=usd&days=${days}&interval=daily`
+      );
+      
+      if (!response.ok) {
+        if (response.status === 429) {
+          console.log(`CoinGecko rate limited for ${coinId}, using fallback data`);
+          return generateFallbackHistoryData(coinId, days);
+        }
+        throw new Error(`CoinGecko API error: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      // Validate historical data
+      if (!validateHistoryData(data)) {
+        console.log(`Invalid data from CoinGecko for ${coinId}, using fallback`);
+        return generateFallbackHistoryData(coinId, days);
+      }
+      
+      // Transform data to expected format
+      const prices = data.prices.map(([timestamp, price]) => ({
+          timestamp: new Date(timestamp).toISOString(),
+          price: Math.round(price * 100) / 100, // Round to 2 decimal places
+      }));
+      
+      return jsonResponse({
+        coin: coinId,
+        prices: prices,
+        days: days,
+        symbol: SUPPORTED_COINS[coinId].symbol,
+        source: 'coingecko',
+        note: 'Real market data from CoinGecko'
+      });
+      
+    } catch (coingeckoError) {
+      console.log(`CoinGecko error for ${coinId}: ${coingeckoError.message}, using fallback data`);
+      return generateFallbackHistoryData(coinId, days);
     }
-    
-    const data = await response.json();
-    
-    // Validate historical data
-    if (!validateHistoryData(data)) {
-      throw new Error('Invalid historical data received from CoinGecko');
-    }
-    
-    // Transform data to expected format
-    const prices = data.prices.map(([timestamp, price]) => ({
-        timestamp: new Date(timestamp).toISOString(),
-        price: Math.round(price * 100) / 100, // Round to 2 decimal places
-    }));
-    
-    return jsonResponse({
-      coin: coinId,
-      prices: prices,
-      days: days,
-      symbol: SUPPORTED_COINS[coinId].symbol,
-      source: 'coingecko',
-      note: 'Real market data from CoinGecko'
-    });
     
   } catch (error) {
-    console.error('Error fetching history:', error);
+    console.error('Error in handleHistory:', error);
     return errorResponse(`Failed to fetch price history: ${error.message}`);
   }
+}
+
+// Generate realistic fallback historical data when CoinGecko is unavailable
+function generateFallbackHistoryData(coinId, days) {
+  const prices = [];
+  const now = new Date();
+  const basePrice = getFallbackBasePrice(coinId);
+  
+  // Generate realistic price movements
+  let currentPrice = basePrice;
+  for (let i = days - 1; i >= 0; i--) {
+    const date = new Date(now);
+    date.setDate(date.getDate() - i);
+    
+    // Add realistic daily volatility (±2% to ±8% depending on coin)
+    const volatility = getVolatilityForCoin(coinId);
+    const changePercent = (Math.random() - 0.5) * 2 * volatility;
+    currentPrice = currentPrice * (1 + changePercent / 100);
+    
+    prices.push({
+      timestamp: date.toISOString(),
+      price: Math.round(currentPrice * 100) / 100
+    });
+  }
+  
+  return jsonResponse({
+    coin: coinId,
+    prices: prices,
+    days: days,
+    symbol: SUPPORTED_COINS[coinId].symbol,
+    source: 'fallback',
+    note: 'Simulated market data (CoinGecko temporarily unavailable)'
+  });
+}
+
+// Get realistic base prices for different coins
+function getFallbackBasePrice(coinId) {
+  const basePrices = {
+    'bitcoin': 45000,
+    'ethereum': 2800,
+    'litecoin': 90,
+    'bitcoin-cash': 250,
+    'cardano': 0.45,
+    'ripple': 0.55,
+    'dogecoin': 0.08,
+    'polkadot': 6.5,
+    'chainlink': 14,
+    'stellar': 0.12,
+    'monero': 160,
+    'tezos': 1.2,
+    'eos': 1.1,
+    'zcash': 45,
+    'dash': 45,
+    'solana': 25
+  };
+  
+  return basePrices[coinId] || 100; // Default fallback price
+}
+
+// Get volatility percentage for different coins
+function getVolatilityForCoin(coinId) {
+  const volatilities = {
+    'bitcoin': 4,      // ±4% daily volatility
+    'ethereum': 5,     // ±5% daily volatility
+    'litecoin': 6,     // ±6% daily volatility
+    'bitcoin-cash': 6,
+    'cardano': 7,
+    'ripple': 7,
+    'dogecoin': 8,     // ±8% daily volatility (more volatile)
+    'polkadot': 7,
+    'chainlink': 7,
+    'stellar': 7,
+    'monero': 6,
+    'tezos': 7,
+    'eos': 7,
+    'zcash': 6,
+    'dash': 6,
+    'solana': 8
+  };
+  
+  return volatilities[coinId] || 6; // Default 6% volatility
 }
 
 async function handleNews(request, env) {
@@ -675,42 +767,6 @@ async function handleAIExplain(request, env) {
  * Classify market mood using Cohere's v2/classify endpoint
  */
 async function classifyMarketMoodWithCohere(rsi, smaSignal, bbSignal, priceData, coin, env) {
-  // Prepare training examples for classification
-  const examples = [
-    {
-      text: "RSI: 85, SMA: SELL, BB: SELL, Price trend: declining sharply",
-      label: "bearish"
-    },
-    {
-      text: "RSI: 25, SMA: BUY, BB: BUY, Price trend: rising from oversold",
-      label: "bullish"
-    },
-    {
-      text: "RSI: 45, SMA: NEUTRAL, BB: NEUTRAL, Price trend: sideways movement",
-      label: "neutral"
-    },
-    {
-      text: "RSI: 75, SMA: BUY, BB: NEUTRAL, Price trend: strong upward momentum",
-      label: "bullish"
-    },
-    {
-      text: "RSI: 30, SMA: SELL, BB: SELL, Price trend: continued downtrend",
-      label: "bearish"
-    },
-    {
-      text: "RSI: 55, SMA: BUY, BB: BUY, Price trend: breaking resistance",
-      label: "bullish"
-    },
-    {
-      text: "RSI: 68, SMA: NEUTRAL, BB: SELL, Price trend: mixed signals",
-      label: "neutral"
-    },
-    {
-      text: "RSI: 20, SMA: BUY, BB: BUY, Price trend: potential reversal",
-      label: "bullish"
-    }
-  ];
-  
   // Calculate price trend from recent data
   const recentPrices = priceData.slice(-5);
   const oldPrice = recentPrices[0]?.y || 0;
@@ -728,50 +784,80 @@ async function classifyMarketMoodWithCohere(rsi, smaSignal, bbSignal, priceData,
   
   console.log('Classifying market mood for:', inputText);
   
-  // Make request to Cohere Classify API v2
-  const response = await fetch('https://api.cohere.com/v2/classify', {
+  // Create a comprehensive prompt for Chat API classification
+  const prompt = `You are a cryptocurrency market sentiment classifier. Based on the technical analysis indicators provided, classify the market sentiment as exactly one of: "bullish", "bearish", or "neutral".
+
+Technical Analysis Data:
+${inputText}
+
+Guidelines:
+- "bullish": Strong positive signals, RSI oversold (under 30) with buy signals, or strong upward momentum
+- "bearish": Strong negative signals, RSI overbought (over 70) with sell signals, or strong downward momentum  
+- "neutral": Mixed signals, RSI in normal range (30-70), or conflicting indicators
+
+Examples:
+- RSI: 25, SMA: BUY, BB: BUY, Price trend: rising strongly → bullish
+- RSI: 80, SMA: SELL, BB: SELL, Price trend: declining sharply → bearish
+- RSI: 50, SMA: NEUTRAL, BB: NEUTRAL, Price trend: sideways movement → neutral
+
+Respond with ONLY a JSON object in this exact format:
+{"sentiment": "bullish", "confidence": 85, "reasoning": "Brief explanation"}
+
+The confidence should be a number between 50-95 based on how clear the signals are.`;
+  
+  // Make request to Cohere Chat API v2
+  const response = await fetch('https://api.cohere.com/v2/chat', {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${env.COHERE_API_KEY}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'embed-english-v3.0',
-      inputs: [inputText],
-      examples: examples,
-      task_description: 'Classify cryptocurrency market sentiment based on technical analysis indicators. Use "bullish" for positive outlook, "bearish" for negative outlook, and "neutral" for mixed or unclear signals.'
+      model: 'command-r',
+      messages: [
+        {
+          role: 'user',
+          content: prompt
+        }
+      ],
+      temperature: 0.3,
+      max_tokens: 200
     }),
   });
   
   if (!response.ok) {
     const errorBody = await response.text();
-    console.log('Cohere Classify API error:', errorBody);
-    throw new Error(`Cohere Classify API error: ${response.status}`);
+    console.log('Cohere Chat API error:', errorBody);
+    throw new Error(`Cohere Chat API error: ${response.status}`);
   }
   
   const data = await response.json();
-  console.log('Cohere Classify API success:', data);
+  console.log('Cohere Chat API success for classification');
   
-  // Extract classification result
-  const classification = data.classifications?.[0];
-  if (!classification) {
-    throw new Error('No classification result returned');
+  // Extract the classification result
+  const messageContent = data.message?.content?.[0]?.text || '';
+  
+  try {
+    // Extract JSON from response
+    const jsonMatch = messageContent.match(/\{.*\}/s);
+    if (jsonMatch) {
+      const result = JSON.parse(jsonMatch[0]);
+      
+      return jsonResponse({
+        mood: result.sentiment,
+        confidence: result.confidence || 75,
+        reasoning: result.reasoning || `Based on RSI ${rsi.toFixed(1)}, SMA: ${smaSignal}, BB: ${bbSignal}, price trend: ${priceTrend}`,
+        method: 'cohere-chat-api',
+        coin: coin,
+        timestamp: new Date().toISOString()
+      });
+    } else {
+      throw new Error('No JSON found in response');
+    }
+  } catch (parseError) {
+    console.log('Failed to parse AI classification response:', parseError.message);
+    throw new Error('Invalid response format from Cohere Chat API');
   }
-  
-  const prediction = classification.prediction;
-  const confidence = classification.confidence || 0;
-  
-  // Map confidence to a more meaningful scale
-  const confidencePercentage = Math.round(confidence * 100);
-  
-  return jsonResponse({
-    mood: prediction,
-    confidence: confidencePercentage,
-    reasoning: `Based on RSI ${rsi.toFixed(1)}, SMA signal: ${smaSignal}, BB signal: ${bbSignal}, and price trend: ${priceTrend}`,
-    method: 'cohere-classify-api',
-    coin: coin,
-    timestamp: new Date().toISOString()
-  });
 }
 
 /**
@@ -1035,6 +1121,57 @@ function explainPatternFallback(rsi, sma, bb, signals, coin, timeframe, liveValu
       currentSMA: smaValue,
       timeframe
     }
+  });
+}
+
+/**
+ * Fallback analysis without pattern analysis
+ */
+function classifyMarketMoodFallback(rsi, smaSignal, bbSignal, priceData, coin) {
+  let bullishScore = 0;
+  let bearishScore = 0;
+  
+  // RSI scoring
+  if (rsi < 30) bullishScore += 2;
+  else if (rsi > 70) bearishScore += 2;
+  else if (rsi >= 45 && rsi <= 55) bullishScore += 0.5;
+  
+  // SMA scoring
+  if (smaSignal === 'BUY') bullishScore += 1.5;
+  else if (smaSignal === 'SELL') bearishScore += 1.5;
+  
+  // BB scoring
+  if (bbSignal === 'BUY') bullishScore += 1;
+  else if (bbSignal === 'SELL') bearishScore += 1;
+  
+  // Price trend analysis
+  if (priceData.length >= 3) {
+    const recentPrices = priceData.slice(-3);
+    const trend = (recentPrices[2].y - recentPrices[0].y) / recentPrices[0].y;
+    if (trend > 0.01) bullishScore += 1;
+    else if (trend < -0.01) bearishScore += 1;
+  }
+  
+  // Determine mood
+  let mood, confidence;
+  if (bullishScore > bearishScore + 1) {
+    mood = 'bullish';
+    confidence = Math.min(90, 60 + (bullishScore - bearishScore) * 8);
+  } else if (bearishScore > bullishScore + 1) {
+    mood = 'bearish';
+    confidence = Math.min(90, 60 + (bearishScore - bullishScore) * 8);
+  } else {
+    mood = 'neutral';
+    confidence = 50 + Math.abs(bullishScore - bearishScore) * 5;
+  }
+  
+  return jsonResponse({
+    mood: mood,
+    confidence: Math.round(confidence),
+    reasoning: `Fallback analysis: bullish signals ${bullishScore.toFixed(1)}, bearish signals ${bearishScore.toFixed(1)}`,
+    method: 'rule-based-fallback',
+    coin: coin,
+    timestamp: new Date().toISOString()
   });
 }
 

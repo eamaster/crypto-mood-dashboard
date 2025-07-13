@@ -1,0 +1,12 @@
+{
+	"/": [
+		"src/routes/+page.js"
+	],
+	"/modules": [],
+	"/modules/coin-news": [],
+	"/modules/mood-impact-chart": [],
+	"/modules/price-chart": [],
+	"/modules/price-fetcher": [],
+	"/modules/sentiment-analyzer": [],
+	"/modules/technical-analysis": []
+}
