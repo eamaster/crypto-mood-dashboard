@@ -4,9 +4,7 @@
 	import { goto } from '$app/navigation';
 	import Chart from 'chart.js/auto';
 	import 'chartjs-adapter-date-fns';
-
-	// Worker URL
-	const WORKER_URL = 'https://crypto-mood-dashboard-production.smah0085.workers.dev';
+	import { WORKER_URL } from '../../lib/config.js';
 
 	// Reactive variables
 	let coinId = 'bitcoin';
