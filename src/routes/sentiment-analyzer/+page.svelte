@@ -1,9 +1,7 @@
 <script>
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-
-	// Worker URL
-	const WORKER_URL = 'https://crypto-mood-dashboard-production.smah0085.workers.dev';
+	import { WORKER_URL } from '../../lib/config.js';
 
 	// Reactive variables
 	let textInput = `Bitcoin price soars to new all-time high
