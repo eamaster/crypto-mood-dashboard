@@ -13,7 +13,9 @@
 	let isRefreshing = false;
 
 	onMount(() => {
-		cryptoStore.initStore();
+		cryptoStore.initStore().catch(error => {
+			console.error('❌ Failed to initialize store:', error);
+		});
 	});
 
 	onDestroy(() => {
@@ -38,13 +40,22 @@
 		if (newCoin === $cryptoStore.selectedCoin) return;
 		
 		selectedCoin = newCoin;
-		await cryptoStore.setCoin(newCoin);
+		try {
+			await cryptoStore.setCoin(newCoin);
+		} catch (error) {
+			console.error('❌ Failed to change coin:', error);
+		}
 	}
 
 	async function handleRefresh() {
 		isRefreshing = true;
-		await cryptoStore.setCoin($cryptoStore.selectedCoin);
-		isRefreshing = false;
+		try {
+			await cryptoStore.setCoin($cryptoStore.selectedCoin);
+		} catch (error) {
+			console.error('❌ Failed to refresh data:', error);
+		} finally {
+			isRefreshing = false;
+		}
 	}
 
 	function toggleRealTime() {

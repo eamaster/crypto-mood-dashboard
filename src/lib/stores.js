@@ -35,44 +35,69 @@ const fetchCoins = async () => {
 
 const fetchPrice = async (coinId) => {
     try {
+        console.log(`🔍 Fetching price for ${coinId} from ${WORKER_URL}/price`);
         const response = await fetch(`${WORKER_URL}/price?coin=${coinId}`);
+        console.log(`📊 Price response status: ${response.status}`);
+        
         if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`❌ Price API error: ${response.status} - ${errorText}`);
             throw new Error(`Failed to fetch price data. Status: ${response.status}`);
         }
+        
         const data = await response.json();
+        console.log(`✅ Price data received:`, data);
+        
         if (data.error) {
             throw new Error(data.error);
         }
         if (!validatePrice(data)) {
+            console.error(`❌ Invalid price data:`, data);
             throw new Error('Invalid price data');
         }
         return data;
     } catch (error) {
-        console.error(`Error fetching price for ${coinId}:`, error);
+        console.error(`❌ Error fetching price for ${coinId}:`, error);
         throw new Error(`Failed to fetch price data for ${coinId}.`);
     }
 };
 
 const fetchHistory = async (coinId) => {
     try {
+        console.log(`🔍 Fetching history for ${coinId} from ${WORKER_URL}/history`);
         const response = await fetch(`${WORKER_URL}/history?coin=${coinId}&days=7`);
+        console.log(`📊 History response status: ${response.status}`);
+        
         if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`❌ History API error: ${response.status} - ${errorText}`);
             throw new Error(`Failed to fetch history data. Status: ${response.status}`);
         }
+        
         const data = await response.json();
+        console.log(`✅ History data received:`, data);
+        
         if (data.error) {
             throw new Error(data.error);
         }
+        
+        if (!data.prices || !Array.isArray(data.prices)) {
+            console.error(`❌ Invalid history data format:`, data);
+            throw new Error('Invalid history data format');
+        }
+        
         const historyData = data.prices.map(item => ({
             x: new Date(item.timestamp),
             y: item.price
         }));
+        
         if (!validateHistory(historyData)) {
+            console.error(`❌ Invalid history data after transformation:`, historyData);
             throw new Error('Invalid history data');
         }
         return historyData;
     } catch (error) {
-        console.error(`Error fetching history for ${coinId}:`, error);
+        console.error(`❌ Error fetching history for ${coinId}:`, error);
         throw new Error(`Failed to fetch history data for ${coinId}.`);
     }
 };
