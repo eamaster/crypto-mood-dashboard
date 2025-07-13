@@ -1742,7 +1742,7 @@
 	}
 
 	function goBack() {
-		goto('/modules');
+		goto('modules');
 	}
 </script>
 

@@ -17,13 +17,13 @@ export const server_loads = [];
 
 export const dictionary = {
 		"/": [2],
-		"/modules": [3],
-		"/modules/coin-news": [4],
-		"/modules/mood-impact-chart": [5],
-		"/modules/price-chart": [6],
-		"/modules/price-fetcher": [7],
-		"/modules/sentiment-analyzer": [8],
-		"/modules/technical-analysis": [9]
+		"/coin-news": [3],
+		"/modules": [4],
+		"/mood-impact-chart": [5],
+		"/price-chart": [6],
+		"/price-fetcher": [7],
+		"/sentiment-analyzer": [8],
+		"/technical-analysis": [9]
 	};
 
 export const hooks = {

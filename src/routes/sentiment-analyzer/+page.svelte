@@ -167,7 +167,7 @@ Positive regulatory developments worldwide`;
 	}
 
 	function goBack() {
-		goto('/modules');
+		goto('modules');
 	}
 </script>
 

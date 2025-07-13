@@ -1,1 +1,1 @@
-export { default as component } from "../../../../src/routes/modules/sentiment-analyzer/+page.svelte";
+export { default as component } from "../../../../src/routes/sentiment-analyzer/+page.svelte";

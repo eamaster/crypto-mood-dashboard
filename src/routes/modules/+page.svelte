@@ -7,42 +7,42 @@
 			title: '🔍 Technical Analysis',
 			description: 'Professional crypto technical indicators and signals with AI-powered analysis',
 			features: ['RSI, SMA, Bollinger Bands', 'Pattern Recognition', 'AI Market Analysis', 'Interactive Charts'],
-			path: './technical-analysis'
+			path: '../technical-analysis'
 		},
 		{
 			id: 'price-fetcher',
 			title: '🚀 Price Fetcher',
 			description: 'Fetch real-time cryptocurrency prices with 24h change data',
 			features: ['Real-time Prices', 'CoinGecko Integration', '24h Change Data', 'Multi-coin Support'],
-			path: './price-fetcher'
+			path: '../price-fetcher'
 		},
 		{
 			id: 'coin-news',
 			title: '📰 Coin News',
 			description: 'Get the latest cryptocurrency news articles powered by NewsAPI.org',
 			features: ['Latest Headlines', 'News Analysis', 'Multiple Sources', 'Real-time Updates'],
-			path: './coin-news'
+			path: '../coin-news'
 		},
 		{
 			id: 'price-chart',
 			title: '📈 Price Chart',
 			description: 'Interactive 7-day price history charts for any cryptocurrency',
 			features: ['7-day History', 'Interactive Charts', 'Time-based Analysis', 'Chart.js Integration'],
-			path: './price-chart'
+			path: '../price-chart'
 		},
 		{
 			id: 'sentiment-analyzer',
 			title: '🧠 Sentiment Analyzer',
 			description: 'AI-powered sentiment analysis of cryptocurrency news headlines',
 			features: ['AI Analysis', 'Confidence Scoring', 'Bullish/Bearish Detection', 'Enhanced Metrics'],
-			path: './sentiment-analyzer'
+			path: '../sentiment-analyzer'
 		},
 		{
 			id: 'mood-impact-chart',
 			title: '📊 Mood Impact Chart',
 			description: 'Combines price data with sentiment analysis for comprehensive market view',
 			features: ['Price vs Sentiment', 'Dual-axis Charts', 'Impact Analysis', 'Combined Visualization'],
-			path: './mood-impact-chart'
+			path: '../mood-impact-chart'
 		},
 		{
 			id: 'coming-soon-1',

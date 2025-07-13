@@ -1,1 +1,1 @@
-export { default as component } from "../../../../src/routes/modules/price-chart/+page.svelte";
+export { default as component } from "../../../../src/routes/price-chart/+page.svelte";

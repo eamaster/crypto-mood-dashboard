@@ -54,6 +54,6 @@
 	</p>
 	<p>
 		<a href="modules">📦 View all modules</a> • 
-		<a href="modules/technical-analysis">🔍 Technical Analysis</a>
+		<a href="technical-analysis">🔍 Technical Analysis</a>
 	</p>
 </footer> 

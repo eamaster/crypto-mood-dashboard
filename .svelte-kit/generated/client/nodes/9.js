@@ -1,1 +1,1 @@
-export { default as component } from "../../../../src/routes/modules/technical-analysis/+page.svelte";
+export { default as component } from "../../../../src/routes/technical-analysis/+page.svelte";

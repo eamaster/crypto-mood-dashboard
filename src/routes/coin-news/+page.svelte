@@ -56,7 +56,7 @@
 	}
 
 	function goBack() {
-		goto('/modules');
+		goto('modules');
 	}
 
 	function escapeHtml(text) {

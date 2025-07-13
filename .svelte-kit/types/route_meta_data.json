@@ -4,25 +4,25 @@
 		"src/routes/+layout.js",
 		"src/routes/+layout.js"
 	],
+	"/coin-news": [
+		"src/routes/+layout.js"
+	],
 	"/modules": [
 		"src/routes/+layout.js"
 	],
-	"/modules/coin-news": [
+	"/mood-impact-chart": [
 		"src/routes/+layout.js"
 	],
-	"/modules/mood-impact-chart": [
+	"/price-chart": [
 		"src/routes/+layout.js"
 	],
-	"/modules/price-chart": [
+	"/price-fetcher": [
 		"src/routes/+layout.js"
 	],
-	"/modules/price-fetcher": [
+	"/sentiment-analyzer": [
 		"src/routes/+layout.js"
 	],
-	"/modules/sentiment-analyzer": [
-		"src/routes/+layout.js"
-	],
-	"/modules/technical-analysis": [
+	"/technical-analysis": [
 		"src/routes/+layout.js"
 	]
 }
