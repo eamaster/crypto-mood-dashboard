@@ -4,10 +4,10 @@
 	import { goto } from '$app/navigation';
 	import Chart from 'chart.js/auto';
 	import 'chartjs-adapter-date-fns';
-	import { WORKER_URL } from '../../lib/config.js';
 
 	// API URLs
 	const COINGECKO_API = 'https://api.coingecko.com/api/v3';
+	const WORKER_URL = 'https://crypto-mood-dashboard-production.smah0085.workers.dev';
 	const ENABLE_NEWS = true; // Enable news analysis
 
 	// Reactive variables

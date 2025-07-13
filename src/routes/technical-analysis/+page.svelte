@@ -45,7 +45,7 @@
 		{ id: 'ripple', name: 'Ripple', symbol: 'XRP' }
 	];
 
-	import { WORKER_URL } from '../../lib/config.js';
+	const WORKER_URL = 'https://crypto-mood-dashboard-production.smah0085.workers.dev';
 
 	onMount(() => {
 		// Auto-analyze Bitcoin on load
