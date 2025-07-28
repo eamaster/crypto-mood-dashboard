@@ -61,5 +61,17 @@ The Crypto Mood Dashboard uses a Cloudflare Worker to fetch data from the follow
 *   **Latest News**: Read the most recent news headlines for the selected cryptocurrency.
 *   **Real-time Updates**: Enable real-time updates to get the latest data every 5 minutes.
 *   **Dark Mode**: Toggle between light and dark themes for a comfortable viewing experience.
-*   **Technical Analysis**: View technical analysis indicators such as RSI, SMA, and Bollinger Bands.
+*   **Technical Analysis**: View technical analysis indicators such as RSI, SMA, and Bollinger Bands for 7, 14, and 30-day periods.
 *   **AI-Powered Explanations**: Get natural language explanations of the technical analysis patterns from Cohere.
+
+## 📦 Modules
+
+The project is divided into several modules, each with its own page:
+
+*   **Dashboard**: The main dashboard with the price card, mood card, and price/sentiment chart.
+*   **Coin News**: A dedicated page to view the latest news for the selected cryptocurrency.
+*   **Mood Impact Chart**: A chart that visualizes the impact of news sentiment on the cryptocurrency's price.
+*   **Price Chart**: A larger, more detailed price chart.
+*   **Price Fetcher**: A simple module to fetch and display the current price of a cryptocurrency.
+*   **Sentiment Analyzer**: A tool to analyze the sentiment of a given piece of text.
+*   **Technical Analysis**: A module that displays technical analysis indicators such as RSI, SMA, and Bollinger Bands.
