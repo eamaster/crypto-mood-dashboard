@@ -7,12 +7,21 @@ main = "worker/index.js"
 # Example: wrangler secret put BLOCKCHAIR_KEY
 
 [env.production]
-vars = { ENVIRONMENT = "production", COHERE_API_KEY = "hYvRyLNadYN17BZGC2ZtIBG0oZH44SyPSGUoMePQ", NEWSAPI_KEY = "1a0067fcf14c4333888e0771d3addae4" }
+vars = { ENVIRONMENT = "production" }
 
 [env.dev]
-vars = { ENVIRONMENT = "development", COHERE_API_KEY = "hYvRyLNadYN17BZGC2ZtIBG0oZH44SyPSGUoMePQ", NEWSAPI_KEY = "1a0067fcf14c4333888e0771d3addae4" }
+vars = { ENVIRONMENT = "development" }
 
-# Environment variables with API keys
-# BLOCKCHAIR_KEY = "G___S4J16vrkR7eK5wn5ykSAhQiExJNB"
-# NEWSDATA_KEY = "pub_0a6ac26df9e94ac1aa0eda7f80b2f44f"  # Old NewsData.io key
-# NEWSAPI_KEY = "1a0067fcf14c4333888e0771d3addae4"  # New @https://newsapi.org/ key 
+# Secrets are managed via wrangler secret commands
+# To set secrets, use: wrangler secret put <SECRET_NAME>
+# Required secrets:
+# - COHERE_API_KEY: Your Cohere API key for AI processing
+# - NEWSAPI_KEY: Your NewsAPI.org API key for news data
+# - BLOCKCHAIR_KEY: Your Blockchair API key for blockchain data (optional)
+# - NEWSDATA_KEY: Your NewsData.io API key (optional, backup news source)
+#
+# Example setup commands:
+# wrangler secret put COHERE_API_KEY
+# wrangler secret put NEWSAPI_KEY
+# wrangler secret put BLOCKCHAIR_KEY
+# wrangler secret put NEWSDATA_KEY 
