@@ -14,6 +14,10 @@ id = "dbbe66243f7a4ecaa97f1e14a3ea2a19"
 [env.production]
 vars = { ENVIRONMENT = "production" }
 
+[[env.production.kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "dbbe66243f7a4ecaa97f1e14a3ea2a19"
+
 [env.dev]
 vars = { ENVIRONMENT = "development" }
 
