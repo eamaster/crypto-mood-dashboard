@@ -36,12 +36,8 @@ const fetchCoins = async () => {
 const fetchPrice = async (coinId) => {
     try {
         console.log(`🔍 Fetching price for ${coinId} from ${WORKER_URL}/price`);
-        const response = await fetch(`${WORKER_URL}/price?coin=${coinId}&_=${Date.now()}`, {
-            headers: {
-                'Cache-Control': 'no-cache, no-store, must-revalidate',
-                'Pragma': 'no-cache'
-            }
-        });
+        // Timestamp parameter is sufficient for cache-busting
+        const response = await fetch(`${WORKER_URL}/price?coin=${coinId}&_=${Date.now()}`);
         console.log(`📊 Price response status: ${response.status}`);
         
         if (!response.ok) {
@@ -70,12 +66,8 @@ const fetchPrice = async (coinId) => {
 const fetchHistory = async (coinId) => {
     try {
         console.log(`🔍 Fetching history for ${coinId} from ${WORKER_URL}/history`);
-        const response = await fetch(`${WORKER_URL}/history?coin=${coinId}&days=7&_=${Date.now()}`, {
-            headers: {
-                'Cache-Control': 'no-cache, no-store, must-revalidate',
-                'Pragma': 'no-cache'
-            }
-        });
+        // Timestamp parameter is sufficient for cache-busting
+        const response = await fetch(`${WORKER_URL}/history?coin=${coinId}&days=7&_=${Date.now()}`);
         console.log(`📊 History response status: ${response.status}`);
         
         if (!response.ok) {
@@ -114,12 +106,8 @@ const fetchHistory = async (coinId) => {
 
 const fetchNews = async (coinId) => {
     try {
-        const response = await fetch(`${WORKER_URL}/news?coin=${coinId}&_=${Date.now()}`, {
-            headers: {
-                'Cache-Control': 'no-cache, no-store, must-revalidate',
-                'Pragma': 'no-cache'
-            }
-        });
+        // Timestamp parameter is sufficient for cache-busting
+        const response = await fetch(`${WORKER_URL}/news?coin=${coinId}&_=${Date.now()}`);
         if (!response.ok) {
             throw new Error(`Failed to fetch news for ${coinId}. Status: ${response.status}`);
         }
