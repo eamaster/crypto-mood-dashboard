@@ -157,11 +157,15 @@ export const initStore = async () => {
     const coins = await fetchCoins();
     const selectedCoin = coins.find(c => c.id === 'bitcoin') ? 'bitcoin' : (coins[0]?.id || 'bitcoin');
 
-    const [priceData, historyData, newsData] = await Promise.all([
-        fetchPrice(selectedCoin),
-        fetchHistory(selectedCoin),
-        fetchNews(selectedCoin)
-    ]);
+    // Fetch sequentially to avoid overwhelming CoinGecko API with simultaneous requests
+    const priceData = await fetchPrice(selectedCoin);
+    
+    // Small delay to respect rate limiting
+    await new Promise(resolve => setTimeout(resolve, 500));
+    const historyData = await fetchHistory(selectedCoin);
+    
+    // News doesn't call CoinGecko, can fetch immediately
+    const newsData = await fetchNews(selectedCoin);
 
     let sentimentData = null;
     if (newsData?.headlines) {
@@ -193,11 +197,15 @@ export const setCoin = async (coinId) => {
     }));
 
     try {
-        const [priceData, historyData, newsData] = await Promise.all([
-            fetchPrice(coinId),
-            fetchHistory(coinId),
-            fetchNews(coinId)
-        ]);
+        // Fetch sequentially to avoid overwhelming CoinGecko API with simultaneous requests
+        const priceData = await fetchPrice(coinId);
+        
+        // Small delay to respect rate limiting
+        await new Promise(resolve => setTimeout(resolve, 500));
+        const historyData = await fetchHistory(coinId);
+        
+        // News doesn't call CoinGecko, can fetch immediately
+        const newsData = await fetchNews(coinId);
 
         let sentimentData = null;
         if (newsData?.headlines) {
