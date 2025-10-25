@@ -36,7 +36,7 @@ function errorResponse(message, status = 400) {
   const COINGECKO_API_BASE = 'https://api.coingecko.com/api/v3';
   
   // Rate limiting configuration
-  const COINGECKO_RATE_LIMIT_DELAY = 60000; // 60 seconds between requests
+  const COINGECKO_RATE_LIMIT_DELAY = 30000; // 30 seconds between requests
   
   // Rate-limited fetch function
   async function rateLimitedFetch(url, options = {}, env) {
