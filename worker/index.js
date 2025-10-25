@@ -56,20 +56,31 @@ const SUPPORTED_COINS = {
   'solana': { id: 'solana', name: 'Solana', symbol: 'SOL', coingecko_id: 'solana' },
 };
 
-// Rate limiting for CoinGecko API
-let lastCoinGeckoRequest = 0;
-
+// Rate limiting for CoinGecko API using KV storage for distributed coordination
 async function rateLimitedFetch(url, options = {}) {
   const now = Date.now();
-  const timeSinceLastRequest = now - lastCoinGeckoRequest;
   
-  if (timeSinceLastRequest < COINGECKO_RATE_LIMIT_DELAY) {
-    const waitTime = COINGECKO_RATE_LIMIT_DELAY - timeSinceLastRequest;
-    await new Promise(resolve => setTimeout(resolve, waitTime));
+  try {
+    // Get the last request time from KV storage
+    const lastRequestTime = await RATE_LIMIT_KV.get('lastCoinGeckoRequest');
+    const lastRequest = lastRequestTime ? parseInt(lastRequestTime) : 0;
+    const timeSinceLastRequest = now - lastRequest;
+    
+    if (timeSinceLastRequest < COINGECKO_RATE_LIMIT_DELAY) {
+      const waitTime = COINGECKO_RATE_LIMIT_DELAY - timeSinceLastRequest;
+      console.log(`⏳ Rate limiting: waiting ${waitTime}ms before CoinGecko request`);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+    }
+    
+    // Update the last request time in KV storage
+    await RATE_LIMIT_KV.put('lastCoinGeckoRequest', now.toString());
+    
+    console.log(`🚀 Making CoinGecko request to: ${url}`);
+    return fetch(url, options);
+  } catch (error) {
+    console.log(`⚠️ Rate limiting error, proceeding with request: ${error.message}`);
+    return fetch(url, options);
   }
-  
-  lastCoinGeckoRequest = Date.now();
-  return fetch(url, options);
 }
 
 // Data validation helpers

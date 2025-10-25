@@ -1,6 +1,11 @@
-name = "crypto-mood-dashboard"
+name = "crypto-mood-dashboard-production"
 compatibility_date = "2024-01-01"
 main = "worker/index.js"
+
+# KV namespace for distributed rate limiting
+[[kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "dbbe66243f7a4ecaa97f1e14a3ea2a19"
 
 # Environment variables (secrets)
 # Set these using: wrangler secret put <VARIABLE_NAME>
