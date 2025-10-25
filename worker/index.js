@@ -36,7 +36,7 @@ function errorResponse(message, status = 400) {
   const COINGECKO_API_BASE = 'https://api.coingecko.com/api/v3';
   
   // Rate limiting configuration
-  const COINGECKO_RATE_LIMIT_DELAY = 10000; // 10 seconds between requests
+  const COINGECKO_RATE_LIMIT_DELAY = 5000; // 5 seconds between requests (faster)
   
   // Rate-limited fetch function
   async function rateLimitedFetch(url, options = {}, env) {
@@ -92,8 +92,8 @@ const SUPPORTED_COINS = {
 async function getCachedPriceData(coinId, env) {
   const cacheKey = `price_${coinId}`;
   const now = Date.now();
-  const CACHE_TTL = 30000; // 30 seconds fresh cache
-  const MAX_STALE = 300000; // 5 minutes max stale
+  const CACHE_TTL = 10000; // 10 seconds fresh cache (faster updates)
+  const MAX_STALE = 60000; // 1 minute max stale (shorter stale period)
   
   try {
     // Get cached data
@@ -126,6 +126,13 @@ async function getCachedPriceData(coinId, env) {
           console.log(`Background refresh failed for ${coinId}:`, error);
         });
         
+        return { data, fromCache: true, fresh: false };
+      } else {
+        // Even if very stale, serve it immediately and refresh in background
+        console.log(`⚡ [Cache] Serving very stale cached data for ${coinId} (${age}ms old), refreshing in background`);
+        refreshPriceInBackground(coinId, env).catch(error => {
+          console.log(`Background refresh failed for ${coinId}:`, error);
+        });
         return { data, fromCache: true, fresh: false };
       }
     }
@@ -227,8 +234,8 @@ async function fetchFreshPriceData(coinId, env) {
 async function getCachedHistoryData(coinId, days, env) {
   const cacheKey = `history_${coinId}_${days}`;
   const now = Date.now();
-  const CACHE_TTL = 30000; // 30 seconds fresh cache
-  const MAX_STALE = 300000; // 5 minutes max stale
+  const CACHE_TTL = 10000; // 10 seconds fresh cache (faster updates)
+  const MAX_STALE = 60000; // 1 minute max stale (shorter stale period)
   
   try {
     // Get cached data
@@ -254,6 +261,11 @@ async function getCachedHistoryData(coinId, days, env) {
         } else if (age < MAX_STALE) {
           console.log(`🔄 [History Cache] Serving stale cached data for ${coinId} (${age}ms old), refreshing in background`);
           // Trigger background refresh
+          refreshHistoryInBackground(coinId, days, env);
+          return { data, fromCache: true, fresh: false };
+        } else {
+          // Even if very stale, serve it immediately and refresh in background
+          console.log(`⚡ [History Cache] Serving very stale cached data for ${coinId} (${age}ms old), refreshing in background`);
           refreshHistoryInBackground(coinId, days, env);
           return { data, fromCache: true, fresh: false };
         }
@@ -510,20 +522,20 @@ function generateFallbackPriceData(coinId) {
 // Get realistic base prices for different coins
 function getFallbackBasePrice(coinId) {
   const basePrices = {
-    'bitcoin': 45000,
-    'ethereum': 2800,
-    'litecoin': 90,
-    'bitcoin-cash': 250,
-    'cardano': 0.45,
-    'ripple': 0.55,
-    'dogecoin': 0.08,
-    'polkadot': 6.5,
-    'chainlink': 14,
-    'stellar': 0.12,
-    'monero': 160,
-    'tezos': 1.2,
-    'eos': 1.1,
-    'zcash': 45,
+    'bitcoin': 111000, // Updated to current Bitcoin price range
+    'ethereum': 3500,  // Updated to current Ethereum price
+    'litecoin': 120,   // Updated to current Litecoin price
+    'bitcoin-cash': 300, // Updated to current BCH price
+    'cardano': 0.55,   // Updated to current ADA price
+    'ripple': 0.65,   // Updated to current XRP price
+    'dogecoin': 0.12,  // Updated to current DOGE price
+    'polkadot': 8.5,   // Updated to current DOT price
+    'chainlink': 18,   // Updated to current LINK price
+    'stellar': 0.15,   // Updated to current XLM price
+    'monero': 180,     // Updated to current XMR price
+    'tezos': 1.5,      // Updated to current XTZ price
+    'eos': 1.3,        // Updated to current EOS price
+    'zcash': 55,       // Updated to current ZEC price
     'dash': 45,
     'solana': 25
   };
