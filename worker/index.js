@@ -34,7 +34,6 @@ function errorResponse(message, status = 400) {
 
 // CoinGecko API configuration
 const COINGECKO_API_BASE = 'https://api.coingecko.com/api/v3';
-const COINGECKO_RATE_LIMIT_DELAY = 10000; // 10 seconds between requests (ultra conservative)
 
 // Supported cryptocurrencies mapping (CoinGecko IDs)
 const SUPPORTED_COINS = {
@@ -56,30 +55,130 @@ const SUPPORTED_COINS = {
   'solana': { id: 'solana', name: 'Solana', symbol: 'SOL', coingecko_id: 'solana' },
 };
 
-// Rate limiting for CoinGecko API using KV storage for distributed coordination
-async function rateLimitedFetch(url, options = {}, env) {
+// Smart caching with background refresh for CoinGecko API
+async function getCachedPriceData(coinId, env) {
+  const cacheKey = `price_${coinId}`;
   const now = Date.now();
+  const CACHE_TTL = 30000; // 30 seconds fresh cache
+  const MAX_STALE = 300000; // 5 minutes max stale
   
   try {
-    // Get the last request time from KV storage
-    const lastRequestTime = await env.RATE_LIMIT_KV.get('lastCoinGeckoRequest');
-    const lastRequest = lastRequestTime ? parseInt(lastRequestTime) : 0;
-    const timeSinceLastRequest = now - lastRequest;
+    // Get cached data
+    const cached = await env.RATE_LIMIT_KV.get(cacheKey);
     
-    if (timeSinceLastRequest < COINGECKO_RATE_LIMIT_DELAY) {
-      const waitTime = COINGECKO_RATE_LIMIT_DELAY - timeSinceLastRequest;
-      console.log(`⏳ Rate limiting: waiting ${waitTime}ms before CoinGecko request`);
-      await new Promise(resolve => setTimeout(resolve, waitTime));
+    if (cached) {
+      const { data, timestamp } = JSON.parse(cached);
+      const age = now - timestamp;
+      
+      // Fresh cache - return immediately
+      if (age <= CACHE_TTL) {
+        console.log(`✅ [Cache] Fresh data for ${coinId} (age: ${age}ms)`);
+        return { data, fromCache: true, fresh: true };
+      }
+      
+      // Stale cache - return immediately but trigger background refresh
+      if (age <= MAX_STALE) {
+        console.log(`🔄 [Cache] Stale data for ${coinId} (age: ${age}ms), triggering background refresh`);
+        
+        // Trigger background refresh without waiting
+        refreshPriceInBackground(coinId, env).catch(error => {
+          console.log(`Background refresh failed for ${coinId}:`, error);
+        });
+        
+        return { data, fromCache: true, fresh: false };
+      }
     }
     
-    // Update the last request time in KV storage
-    await env.RATE_LIMIT_KV.put('lastCoinGeckoRequest', now.toString());
+    // No cache or too stale - fetch fresh data
+    console.log(`🆕 [Cache] No cache for ${coinId}, fetching fresh data`);
+    return await fetchFreshPriceData(coinId, env);
     
-    console.log(`🚀 Making CoinGecko request to: ${url}`);
-    return fetch(url, options);
   } catch (error) {
-    console.log(`⚠️ Rate limiting error, proceeding with request: ${error.message}`);
-    return fetch(url, options);
+    console.log(`❌ [Cache] Error getting cached data for ${coinId}:`, error);
+    return await fetchFreshPriceData(coinId, env);
+  }
+}
+
+async function refreshPriceInBackground(coinId, env) {
+  const coingeckoId = SUPPORTED_COINS[coinId].coingecko_id;
+  const url = `${COINGECKO_API_BASE}/simple/price?ids=${coingeckoId}&vs_currencies=usd&include_24hr_change=true&include_market_cap=true&include_24hr_vol=true`;
+  
+  try {
+    console.log(`🔄 [Background] Refreshing price for ${coinId}`);
+    const response = await fetch(url);
+    
+    if (response.ok) {
+      const data = await response.json();
+      const coinData = data[coingeckoId];
+      
+      if (validatePriceData(coinData)) {
+        const priceData = {
+          coin: coinId,
+          price: Math.round(coinData.usd * 100) / 100,
+          change24h: coinData.usd_24h_change || 0,
+          market_cap: coinData.usd_market_cap || 0,
+          volume_24h: coinData.usd_24h_vol || 0,
+          symbol: SUPPORTED_COINS[coinId].symbol,
+          source: 'coingecko',
+          timestamp: new Date().toISOString()
+        };
+        
+        // Update cache
+        await env.RATE_LIMIT_KV.put(`price_${coinId}`, JSON.stringify({
+          data: priceData,
+          timestamp: Date.now()
+        }));
+        
+        console.log(`✅ [Background] Updated cache for ${coinId}`);
+      }
+    }
+  } catch (error) {
+    console.log(`❌ [Background] Failed to refresh ${coinId}:`, error);
+  }
+}
+
+async function fetchFreshPriceData(coinId, env) {
+  const coingeckoId = SUPPORTED_COINS[coinId].coingecko_id;
+  const url = `${COINGECKO_API_BASE}/simple/price?ids=${coingeckoId}&vs_currencies=usd&include_24hr_change=true&include_market_cap=true&include_24hr_vol=true`;
+  
+  try {
+    console.log(`🚀 [Fresh] Fetching price for ${coinId}`);
+    const response = await fetch(url);
+    
+    if (!response.ok) {
+      throw new Error(`CoinGecko API error: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    const coinData = data[coingeckoId];
+    
+    if (!validatePriceData(coinData)) {
+      throw new Error('Invalid CoinGecko response');
+    }
+    
+    const priceData = {
+      coin: coinId,
+      price: Math.round(coinData.usd * 100) / 100,
+      change24h: coinData.usd_24h_change || 0,
+      market_cap: coinData.usd_market_cap || 0,
+      volume_24h: coinData.usd_24h_vol || 0,
+      symbol: SUPPORTED_COINS[coinId].symbol,
+      source: 'coingecko',
+      timestamp: new Date().toISOString()
+    };
+    
+    // Cache the fresh data
+    await env.RATE_LIMIT_KV.put(`price_${coinId}`, JSON.stringify({
+      data: priceData,
+      timestamp: Date.now()
+    }));
+    
+    console.log(`✅ [Fresh] Cached fresh data for ${coinId}`);
+    return { data: priceData, fromCache: false, fresh: true };
+    
+  } catch (error) {
+    console.log(`❌ [Fresh] Failed to fetch ${coinId}:`, error);
+    throw error;
   }
 }
 
@@ -135,63 +234,33 @@ async function handlePrice(request, env) {
   try {
     const url = new URL(request.url);
     const coinId = url.searchParams.get('coin') || 'bitcoin';
-    
-    if (!SUPPORTED_COINS[coinId]) {
-      return errorResponse(`Unsupported coin: ${coinId}`);
-    }
-    
-    const coingeckoId = SUPPORTED_COINS[coinId].coingecko_id;
     const origin = request.headers.get('Origin');
     
     console.log(`Fetching price for ${coinId} from origin: ${origin || 'direct'}`);
     
     try {
-      // Try CoinGecko API first
-      console.log(`[Price] Fetching from CoinGecko for ${coinId}`);
-      const response = await rateLimitedFetch(
-        `${COINGECKO_API_BASE}/simple/price?ids=${coingeckoId}&vs_currencies=usd&include_24hr_change=true&include_market_cap=true&include_24hr_vol=true`,
-        {},
-        env
-      );
+      // Use smart caching - always returns data immediately
+      console.log(`[Price] Getting cached data for ${coinId}`);
+      const result = await getCachedPriceData(coinId, env);
       
-      console.log(`[Price] CoinGecko response status: ${response.status}`);
+      // Add cache status headers for debugging
+      const headers = {
+        'X-Cache-Status': result.fromCache ? (result.fresh ? 'fresh' : 'stale') : 'miss',
+        'X-Cache-Source': result.fromCache ? 'cache' : 'api'
+      };
       
-      if (!response.ok) {
-        if (response.status === 429) {
-          console.log(`❌ [Price] CoinGecko rate limited for ${coinId}, using fallback price`);
-          return generateFallbackPriceData(coinId);
-        }
-        console.log(`❌ [Price] CoinGecko API error: ${response.status}`);
-        throw new Error(`CoinGecko API error: ${response.status}`);
-      }
+      console.log(`✅ [Price] Successfully got price for ${coinId}: $${result.data.price} (${result.fromCache ? 'cached' : 'fresh'})`);
+      return jsonResponse(result.data, 200, headers);
       
-      const data = await response.json();
-      const coinData = data[coingeckoId];
-      
-      if (!validatePriceData(coinData)) {
-        console.log(`Invalid price data from CoinGecko for ${coinId}, using fallback`);
-        return generateFallbackPriceData(coinId);
-      }
-      
-      return jsonResponse({
-        coin: coinId,
-        price: Math.round(coinData.usd * 100) / 100,
-        change24h: coinData.usd_24h_change || 0,
-        market_cap: coinData.usd_market_cap || 0,
-        volume_24h: coinData.usd_24h_vol || 0,
-        symbol: SUPPORTED_COINS[coinId].symbol,
-        source: 'coingecko',
-        timestamp: new Date().toISOString()
-      });
-      
-    } catch (coingeckoError) {
-      console.log(`CoinGecko error for ${coinId}: ${coingeckoError.message}, using fallback`);
+    } catch (error) {
+      console.log(`❌ [Price] Cache failed for ${coinId}: ${error.message}`);
+      console.log(`[Price] Using fallback price for ${coinId}`);
       return generateFallbackPriceData(coinId);
     }
     
   } catch (error) {
-    console.error('Error in handlePrice:', error);
-    return errorResponse(`Failed to fetch price data: ${error.message}`);
+    console.log(`❌ [Price] Error handling price request: ${error.message}`);
+    return errorResponse('Failed to fetch price data');
   }
 }
 
@@ -539,7 +608,7 @@ Use these criteria:
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'command-r',
+      model: 'command-light',
       messages: [
         {
           role: 'user',
@@ -872,7 +941,7 @@ The confidence should be a number between 50-95 based on how clear the signals a
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'command-r',
+      model: 'command-light',
       messages: [
         {
           role: 'user',
@@ -1072,7 +1141,7 @@ Provide a detailed, well-structured explanation in plain English that helps user
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'command-r',
+      model: 'command-light',
       messages: [
         {
           role: 'user',
@@ -1427,8 +1496,15 @@ async function handleOHLC(request, env) {
 // MAIN HANDLER
 // =============================================================================
 
+
 export default {
   async fetch(request, env, ctx) {
+    // Debug: Check if secrets are accessible
+    console.log('🔑 Environment check:');
+    console.log(`- COHERE_API_KEY: ${env.COHERE_API_KEY ? 'SET' : 'NOT SET'}`);
+    console.log(`- NEWSAPI_KEY: ${env.NEWSAPI_KEY ? 'SET' : 'NOT SET'}`);
+    console.log(`- ENVIRONMENT: ${env.ENVIRONMENT || 'NOT SET'}`);
+    
     // Enhanced CORS preflight handling with logging
     if (request.method === 'OPTIONS') {
       const origin = request.headers.get('Origin');
@@ -1489,4 +1565,4 @@ export default {
       return errorResponse('Internal server error', 500);
     }
   },
-}; 
+};

@@ -2,24 +2,13 @@ name = "crypto-mood-dashboard-production"
 compatibility_date = "2024-01-01"
 main = "worker/index.js"
 
+# Environment variables
+vars = { ENVIRONMENT = "production" }
+
 # KV namespace for distributed rate limiting
 [[kv_namespaces]]
 binding = "RATE_LIMIT_KV"
 id = "dbbe66243f7a4ecaa97f1e14a3ea2a19"
-
-# Environment variables (secrets)
-# Set these using: wrangler secret put <VARIABLE_NAME>
-# Example: wrangler secret put BLOCKCHAIR_KEY
-
-[env.production]
-vars = { ENVIRONMENT = "production" }
-
-[[env.production.kv_namespaces]]
-binding = "RATE_LIMIT_KV"
-id = "dbbe66243f7a4ecaa97f1e14a3ea2a19"
-
-[env.dev]
-vars = { ENVIRONMENT = "development" }
 
 # Secrets are managed via wrangler secret commands
 # To set secrets, use: wrangler secret put <SECRET_NAME>
