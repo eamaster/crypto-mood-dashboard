@@ -34,7 +34,7 @@ function errorResponse(message, status = 400) {
 
 // CoinGecko API configuration
 const COINGECKO_API_BASE = 'https://api.coingecko.com/api/v3';
-const COINGECKO_RATE_LIMIT_DELAY = 5000; // 5 seconds between requests (very conservative)
+const COINGECKO_RATE_LIMIT_DELAY = 10000; // 10 seconds between requests (ultra conservative)
 
 // Supported cryptocurrencies mapping (CoinGecko IDs)
 const SUPPORTED_COINS = {
