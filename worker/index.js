@@ -34,7 +34,7 @@ function errorResponse(message, status = 400) {
 
 // CoinGecko API configuration
 const COINGECKO_API_BASE = 'https://api.coingecko.com/api/v3';
-const COINGECKO_RATE_LIMIT_DELAY = 1000; // 1 second between requests
+const COINGECKO_RATE_LIMIT_DELAY = 2000; // 2 seconds between requests (more conservative)
 
 // Supported cryptocurrencies mapping (CoinGecko IDs)
 const SUPPORTED_COINS = {
@@ -136,15 +136,19 @@ async function handlePrice(request, env) {
     
     try {
       // Try CoinGecko API first
+      console.log(`[Price] Fetching from CoinGecko for ${coinId}`);
       const response = await rateLimitedFetch(
         `${COINGECKO_API_BASE}/simple/price?ids=${coingeckoId}&vs_currencies=usd&include_24hr_change=true&include_market_cap=true&include_24hr_vol=true`
       );
       
+      console.log(`[Price] CoinGecko response status: ${response.status}`);
+      
       if (!response.ok) {
         if (response.status === 429) {
-          console.log(`CoinGecko rate limited for ${coinId}, using fallback price`);
+          console.log(`❌ [Price] CoinGecko rate limited for ${coinId}, using fallback price`);
           return generateFallbackPriceData(coinId);
         }
+        console.log(`❌ [Price] CoinGecko API error: ${response.status}`);
         throw new Error(`CoinGecko API error: ${response.status}`);
       }
       
