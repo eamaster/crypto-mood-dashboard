@@ -608,7 +608,7 @@ Use these criteria:
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'command-light',
+        model: 'command-r-plus',
       messages: [
         {
           role: 'user',
@@ -941,7 +941,7 @@ The confidence should be a number between 50-95 based on how clear the signals a
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'command-light',
+        model: 'command-r-plus',
       messages: [
         {
           role: 'user',
@@ -1106,30 +1106,28 @@ async function explainPatternWithCohere(rsi, sma, bb, signals, coin, timeframe, 
   const rsiValue = rsi.length > 0 ? rsi[rsi.length - 1].y : currentRSI;
   const smaValue = sma.length > 0 ? sma[sma.length - 1].y : currentSMA;
   
-  // Create detailed prompt for AI explanation
-  const prompt = `You are a professional cryptocurrency technical analyst. Provide a comprehensive explanation of the current market pattern for ${coin.toUpperCase()}.
+  // Create system and user prompts for educational guidance
+  const system = [
+    "You are a crypto technical analysis assistant that provides concise, **educational guidance**.",
+    "Use only the numeric context provided; never invent prices, indicators, or signals.",
+    "Your output must be brief, concrete, and user-guiding:",
+    "- What it means (1–2 sentences).",
+    "- **Levels to watch**: key prices or RSI thresholds.",
+    "- **Near-term outlook**: bullish / neutral / bearish with a confidence 0–100%.",
+    "- **Risk notes**: sizing, stop ranges, or conditions to wait for.",
+    "Keep it under 140 words. Avoid imperative 'buy/sell now'; use 'consider', 'if/when', and conditions.",
+    "End with: 'Educational guidance, not financial advice.'"
+  ].join(" ");
 
-**Current Technical Analysis Data:**
-- Current Price: $${currentPrice.toLocaleString()}
-- RSI (14): ${rsiValue.toFixed(2)}
-- SMA (20): $${smaValue.toLocaleString()}
-- Bollinger Band Upper: $${currentBBUpper.toLocaleString()}
-- Bollinger Band Lower: $${currentBBLower.toLocaleString()}
-- Timeframe: ${timeframe} days
-- Analysis Signals: ${signals.map(s => `${s.type}: ${s.signal} (${s.strength})`).join(', ')}
-
-**Instructions:**
-1. Explain what these technical indicators are telling us about ${coin.toUpperCase()}'s current market condition
-2. Analyze the relationship between price and moving averages
-3. Interpret the RSI level and what it suggests about momentum
-4. Explain the Bollinger Bands positioning and market volatility
-5. Provide trading insights based on the combined signals
-6. Include risk management considerations
-7. Keep the explanation educational and professional
-
-**Important:** This is educational content only, not financial advice. Focus on explaining the technical patterns and what they typically indicate in market analysis.
-
-Provide a detailed, well-structured explanation in plain English that helps users understand the current market pattern.`;
+  const user = [
+    `Analyze ${coin.toUpperCase()} over ${timeframe} days.`,
+    `Context -> price=${currentPrice}, RSI=${rsiValue.toFixed(2)}, SMA=${smaValue.toLocaleString()}, BB=[${currentBBLower.toLocaleString()}-${currentBBUpper.toLocaleString()}].`,
+    "Return Markdown with these sections:",
+    "**Guidance:** <2–3 sentences>",
+    "**Levels to Watch:** <bullets with numeric thresholds>",
+    "**Risk Notes:** <1–2 bullets>",
+    "**Confidence:** <0–100>%"
+  ].join(" ");
 
   console.log('🤖 Sending comprehensive explanation request to Cohere...');
   
@@ -1141,11 +1139,15 @@ Provide a detailed, well-structured explanation in plain English that helps user
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'command-light',
+        model: 'command-r-plus',
       messages: [
         {
+          role: 'system',
+          content: system
+        },
+        {
           role: 'user',
-          content: prompt
+          content: user
         }
       ],
       temperature: 0.4,
@@ -1565,4 +1567,4 @@ export default {
       return errorResponse('Internal server error', 500);
     }
   },
-};
+}; 
