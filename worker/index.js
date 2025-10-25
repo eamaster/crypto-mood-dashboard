@@ -32,8 +32,41 @@ function errorResponse(message, status = 400) {
   return jsonResponse({ error: message }, status);
 }
 
-// CoinGecko API configuration
-const COINGECKO_API_BASE = 'https://api.coingecko.com/api/v3';
+  // CoinGecko API configuration
+  const COINGECKO_API_BASE = 'https://api.coingecko.com/api/v3';
+  
+  // Rate limiting configuration
+  const COINGECKO_RATE_LIMIT_DELAY = 60000; // 60 seconds between requests
+  
+  // Rate-limited fetch function
+  async function rateLimitedFetch(url, options = {}, env) {
+    const cacheKey = `rate_limit_${Date.now()}`;
+    
+    try {
+      // Check if we need to wait based on KV storage
+      if (env.RATE_LIMIT_KV) {
+        const lastRequest = await env.RATE_LIMIT_KV.get('last_coingecko_request');
+        if (lastRequest) {
+          const lastRequestTime = parseInt(lastRequest);
+          const timeSinceLastRequest = Date.now() - lastRequestTime;
+          
+          if (timeSinceLastRequest < COINGECKO_RATE_LIMIT_DELAY) {
+            const waitTime = COINGECKO_RATE_LIMIT_DELAY - timeSinceLastRequest;
+            console.log(`⏳ Rate limiting: waiting ${waitTime}ms before CoinGecko request`);
+            await new Promise(resolve => setTimeout(resolve, waitTime));
+          }
+        }
+        
+        // Update last request time
+        await env.RATE_LIMIT_KV.put('last_coingecko_request', Date.now().toString());
+      }
+      
+      return await fetch(url, options);
+    } catch (error) {
+      console.log(`❌ Rate limited fetch error: ${error.message}`);
+      throw error;
+    }
+  }
 
 // Supported cryptocurrencies mapping (CoinGecko IDs)
 const SUPPORTED_COINS = {
@@ -67,10 +100,18 @@ async function getCachedPriceData(coinId, env) {
     const cached = await env.RATE_LIMIT_KV.get(cacheKey);
     
     if (cached) {
-      const { data, timestamp } = JSON.parse(cached);
-      const age = now - timestamp;
-      
-      // Fresh cache - return immediately
+        const { data, timestamp } = JSON.parse(cached);
+        const age = now - timestamp;
+        
+        // Validate cached price data - Bitcoin should be between $30,000 and $150,000
+        if (coinId === 'bitcoin' && (data.price < 30000 || data.price > 150000)) {
+          console.log(`⚠️ [Cache] Invalid cached Bitcoin price: $${data.price}, fetching fresh data`);
+          // Clear invalid cache and fetch fresh data
+          await env.RATE_LIMIT_KV.delete(cacheKey);
+          return await fetchFreshPriceData(coinId, env);
+        }
+        
+        // Fresh cache - return immediately
       if (age <= CACHE_TTL) {
         console.log(`✅ [Cache] Fresh data for ${coinId} (age: ${age}ms)`);
         return { data, fromCache: true, fresh: true };
@@ -188,6 +229,13 @@ function validatePriceData(data) {
   if (typeof data.usd !== 'number' || data.usd <= 0) return false;
   // usd_24h_change can be null, so we allow that
   if (data.usd_24h_change !== null && typeof data.usd_24h_change !== 'number') return false;
+  
+  // Validate Bitcoin price is reasonable (between $30,000 and $150,000)
+  if (data.usd < 30000 || data.usd > 150000) {
+    console.log(`⚠️ Unrealistic Bitcoin price from CoinGecko: $${data.usd}`);
+    return false;
+  }
+  
   return true;
 }
 
@@ -608,7 +656,7 @@ Use these criteria:
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-        model: 'command-r-plus',
+        model: 'command-a-03-2025',
       messages: [
         {
           role: 'user',
@@ -912,6 +960,24 @@ async function classifyMarketMoodWithCohere(rsi, smaSignal, bbSignal, priceData,
   
   console.log('Classifying market mood for:', inputText);
   
+  // Calculate dynamic confidence based on signal strength
+  let baseConfidence = 60;
+  
+  // RSI confidence factors
+  if (rsi >= 70 || rsi <= 30) baseConfidence += 20; // Strong RSI signals
+  else if (rsi >= 60 || rsi <= 40) baseConfidence += 10; // Moderate RSI signals
+  
+  // SMA signal confidence
+  if (smaSignal === 'BUY') baseConfidence += 10;
+  else if (smaSignal === 'SELL') baseConfidence += 10;
+  
+  // Price trend confidence
+  if (priceChange > 2 || priceChange < -2) baseConfidence += 10; // Strong trends
+  else if (Math.abs(priceChange) > 0.5) baseConfidence += 5; // Moderate trends
+  
+  // Cap confidence at 90%
+  baseConfidence = Math.min(90, baseConfidence);
+
   // Create a comprehensive prompt for Chat API classification
   const prompt = `You are a cryptocurrency market sentiment classifier. Based on the technical analysis indicators provided, classify the market sentiment as exactly one of: "bullish", "bearish", or "neutral".
 
@@ -929,7 +995,7 @@ Examples:
 - RSI: 50, SMA: NEUTRAL, BB: NEUTRAL, Price trend: sideways movement → neutral
 
 Respond with ONLY a JSON object in this exact format:
-{"sentiment": "bullish", "confidence": 85, "reasoning": "Brief explanation"}
+{"sentiment": "bullish", "confidence": ${baseConfidence}, "reasoning": "Brief explanation"}
 
 The confidence should be a number between 50-95 based on how clear the signals are.`;
   
@@ -941,7 +1007,7 @@ The confidence should be a number between 50-95 based on how clear the signals a
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-        model: 'command-r-plus',
+        model: 'command-a-03-2025',
       messages: [
         {
           role: 'user',
@@ -973,7 +1039,7 @@ The confidence should be a number between 50-95 based on how clear the signals a
       
       return jsonResponse({
         mood: result.sentiment,
-        confidence: result.confidence || 75,
+        confidence: baseConfidence, // Use our calculated confidence instead of AI's
         reasoning: result.reasoning || `Based on RSI ${rsi.toFixed(1)}, SMA: ${smaSignal}, BB: ${bbSignal}, price trend: ${priceTrend}`,
         method: 'cohere-chat-api',
         coin: coin,
@@ -1106,28 +1172,104 @@ async function explainPatternWithCohere(rsi, sma, bb, signals, coin, timeframe, 
   const rsiValue = rsi.length > 0 ? rsi[rsi.length - 1].y : currentRSI;
   const smaValue = sma.length > 0 ? sma[sma.length - 1].y : currentSMA;
   
-  // Create system and user prompts for educational guidance
+  // Round exactly once so the model can only echo these strings
+  function toFixedStr(n, dp = 2) { return Number(n).toFixed(dp); }
+  
+  const P = toFixedStr(currentPrice, 2);
+  const R = toFixedStr(rsiValue, 2);
+  const S = toFixedStr(smaValue, 2);
+  const L = toFixedStr(currentBBLower, 2);
+  const U = toFixedStr(currentBBUpper, 2);
+  const PERIOD = 4; // SMA period used in charts
+  const TF = Number(timeframe);
+
+  // Derived metrics for richer text (percentages shown with % in copy)
+  const priceVsSmaPct   = ((Number(P) - Number(S)) / Number(S)) * 100;
+  const distToLowerPct  = ((Number(P) - Number(L)) / Number(L)) * 100;
+  const distToUpperPct  = ((Number(U) - Number(P)) / Number(P)) * 100;
+  const bandWidthPct    = ((Number(U) - Number(L)) / Number(S)) * 100;
+
+  const PV = toFixedStr(priceVsSmaPct, 2);
+  const DL = toFixedStr(distToLowerPct, 2);
+  const DU = toFixedStr(distToUpperPct, 2);
+  const BW = toFixedStr(bandWidthPct, 2);
+
+  // Allow common RSI thresholds explicitly
+  const allowedNumbers = [
+    P, R, S, L, U, String(PERIOD), String(TF),
+    PV, DL, DU, BW,
+    "30", "40", "60", "70"
+  ];
+  
+  // Dynamic logic for scenario planning
+  const isAboveSMA = Number(P) >= Number(S);
+  const bullVerb = isAboveSMA ? "holds above" : "reclaims";
+  const bullishLine = `- If price ${bullVerb} SMA(${PERIOD}) ${S} with RSI > 60, look for follow-through toward ${U}.`;
+  const bearishLine = isAboveSMA
+    ? `- If price closes back below SMA(${PERIOD}) ${S} with RSI < 40, risk shifts toward ${L}.`
+    : `- If price loses ${L}, risk expands; distance to lower band was ${DL}% and may extend.`;
+  const lean = Number(R) >= 60 ? "bearish" : Number(R) <= 40 ? "bullish" : "neutral";
+  
+  // Dynamic confidence calculation based on signal strength
+  let conf = 60; // Base confidence
+  const rsiNum = Number(R);
+  
+  // RSI confidence boost
+  if (rsiNum >= 70 || rsiNum <= 30) conf += 15; // Strong RSI signals
+  else if (rsiNum >= 60 || rsiNum <= 40) conf += 10; // Moderate RSI signals
+  
+  // Price vs SMA confidence boost
+  const priceDeviation = Number(PV);
+  if (Math.abs(priceDeviation) > 5) conf += 10; // Strong price deviation
+  else if (Math.abs(priceDeviation) > 2) conf += 5; // Moderate price deviation
+  
+  // Band width confidence boost
+  const bandWidth = Number(BW);
+  if (bandWidth > 10) conf += 5; // High volatility = more uncertainty
+  else if (bandWidth < 5) conf += 5; // Low volatility = more predictable
+  
+  // Cap confidence at 90%
+  conf = Math.min(90, conf);
+
+  // Create system and user prompts with strict rules
   const system = [
-    "You are a crypto technical analysis assistant that provides concise, **educational guidance**.",
-    "Use only the numeric context provided; never invent prices, indicators, or signals.",
-    "Your output must be brief, concrete, and user-guiding:",
-    "- What it means (1–2 sentences).",
-    "- **Levels to watch**: key prices or RSI thresholds.",
-    "- **Near-term outlook**: bullish / neutral / bearish with a confidence 0–100%.",
-    "- **Risk notes**: sizing, stop ranges, or conditions to wait for.",
-    "Keep it under 140 words. Avoid imperative 'buy/sell now'; use 'consider', 'if/when', and conditions.",
+    "You are a crypto technical analysis assistant that produces three layers: a beginner-friendly summary, a decision helper, and a detailed section.",
+    "STRICT RULES:",
+    "- Use ONLY the numbers in 'AllowedNumbers'. Do not write any other numeric value.",
+    "- Refer to the moving average exactly as 'SMA(" + PERIOD + ")'. Never say '50/100/200-day' unless provided.",
+    "- Use given percentages verbatim (they may include a %).",
+    "",
+    "OUTPUT FORMAT (Markdown):",
+    "## Simple Summary",
+    "- In plain English (no jargon). Three short bullets: price vs SMA(" + PERIOD + "), what RSI means, and the key support/resistance.",
+    "",
+    "## Decision Helper",
+    "- Three short bullets with clear if/then cues and verbs like 'consider' or 'avoid'.",
+    "- Use ONLY the scenario lines supplied in the user message (do not alter numbers).",
+    "",
+    "## Detailed Guidance",
+    "Write ~120–160 words with sections:",
+    "**Guidance:** 3–5 sentences referencing Context/Derived.",
+    "**Levels to Watch:** bullets with provided levels.",
+    "**Scenario Plan:** two bullets using the exact scenario lines supplied.",
+    "**Invalidation:** one sentence that fits the current baseline.",
+    "**Confidence:** 0–100%.",
+    "",
     "End with: 'Educational guidance, not financial advice.'"
-  ].join(" ");
+  ].join("\n");
 
   const user = [
-    `Analyze ${coin.toUpperCase()} over ${timeframe} days.`,
-    `Context -> price=${currentPrice}, RSI=${rsiValue.toFixed(2)}, SMA=${smaValue.toLocaleString()}, BB=[${currentBBLower.toLocaleString()}-${currentBBUpper.toLocaleString()}].`,
-    "Return Markdown with these sections:",
-    "**Guidance:** <2–3 sentences>",
-    "**Levels to Watch:** <bullets with numeric thresholds>",
-    "**Risk Notes:** <1–2 bullets>",
-    "**Confidence:** <0–100>%"
-  ].join(" ");
+    `Coin: ${coin.toUpperCase()} — Timeframe: ${TF} days`,
+    `Context: price=${P}, RSI=${R}, SMA(${PERIOD})=${S}, BB=[${L}-${U}]`,
+    `Derived: price_vs_sma_pct=${PV}, dist_to_lower_pct=${DL}, dist_to_upper_pct=${DU}, band_width_pct=${BW}`,
+    `AllowedNumbers: ${allowedNumbers.join(", ")}`,
+    "",
+    "Use these scenario lines EXACTLY (do not change numbers):",
+    bullishLine,
+    bearishLine,
+    "",
+    "Remember: Do not use any number not listed in AllowedNumbers."
+  ].join("\n");
 
   console.log('🤖 Sending comprehensive explanation request to Cohere...');
   
@@ -1139,7 +1281,7 @@ async function explainPatternWithCohere(rsi, sma, bb, signals, coin, timeframe, 
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-        model: 'command-r-plus',
+        model: 'command-a-03-2025',
       messages: [
         {
           role: 'system',
@@ -1165,7 +1307,26 @@ async function explainPatternWithCohere(rsi, sma, bb, signals, coin, timeframe, 
   console.log('🤖 Cohere explanation API success');
 
   // Extract the explanation
-  const explanation = data.message?.content?.[0]?.text || 'No explanation generated';
+  let explanation = data.message?.content?.[0]?.text || 'No explanation generated';
+  
+  // Guardrails: validate that AI only uses allowed numbers
+  const okNums = new Set(allowedNumbers);
+  function hasDisallowedNumber(text) {
+    // capture numbers like 41,280.41 or 42502.07 or 60
+    const matches = text.match(/\b\d{1,3}(?:,\d{3})*(?:\.\d+)?\b/g) || [];
+    return matches.some(n => !okNums.has(n));
+  }
+  function wrongLabel(text) {
+    return /(?:\b|^)(?:50|100|200)[-\s]day\s+SMA|\bMA(?:50|100|200)\b/i.test(text);
+  }
+  
+  // If AI violates rules, use strict rule-based explanation
+  if (hasDisallowedNumber(explanation) || wrongLabel(explanation)) {
+    console.log('🤖 AI violated number/label rules, using strict fallback');
+    explanation = buildRuleBasedExplanationStrict({
+      coin, P, R, S, L, U, PERIOD, TF, PV, DL, DU, BW
+    });
+  }
   
   return jsonResponse({
     explanation: explanation,
@@ -1173,12 +1334,79 @@ async function explainPatternWithCohere(rsi, sma, bb, signals, coin, timeframe, 
     coin: coin,
     timestamp: new Date().toISOString(),
     technicalContext: {
-      currentPrice,
-      currentRSI: rsiValue,
-      currentSMA: smaValue,
-      timeframe
+      currentPrice: Number(P),
+      currentRSI: Number(R),
+      currentSMA: Number(S),
+      timeframe: TF,
+      smaPeriod: PERIOD
     }
   });
+}
+
+/**
+ * Strict rule-based explanation that uses only provided numbers
+ */
+function buildRuleBasedExplanationStrict({ coin, P, R, S, L, U, PERIOD, TF, PV, DL, DU, BW }) {
+  const rsiNum = Number(R);
+  const mood = rsiNum >= 70 ? "overbought" : rsiNum <= 30 ? "oversold" : "neutral";
+  const lean = rsiNum >= 60 ? "bearish" : rsiNum <= 40 ? "bullish" : "neutral";
+  
+  // Dynamic confidence calculation (same as AI version)
+  let conf = 60; // Base confidence
+  
+  // RSI confidence boost
+  if (rsiNum >= 70 || rsiNum <= 30) conf += 15; // Strong RSI signals
+  else if (rsiNum >= 60 || rsiNum <= 40) conf += 10; // Moderate RSI signals
+  
+  // Price vs SMA confidence boost
+  const priceDeviation = Number(PV);
+  if (Math.abs(priceDeviation) > 5) conf += 10; // Strong price deviation
+  else if (Math.abs(priceDeviation) > 2) conf += 5; // Moderate price deviation
+  
+  // Band width confidence boost
+  const bandWidth = Number(BW);
+  if (bandWidth > 10) conf += 5; // High volatility = more uncertainty
+  else if (bandWidth < 5) conf += 5; // Low volatility = more predictable
+  
+  // Cap confidence at 90%
+  conf = Math.min(90, conf);
+  
+  const isAboveSMA = Number(P) >= Number(S);
+  const bullVerb = isAboveSMA ? "holds above" : "reclaims";
+  const bullishLine = `- If price ${bullVerb} SMA(${PERIOD}) ${S} with RSI > 60, look for follow-through toward ${U}.`;
+  const bearishLine = isAboveSMA
+    ? `- If price closes back below SMA(${PERIOD}) ${S} with RSI < 40, risk shifts toward ${L}.`
+    : `- If price loses ${L}, risk expands; distance to lower band was ${DL}% and may extend.`;
+
+  return [
+    "## Simple Summary",
+    `- Price is ${isAboveSMA ? "above" : "below"} SMA(${PERIOD}) ${S}; current price $${P}.`,
+    `- RSI ${R} indicates ${mood} conditions.`,
+    `- Watch ${L} (support) and ${U} (resistance).`,
+    "",
+    "## Decision Helper",
+    `- Consider ${isAboveSMA ? "holding" : "waiting for"} positions if price ${isAboveSMA ? "stays above" : "breaks above"} SMA(${PERIOD}) ${S}.`,
+    `- Avoid ${mood === "overbought" ? "chasing" : mood === "oversold" ? "panic selling" : "large"} positions near current levels.`,
+    `- Monitor ${L} as key support and ${U} as resistance for breakout signals.`,
+    "",
+    "## Detailed Guidance",
+    "**Guidance:**",
+    `${coin.toUpperCase()} trades near $${P}. RSI at ${R} is ${mood}. Price is between bands [${L}–${U}] and ${PV}% ${isAboveSMA ? "above" : "below"} SMA(${PERIOD}) ${S}. Band width is ${BW}% (volatility context). Baseline leaning: ${lean}.`,
+    "**Levels to Watch:**",
+    `- Support: ${L} (lower band)`,
+    `- Resistance: ${S} (SMA(${PERIOD})), ${U} (upper band)`,
+    "**Scenario Plan:**",
+    bullishLine,
+    bearishLine,
+    `**Invalidation:** ${lean === "bearish"
+        ? `A close above ${S} with RSI > 60 invalidates the bearish tilt.`
+        : lean === "bullish"
+          ? `A close below ${S} with RSI < 40 invalidates the bullish tilt.`
+          : `A decisive move outside [${L}–${U}] with RSI > 60 or < 40 resolves the neutral state.`}`,
+    `**Confidence:** ${conf}%`,
+    "",
+    "Educational guidance, not financial advice."
+  ].join("\n");
 }
 
 /**
@@ -1190,66 +1418,43 @@ function explainPatternFallback(rsi, sma, bb, signals, coin, timeframe, liveValu
   const rsiValue = rsi.length > 0 ? rsi[rsi.length - 1].y : currentRSI;
   const smaValue = sma.length > 0 ? sma[sma.length - 1].y : currentSMA;
   
-  let explanation = `**Technical Analysis Explanation for ${coin.toUpperCase()}**\n\n`;
+  // Use the same strict formatting as the AI version
+  function toFixedStr(n, dp = 2) { return Number(n).toFixed(dp); }
   
-  explanation += `**Current Market Snapshot:**\n`;
-  explanation += `• Price: $${currentPrice.toLocaleString()}\n`;
-  explanation += `• Timeframe: ${timeframe} days\n\n`;
+  const P = toFixedStr(currentPrice, 2);
+  const R = toFixedStr(rsiValue, 2);
+  const S = toFixedStr(smaValue, 2);
+  const L = toFixedStr(currentBBLower, 2);
+  const U = toFixedStr(currentBBUpper, 2);
+  const PERIOD = 4;
+  const TF = Number(timeframe);
+
+  // Calculate derived metrics for richer fallback
+  const priceVsSmaPct   = ((Number(P) - Number(S)) / Number(S)) * 100;
+  const distToLowerPct  = ((Number(P) - Number(L)) / Number(L)) * 100;
+  const distToUpperPct  = ((Number(U) - Number(P)) / Number(P)) * 100;
+  const bandWidthPct    = ((Number(U) - Number(L)) / Number(S)) * 100;
+
+  const PV = toFixedStr(priceVsSmaPct, 2);
+  const DL = toFixedStr(distToLowerPct, 2);
+  const DU = toFixedStr(distToUpperPct, 2);
+  const BW = toFixedStr(bandWidthPct, 2);
   
-  explanation += `**RSI Analysis (${rsiValue.toFixed(2)}):**\n`;
-  if (rsiValue < 30) {
-    explanation += `• The RSI is in oversold territory, suggesting the asset may be undervalued and due for a potential price recovery.\n`;
-  } else if (rsiValue > 70) {
-    explanation += `• The RSI is in overbought territory, indicating the asset may be overvalued and could face selling pressure.\n`;
-  } else {
-    explanation += `• The RSI is in a neutral range, suggesting balanced buying and selling pressure.\n`;
-  }
-  
-  explanation += `\n**Moving Average Analysis:**\n`;
-  const priceVsSMA = ((currentPrice - smaValue) / smaValue) * 100;
-  explanation += `• Current price is ${priceVsSMA >= 0 ? 'above' : 'below'} the 20-day moving average by ${Math.abs(priceVsSMA).toFixed(2)}%\n`;
-  if (currentPrice > smaValue * 1.02) {
-    explanation += `• This suggests an upward trend with bullish momentum.\n`;
-  } else if (currentPrice < smaValue * 0.98) {
-    explanation += `• This indicates a downward trend with bearish pressure.\n`;
-  } else {
-    explanation += `• Price is consolidating around the moving average.\n`;
-  }
-  
-  explanation += `\n**Bollinger Bands Analysis:**\n`;
-  explanation += `• Upper Band: $${currentBBUpper.toLocaleString()}\n`;
-  explanation += `• Lower Band: $${currentBBLower.toLocaleString()}\n`;
-  if (currentPrice > currentBBUpper) {
-    explanation += `• Price is above the upper band, suggesting potential overbought conditions.\n`;
-  } else if (currentPrice < currentBBLower) {
-    explanation += `• Price is below the lower band, suggesting potential oversold conditions.\n`;
-  } else {
-    explanation += `• Price is within the bands, indicating normal volatility levels.\n`;
-  }
-  
-  explanation += `\n**Signal Summary:**\n`;
-  const buySignals = signals.filter(s => s.signal === 'BUY').length;
-  const sellSignals = signals.filter(s => s.signal === 'SELL').length;
-  explanation += `• ${buySignals} bullish signals detected\n`;
-  explanation += `• ${sellSignals} bearish signals detected\n`;
-  
-  explanation += `\n**Risk Management Notes:**\n`;
-  explanation += `• Always use proper position sizing and stop-loss orders\n`;
-  explanation += `• Technical analysis should be combined with fundamental analysis\n`;
-  explanation += `• Past performance does not guarantee future results\n\n`;
-  
-  explanation += `**Disclaimer:** This analysis is for educational purposes only and should not be considered financial advice.`;
+  const explanation = buildRuleBasedExplanationStrict({
+    coin, P, R, S, L, U, PERIOD, TF, PV, DL, DU, BW
+  });
   
   return jsonResponse({
     explanation: explanation,
-    method: 'rule-based',
+    method: 'rule-based-fallback',
     coin: coin,
     timestamp: new Date().toISOString(),
     technicalContext: {
-      currentPrice,
-      currentRSI: rsiValue,
-      currentSMA: smaValue,
-      timeframe
+      currentPrice: Number(P),
+      currentRSI: Number(R),
+      currentSMA: Number(S),
+      timeframe: TF,
+      smaPeriod: PERIOD
     }
   });
 }
@@ -1394,24 +1599,22 @@ async function handleOHLC(request, env) {
       return errorResponse(`Unsupported coin: ${coinId}`);
     }
     
-    // Get current price from Blockchair
-    const statsResponse = await fetch(`https://api.blockchair.com/${coinId}/stats`, {
-      headers: {
-        'X-API-Key': env.BLOCKCHAIR_API_KEY,
-      },
-    });
-    
-    if (!statsResponse.ok) {
-      throw new Error(`Blockchair API error: ${statsResponse.status}`);
-    }
-    
-    const statsData = await statsResponse.json();
-    
-    if (!statsData.data || !statsData.data.market_price_usd) {
-      throw new Error('Invalid price data from Blockchair');
-    }
-    
-    const currentPrice = statsData.data.market_price_usd;
+     // Get current price using the same validation as price endpoint
+     let currentPrice = 45000; // Default fallback price for Bitcoin
+     
+     try {
+       const priceResult = await getCachedPriceData(coinId, env);
+       currentPrice = priceResult.data.price;
+       
+       // Validate the price is reasonable for Bitcoin
+       if (coinId === 'bitcoin' && (currentPrice < 30000 || currentPrice > 150000)) {
+         console.log(`⚠️ [OHLC] Invalid Bitcoin price: $${currentPrice}, using fallback`);
+         currentPrice = 45000; // Use reasonable fallback price
+       }
+     } catch (error) {
+       console.log(`⚠️ [OHLC] Failed to get price data: ${error.message}, using fallback`);
+       currentPrice = 45000; // Use reasonable fallback price
+     }
     
     // Generate OHLC data (Open, High, Low, Close)
     const ohlc = [];
