@@ -57,12 +57,12 @@ const SUPPORTED_COINS = {
 };
 
 // Rate limiting for CoinGecko API using KV storage for distributed coordination
-async function rateLimitedFetch(url, options = {}) {
+async function rateLimitedFetch(url, options = {}, env) {
   const now = Date.now();
   
   try {
     // Get the last request time from KV storage
-    const lastRequestTime = await RATE_LIMIT_KV.get('lastCoinGeckoRequest');
+    const lastRequestTime = await env.RATE_LIMIT_KV.get('lastCoinGeckoRequest');
     const lastRequest = lastRequestTime ? parseInt(lastRequestTime) : 0;
     const timeSinceLastRequest = now - lastRequest;
     
@@ -73,7 +73,7 @@ async function rateLimitedFetch(url, options = {}) {
     }
     
     // Update the last request time in KV storage
-    await RATE_LIMIT_KV.put('lastCoinGeckoRequest', now.toString());
+    await env.RATE_LIMIT_KV.put('lastCoinGeckoRequest', now.toString());
     
     console.log(`🚀 Making CoinGecko request to: ${url}`);
     return fetch(url, options);
@@ -149,7 +149,9 @@ async function handlePrice(request, env) {
       // Try CoinGecko API first
       console.log(`[Price] Fetching from CoinGecko for ${coinId}`);
       const response = await rateLimitedFetch(
-        `${COINGECKO_API_BASE}/simple/price?ids=${coingeckoId}&vs_currencies=usd&include_24hr_change=true&include_market_cap=true&include_24hr_vol=true`
+        `${COINGECKO_API_BASE}/simple/price?ids=${coingeckoId}&vs_currencies=usd&include_24hr_change=true&include_market_cap=true&include_24hr_vol=true`,
+        {},
+        env
       );
       
       console.log(`[Price] CoinGecko response status: ${response.status}`);
@@ -208,7 +210,9 @@ async function handleHistory(request, env) {
     try {
       // Fetch historical price data from CoinGecko
       const response = await rateLimitedFetch(
-        `${COINGECKO_API_BASE}/coins/${coingeckoId}/market_chart?vs_currency=usd&days=${days}&interval=daily`
+        `${COINGECKO_API_BASE}/coins/${coingeckoId}/market_chart?vs_currency=usd&days=${days}&interval=daily`,
+        {},
+        env
       );
       
       if (!response.ok) {
