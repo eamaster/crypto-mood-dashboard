@@ -288,9 +288,12 @@
 			</div>
 			{#if historyData.length > 0}
 				<div class="stat">
-					<span class="stat-label">Latest Price:</span>
+					<span class="stat-label">Price Range:</span>
 					<span class="stat-value">
-						${historyData[historyData.length - 1].y.toLocaleString('en-US', { 
+						${Math.min(...historyData.map(d => d.y)).toLocaleString('en-US', { 
+							minimumFractionDigits: 2, 
+							maximumFractionDigits: 2 
+						})} - ${Math.max(...historyData.map(d => d.y)).toLocaleString('en-US', { 
 							minimumFractionDigits: 2, 
 							maximumFractionDigits: 2 
 						})}

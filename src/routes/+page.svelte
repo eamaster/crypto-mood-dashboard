@@ -39,11 +39,14 @@
 		const newCoin = event.target.value;
 		if (newCoin === $cryptoStore.selectedCoin) return;
 		
+		isRefreshing = true;
 		selectedCoin = newCoin;
 		try {
-		await cryptoStore.setCoin(newCoin);
+			await cryptoStore.setCoin(newCoin);
 		} catch (error) {
 			console.error('❌ Failed to change coin:', error);
+		} finally {
+			isRefreshing = false;
 		}
 	}
 

@@ -26,13 +26,19 @@
 </script>
 
 <DataCard title="💰 Current Price" {loading} {error}>
-	<div class="price-widget">
-		<div class="price-value">{formatPrice(price)}</div>
-		<div class="price-change" class:positive={change >= 0} class:negative={change < 0}>
-			{change >= 0 ? '+' : ''}{formatChange(change)}%
+	{#if loading}
+		<div class="price-widget loading-state">
+			<div class="loading-placeholder">Loading price...</div>
 		</div>
-		<div class="price-symbol">{symbol.toUpperCase()}</div>
-	</div>
+	{:else}
+		<div class="price-widget">
+			<div class="price-value">{formatPrice(price)}</div>
+			<div class="price-change" class:positive={change >= 0} class:negative={change < 0}>
+				{change >= 0 ? '+' : ''}{formatChange(change)}%
+			</div>
+			<div class="price-symbol">{symbol.toUpperCase()}</div>
+		</div>
+	{/if}
 </DataCard>
 
 <style>
@@ -66,5 +72,17 @@
 		font-size: 0.9rem;
 		color: var(--text-secondary);
 		font-weight: 500;
+	}
+	
+	.loading-state {
+		min-height: 100px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+	
+	.loading-placeholder {
+		color: var(--text-secondary);
+		font-style: italic;
 	}
 </style> 

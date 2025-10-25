@@ -36,7 +36,12 @@ const fetchCoins = async () => {
 const fetchPrice = async (coinId) => {
     try {
         console.log(`🔍 Fetching price for ${coinId} from ${WORKER_URL}/price`);
-        const response = await fetch(`${WORKER_URL}/price?coin=${coinId}`);
+        const response = await fetch(`${WORKER_URL}/price?coin=${coinId}&_=${Date.now()}`, {
+            headers: {
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Pragma': 'no-cache'
+            }
+        });
         console.log(`📊 Price response status: ${response.status}`);
         
         if (!response.ok) {
@@ -65,7 +70,12 @@ const fetchPrice = async (coinId) => {
 const fetchHistory = async (coinId) => {
     try {
         console.log(`🔍 Fetching history for ${coinId} from ${WORKER_URL}/history`);
-        const response = await fetch(`${WORKER_URL}/history?coin=${coinId}&days=7`);
+        const response = await fetch(`${WORKER_URL}/history?coin=${coinId}&days=7&_=${Date.now()}`, {
+            headers: {
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Pragma': 'no-cache'
+            }
+        });
         console.log(`📊 History response status: ${response.status}`);
         
         if (!response.ok) {
@@ -104,7 +114,12 @@ const fetchHistory = async (coinId) => {
 
 const fetchNews = async (coinId) => {
     try {
-        const response = await fetch(`${WORKER_URL}/news?coin=${coinId}`);
+        const response = await fetch(`${WORKER_URL}/news?coin=${coinId}&_=${Date.now()}`, {
+            headers: {
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Pragma': 'no-cache'
+            }
+        });
         if (!response.ok) {
             throw new Error(`Failed to fetch news for ${coinId}. Status: ${response.status}`);
         }
@@ -178,27 +193,45 @@ export const initStore = async () => {
 
 // Function to update the selected coin
 export const setCoin = async (coinId) => {
-    update(state => ({ ...state, loading: true, error: null, selectedCoin: coinId }));
-
-    const [priceData, historyData, newsData] = await Promise.all([
-        fetchPrice(coinId),
-        fetchHistory(coinId),
-        fetchNews(coinId)
-    ]);
-
-    let sentimentData = null;
-    if (newsData?.headlines) {
-        sentimentData = await fetchSentiment(newsData.headlines);
-    }
-
-    update(state => ({
-        ...state,
-        priceData,
-        historyData,
-        newsData: { ...newsData, sentiment: sentimentData },
-        loading: false,
-        error: null
+    // Clear old data immediately to prevent showing stale data
+    update(state => ({ 
+        ...state, 
+        loading: true, 
+        error: null, 
+        selectedCoin: coinId,
+        priceData: null,
+        historyData: null,
+        newsData: null
     }));
+
+    try {
+        const [priceData, historyData, newsData] = await Promise.all([
+            fetchPrice(coinId),
+            fetchHistory(coinId),
+            fetchNews(coinId)
+        ]);
+
+        let sentimentData = null;
+        if (newsData?.headlines) {
+            sentimentData = await fetchSentiment(newsData.headlines);
+        }
+
+        update(state => ({
+            ...state,
+            priceData,
+            historyData,
+            newsData: { ...newsData, sentiment: sentimentData },
+            loading: false,
+            error: null
+        }));
+    } catch (error) {
+        console.error(`❌ Error in setCoin for ${coinId}:`, error);
+        update(state => ({
+            ...state,
+            loading: false,
+            error: error.message || 'Failed to load data'
+        }));
+    }
 };
 
 // Validation functions
