@@ -99,6 +99,17 @@ h1 {
     font-weight: 700;
 }
 
+.logo-link {
+    color: inherit;
+    text-decoration: none;
+    transition: all 0.3s ease;
+}
+
+.logo-link:hover {
+    color: var(--accent-hover);
+    transform: scale(1.02);
+}
+
 .theme-toggle {
     background: var(--bg-tertiary);
     border: 1px solid var(--border-color);

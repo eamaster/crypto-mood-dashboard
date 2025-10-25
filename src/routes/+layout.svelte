@@ -35,7 +35,7 @@
 
 <header>
 	<div class="header-content">
-		<h1>📊 Crypto Mood Dashboard</h1>
+		<h1><a href="https://hesam.me/crypto-mood-dashboard/" class="logo-link">📊 Crypto Mood Dashboard</a></h1>
 		<button class="theme-toggle" on:click={toggleTheme}>
 			{darkTheme ? '☀️' : '🌙'}
 		</button>
