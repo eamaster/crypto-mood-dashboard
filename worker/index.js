@@ -36,7 +36,7 @@ function errorResponse(message, status = 400) {
   const COINGECKO_API_BASE = 'https://api.coingecko.com/api/v3';
   
   // Rate limiting configuration
-  const COINGECKO_RATE_LIMIT_DELAY = 30000; // 30 seconds between requests
+  const COINGECKO_RATE_LIMIT_DELAY = 10000; // 10 seconds between requests
   
   // Rate-limited fetch function
   async function rateLimitedFetch(url, options = {}, env) {
@@ -223,6 +223,107 @@ async function fetchFreshPriceData(coinId, env) {
   }
 }
 
+// History data caching functions
+async function getCachedHistoryData(coinId, days, env) {
+  const cacheKey = `history_${coinId}_${days}`;
+  const now = Date.now();
+  const CACHE_TTL = 30000; // 30 seconds fresh cache
+  const MAX_STALE = 300000; // 5 minutes max stale
+  
+  try {
+    // Get cached data
+    const cached = await env.RATE_LIMIT_KV.get(cacheKey);
+    
+    if (cached) {
+        const { data, timestamp } = JSON.parse(cached);
+        const age = now - timestamp;
+        
+        // Validate cached history data - Bitcoin prices should be reasonable
+        if (coinId === 'bitcoin' && data.prices && data.prices.length > 0) {
+          const avgPrice = data.prices.reduce((sum, p) => sum + p.price, 0) / data.prices.length;
+          if (avgPrice < 30000 || avgPrice > 150000) {
+            console.log(`⚠️ [History Cache] Invalid cached Bitcoin prices (avg: $${avgPrice}), fetching fresh data`);
+            await env.RATE_LIMIT_KV.delete(cacheKey);
+            return await fetchFreshHistoryData(coinId, days, env);
+          }
+        }
+        
+        if (age < CACHE_TTL) {
+          console.log(`✅ [History Cache] Serving fresh cached data for ${coinId} (${age}ms old)`);
+          return { data, fromCache: true, fresh: true };
+        } else if (age < MAX_STALE) {
+          console.log(`🔄 [History Cache] Serving stale cached data for ${coinId} (${age}ms old), refreshing in background`);
+          // Trigger background refresh
+          refreshHistoryInBackground(coinId, days, env);
+          return { data, fromCache: true, fresh: false };
+        }
+    }
+    
+    // No cache or too old, fetch fresh data
+    console.log(`🔄 [History Cache] No valid cache for ${coinId}, fetching fresh data`);
+    return await fetchFreshHistoryData(coinId, days, env);
+    
+  } catch (error) {
+    console.log(`❌ [History Cache] Error getting cached data for ${coinId}: ${error.message}`);
+    return await fetchFreshHistoryData(coinId, days, env);
+  }
+}
+
+async function fetchFreshHistoryData(coinId, days, env) {
+  const coingeckoId = SUPPORTED_COINS[coinId].coingecko_id;
+  const url = `${COINGECKO_API_BASE}/coins/${coingeckoId}/market_chart?vs_currency=usd&days=${days}&interval=daily`;
+  
+  try {
+    console.log(`🚀 [Fresh History] Fetching history for ${coinId} (${days} days)`);
+    const response = await rateLimitedFetch(url, {}, env);
+    
+    if (!response.ok) {
+      throw new Error(`CoinGecko API error: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    
+    if (!validateHistoryData(data)) {
+      throw new Error('Invalid CoinGecko response');
+    }
+    
+    // Transform data to expected format
+    const prices = data.prices.map(([timestamp, price]) => ({
+        timestamp: new Date(timestamp).toISOString(),
+        price: Math.round(price * 100) / 100, // Round to 2 decimal places
+    }));
+    
+    const historyData = {
+      coin: coinId,
+      prices: prices,
+      days: days,
+      symbol: SUPPORTED_COINS[coinId].symbol,
+      source: 'coingecko',
+      note: 'Real market data from CoinGecko'
+    };
+    
+    // Cache the fresh data
+    await env.RATE_LIMIT_KV.put(`history_${coinId}_${days}`, JSON.stringify({
+      data: historyData,
+      timestamp: Date.now()
+    }));
+    
+    console.log(`✅ [Fresh History] Cached fresh history data for ${coinId}`);
+    return { data: historyData, fromCache: false, fresh: true };
+    
+  } catch (error) {
+    console.log(`❌ [Fresh History] Failed to fetch history for ${coinId}:`, error);
+    throw error;
+  }
+}
+
+async function refreshHistoryInBackground(coinId, days, env) {
+  // Don't await this - let it run in background
+  fetchFreshHistoryData(coinId, days, env).catch(error => {
+    console.log(`⚠️ [Background History] Failed to refresh ${coinId}: ${error.message}`);
+  });
+}
+
 // Data validation helpers
 function validatePriceData(data) {
   if (!data || typeof data !== 'object') return false;
@@ -322,49 +423,22 @@ async function handleHistory(request, env) {
       return errorResponse(`Unsupported coin: ${coinId}`);
     }
     
-    const coingeckoId = SUPPORTED_COINS[coinId].coingecko_id;
-    
     try {
-      // Fetch historical price data from CoinGecko
-      const response = await rateLimitedFetch(
-        `${COINGECKO_API_BASE}/coins/${coingeckoId}/market_chart?vs_currency=usd&days=${days}&interval=daily`,
-        {},
-        env
-      );
+      // Use cached history data with smart caching
+      const result = await getCachedHistoryData(coinId, days, env);
       
-      if (!response.ok) {
-        if (response.status === 429) {
-          console.log(`CoinGecko rate limited for ${coinId}, using fallback data`);
-          return generateFallbackHistoryData(coinId, days);
-        }
-        throw new Error(`CoinGecko API error: ${response.status}`);
-      }
+      // Add cache status headers for debugging
+      const headers = {
+        'X-Cache-Status': result.fromCache ? (result.fresh ? 'fresh' : 'stale') : 'miss',
+        'X-Cache-Source': result.fromCache ? 'cache' : 'api'
+      };
       
-      const data = await response.json();
+      console.log(`✅ [History] Successfully got history for ${coinId} (${result.data.prices.length} points, ${result.fromCache ? 'cached' : 'fresh'})`);
+      return jsonResponse(result.data, 200, headers);
       
-      // Validate historical data
-      if (!validateHistoryData(data)) {
-        console.log(`Invalid data from CoinGecko for ${coinId}, using fallback`);
-        return generateFallbackHistoryData(coinId, days);
-      }
-      
-      // Transform data to expected format
-      const prices = data.prices.map(([timestamp, price]) => ({
-          timestamp: new Date(timestamp).toISOString(),
-          price: Math.round(price * 100) / 100, // Round to 2 decimal places
-      }));
-      
-      return jsonResponse({
-        coin: coinId,
-        prices: prices,
-        days: days,
-        symbol: SUPPORTED_COINS[coinId].symbol,
-        source: 'coingecko',
-        note: 'Real market data from CoinGecko'
-      });
-      
-    } catch (coingeckoError) {
-      console.log(`CoinGecko error for ${coinId}: ${coingeckoError.message}, using fallback data`);
+    } catch (error) {
+      console.log(`❌ [History] Cache failed for ${coinId}: ${error.message}`);
+      console.log(`[History] Using fallback history data for ${coinId}`);
       return generateFallbackHistoryData(coinId, days);
     }
     
