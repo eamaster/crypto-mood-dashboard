@@ -1807,7 +1807,13 @@ export default {
       console.log(`CORS preflight from origin: ${origin}`);
       return new Response(null, {
         status: 200,
-        headers: CORS_HEADERS,
+        headers: {
+          ...DEFAULT_CORS,
+          'Cache-Control': 'no-store, max-age=0, must-revalidate',
+          'Surrogate-Control': 'no-store',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        },
       });
     }
     
