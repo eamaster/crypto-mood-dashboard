@@ -8,7 +8,7 @@ const DEFAULT_CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS, HEAD',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Referer, User-Agent, Cache-Control, Pragma',
-  'Access-Control-Expose-Headers': 'Content-Length, Content-Type, X-Cache-Status, X-DO-Age, X-Cache-Source',
+  'Access-Control-Expose-Headers': 'Content-Length, Content-Type, X-Cache-Status, X-DO-Age, X-Cache-Source, X-Latency-ms',
   'Access-Control-Max-Age': '86400', // 24 hours
   'Vary': 'Origin, Accept-Encoding'
 };
@@ -428,6 +428,7 @@ async function handleCoins() {
 }
 
 async function handlePrice(request, env) {
+  const start = Date.now();
   try {
     const url = new URL(request.url);
     const coinId = url.searchParams.get('coin') || 'bitcoin';
@@ -435,80 +436,124 @@ async function handlePrice(request, env) {
 
     console.log(`Fetching price for ${coinId} from origin: ${origin || 'direct'}`);
 
-    // Respect client cache-bust
+    // allow mutation
     let force = isForceRefresh(request.url);
 
-    // Delete KV if older than threshold (e.g., 48h stale safety)
-    const VERY_OLD_MS = 48 * 60 * 60 * 1000; // 48 hours
-    await deleteIfVeryOld(env.RATE_LIMIT_KV, `price_${coinId}`, VERY_OLD_MS);
+    // Safety: delete KV if ultra-old (48h). Non-blocking best-effort.
+    const VERY_OLD_MS = 48 * 60 * 60 * 1000;
+    try {
+      await deleteIfVeryOld(env.RATE_LIMIT_KV, `price_${coinId}`, VERY_OLD_MS);
+    } catch (e) {
+      console.warn('[Price] deleteIfVeryOld error:', e.message);
+    }
 
-    // Implement a short freshness threshold (30s)
-    const SHORT_TTL_MS = 30 * 1000; // 30 seconds
-    // If not force, check existing KV age and force refresh if older than SHORT_TTL_MS
+    // SHORT TTL: force refresh if cached entry older than SHORT_TTL_MS
+    const SHORT_TTL_MS = 30 * 1000; // 30s
     if (!force) {
       try {
         const raw = await env.RATE_LIMIT_KV.get(`price_${coinId}`);
         if (raw) {
           const parsed = JSON.parse(raw);
-          const cachedTs = parsed.timestamp || 0;
+          const cachedTs = parsed.timestamp || parsed.data?.timestamp || 0;
           if (cachedTs && (Date.now() - cachedTs > SHORT_TTL_MS)) {
-            console.log(`[Price] Cached price too old (${Math.floor((Date.now()-cachedTs)/1000)}s), forcing refresh`);
+            console.log(`[Price] Cached price too old (${Math.floor((Date.now()-cachedTs)/1000)}s), will force refresh`);
             force = true;
           }
         }
       } catch (e) {
         console.warn('[Price] error reading KV for age check:', e.message);
+        // don't fail - proceed without forcing
       }
     }
 
+    // Fetch path
     let result;
+    let stageStart = Date.now();
     if (force) {
-      // always attempt to fetch fresh and update cache
       console.log(`[Price] Force refresh for ${coinId}`);
-      result = await fetchFreshPriceData(coinId, env);
+      // fetch fresh (this throws only if upstream fails)
+      try {
+        result = await fetchFreshPriceData(coinId, env);
+      } catch (upErr) {
+        // Upstream failed — try to serve stale if available, otherwise bubble error
+        console.warn(`[Price] fetchFreshPriceData failed: ${upErr.message}`);
+        try {
+          // try to serve whatever cached data we have, but mark stale-if-error
+          const raw = await env.RATE_LIMIT_KV.get(`price_${coinId}`);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            result = { data: parsed.data, fromCache: true, fresh: false, staleIfError: true };
+            console.warn('[Price] Serving stale cached price after upstream failure');
+          } else {
+            throw upErr; // no cached data
+          }
+        } catch (serveErr) {
+          console.error('[Price] No cached data to fall back to:', serveErr.message);
+          throw upErr; // bubble original upstream error to outer catch
+        }
+      }
     } else {
-      // use smart cached data
+      // Use smart cache (may trigger background refresh)
+      const beforeKV = Date.now();
       result = await getCachedPriceData(coinId, env);
+      const afterKV = Date.now();
+      console.log(`[Price] KV read latency: ${afterKV - beforeKV}ms`);
+      // If getCachedPriceData somehow returned nothing, fetch fresh
+      if (!result || !result.data) {
+        console.log('[Price] getCachedPriceData returned no data, fetching fresh');
+        result = await fetchFreshPriceData(coinId, env);
+      }
     }
+    const stageEnd = Date.now();
 
-    // Build observability headers
-    const dataTs = result.data?.timestamp ? new Date(result.data.timestamp).getTime() : Date.now();
-    const xdoage = Math.floor((Date.now() - dataTs) / 1000);
+    // Prepare observability headers
+    const dataTs = result?.data?.timestamp ? new Date(result.data.timestamp).getTime() : null;
+    const xdoage = dataTs ? String(Math.floor((Date.now() - dataTs) / 1000)) : '';
+    const xcacheStatus = result.fromCache ? (result.fresh ? 'fresh' : (result.staleIfError ? 'stale-if-error' : 'stale')) : 'miss';
     const headers = {
-      'X-Cache-Status': result.fromCache ? (result.fresh ? 'fresh' : 'stale') : 'miss',
+      'X-Cache-Status': xcacheStatus,
       'X-Cache-Source': result.fromCache ? 'cache' : 'api',
-      'X-DO-Age': String(xdoage),
-      'X-Client-Cache': 'no-store'
+      'X-DO-Age': xdoage,
+      'X-Client-Cache': 'no-store',
+      'X-Latency-ms': String(Date.now() - start)
     };
 
-    console.log(`✅ [Price] Got price for ${coinId}: $${result.data.price} (fromCache=${result.fromCache}, age=${xdoage}s)`);
+    console.log(`✅ [Price] Got price for ${coinId}: $${result.data.price} (fromCache=${!!result.fromCache}, age=${xdoage}s), totalLatency=${Date.now()-start}ms`);
     return jsonResponse(result.data, 200, headers);
 
   } catch (error) {
+    // More informative error for client; include small hint in logs
     console.error('❌ [Price] Error handling price request:', error);
-    return errorResponse('Failed to fetch price data');
+    // Return a helpful JSON error and 502 for upstream errors (not generic 400)
+    const status = (error.message && error.message.includes('CoinGecko')) ? 502 : 500;
+    return jsonResponse({ error: 'Failed to fetch price data', details: error.message || 'unknown' }, status, { 'X-Client-Cache': 'no-store' });
   }
 }
 
 async function handleHistory(request, env) {
+  const start = Date.now();
   try {
     const url = new URL(request.url);
     const coinId = url.searchParams.get('coin') || 'bitcoin';
-    const days = Math.min(parseInt(url.searchParams.get('days')) || 7, 30); // Max 30 days
+    const days = Math.min(parseInt(url.searchParams.get('days')) || 7, 30);
     
     if (!SUPPORTED_COINS[coinId]) {
       return errorResponse(`Unsupported coin: ${coinId}`);
     }
     
-    // Respect client cache-bust
+    // allow mutation
     let force = isForceRefresh(request.url);
 
-    // Delete KV if older than threshold
-    const VERY_OLD_MS = 48 * 60 * 60 * 1000; // 48 hours
-    await deleteIfVeryOld(env.RATE_LIMIT_KV, `history_${coinId}_${days}`, VERY_OLD_MS);
+    // Safety: delete KV if ultra-old
+    const VERY_OLD_MS = 48 * 60 * 60 * 1000;
+    try {
+      await deleteIfVeryOld(env.RATE_LIMIT_KV, `history_${coinId}_${days}`, VERY_OLD_MS);
+    } catch (e) {
+      console.warn('[History] deleteIfVeryOld error:', e.message);
+    }
 
-    // Implement a short freshness threshold (30s)
-    const SHORT_TTL_MS = 30 * 1000; // 30 seconds
+    // SHORT TTL: force refresh if cached entry older than SHORT_TTL_MS
+    const SHORT_TTL_MS = 30 * 1000;
     if (!force) {
       try {
         const raw = await env.RATE_LIMIT_KV.get(`history_${coinId}_${days}`);
@@ -516,7 +561,7 @@ async function handleHistory(request, env) {
           const parsed = JSON.parse(raw);
           const cachedTs = parsed.timestamp || 0;
           if (cachedTs && (Date.now() - cachedTs > SHORT_TTL_MS)) {
-            console.log(`[History] Cached history too old (${Math.floor((Date.now()-cachedTs)/1000)}s), forcing refresh`);
+            console.log(`[History] Cached history too old (${Math.floor((Date.now()-cachedTs)/1000)}s), will force refresh`);
             force = true;
           }
         }
@@ -525,31 +570,59 @@ async function handleHistory(request, env) {
       }
     }
     
+    // Fetch path
     let result;
     if (force) {
       console.log(`[History] Force refresh for ${coinId} (${days} days)`);
-      result = await fetchFreshHistoryData(coinId, days, env);
+      try {
+        result = await fetchFreshHistoryData(coinId, days, env);
+      } catch (upErr) {
+        console.warn(`[History] fetchFreshHistoryData failed: ${upErr.message}`);
+        try {
+          const raw = await env.RATE_LIMIT_KV.get(`history_${coinId}_${days}`);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            result = { data: parsed.data, fromCache: true, fresh: false, staleIfError: true };
+            console.warn('[History] Serving stale cached history after upstream failure');
+          } else {
+            throw upErr;
+          }
+        } catch (serveErr) {
+          console.error('[History] No cached data to fall back to:', serveErr.message);
+          throw upErr;
+        }
+      }
     } else {
+      const beforeKV = Date.now();
       result = await getCachedHistoryData(coinId, days, env);
+      const afterKV = Date.now();
+      console.log(`[History] KV read latency: ${afterKV - beforeKV}ms`);
+      if (!result || !result.data) {
+        console.log('[History] getCachedHistoryData returned no data, fetching fresh');
+        result = await fetchFreshHistoryData(coinId, days, env);
+      }
     }
     
-    // Build observability headers (use first price timestamp for age)
-    const firstPrice = result.data.prices && result.data.prices.length > 0 ? result.data.prices[0] : null;
-    const dataTs = firstPrice?.timestamp ? new Date(firstPrice.timestamp).getTime() : Date.now();
-    const xdoage = Math.floor((Date.now() - dataTs) / 1000);
+    // Build observability headers (use last price timestamp for age)
+    const lastPrice = result.data.prices && result.data.prices.length > 0 ? result.data.prices[result.data.prices.length-1] : null;
+    const dataTs = lastPrice?.timestamp ? new Date(lastPrice.timestamp).getTime() : null;
+    const xdoage = dataTs ? String(Math.floor((Date.now() - dataTs) / 1000)) : '';
+    const xcacheStatus = result.fromCache ? (result.fresh ? 'fresh' : (result.staleIfError ? 'stale-if-error' : 'stale')) : 'miss';
     const headers = {
-      'X-Cache-Status': result.fromCache ? (result.fresh ? 'fresh' : 'stale') : 'miss',
+      'X-Cache-Status': xcacheStatus,
       'X-Cache-Source': result.fromCache ? 'cache' : 'api',
-      'X-DO-Age': String(xdoage),
-      'X-Client-Cache': 'no-store'
+      'X-DO-Age': xdoage,
+      'X-Client-Cache': 'no-store',
+      'X-Latency-ms': String(Date.now() - start)
     };
     
-    console.log(`✅ [History] Got history for ${coinId} (${result.data.prices.length} points, fromCache=${result.fromCache}, age=${xdoage}s)`);
+    console.log(`✅ [History] Got history for ${coinId} (${result.data.prices.length} points, fromCache=${!!result.fromCache}, age=${xdoage}s), totalLatency=${Date.now()-start}ms`);
     return jsonResponse(result.data, 200, headers);
     
   } catch (error) {
-    console.error('Error in handleHistory:', error);
-    return errorResponse(`Failed to fetch price history: ${error.message}`);
+    console.error('❌ [History] Error handling history request:', error);
+    const status = (error.message && error.message.includes('CoinGecko')) ? 502 : 500;
+    return jsonResponse({ error: 'Failed to fetch price history', details: error.message || 'unknown' }, status, { 'X-Client-Cache': 'no-store' });
   }
 }
 

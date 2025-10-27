@@ -179,7 +179,7 @@ export const initStore = async () => {
     const priceData = await fetchPrice(selectedCoin);
     
     // Small delay to respect rate limiting
-    await new Promise(resolve => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, 200));
     const historyData = await fetchHistory(selectedCoin);
     
     // News doesn't call CoinGecko, can fetch immediately
