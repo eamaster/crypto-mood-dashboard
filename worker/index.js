@@ -37,8 +37,39 @@ function errorResponse(message, status = 400) {
   return jsonResponse({ error: message }, status);
 }
 
+// Helper: treat `_` or force=true as cache-bust
+function isForceRefresh(requestUrl) {
+  try {
+    const u = new URL(requestUrl);
+    if (u.searchParams.has('_')) return true;
+    const f = u.searchParams.get('force');
+    return f === '1' || f === 'true';
+  } catch (e) {
+    return false;
+  }
+}
+
+// Delete a KV key if older than thresholdMs
+async function deleteIfVeryOld(kv, cacheKey, thresholdMs) {
+  try {
+    const raw = await kv.get(cacheKey);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw);
+    const ts = parsed.timestamp || parsed.data?.timestamp || 0;
+    if (!ts) return false;
+    if (Date.now() - ts > thresholdMs) {
+      console.log(`[Cache] Deleting very old cache ${cacheKey} (age: ${Math.floor((Date.now()-ts)/1000)}s)`);
+      await kv.delete(cacheKey);
+      return true;
+    }
+  } catch (e) {
+    console.warn(`[Cache] deleteIfVeryOld failed for ${cacheKey}:`, e.message);
+  }
+  return false;
+}
+
   // CoinGecko API configuration
-  const COINGECKO_API_BASE = 'https://api.coingecko.com/api/v3';
+const COINGECKO_API_BASE = 'https://api.coingecko.com/api/v3';
   
   // Rate limiting configuration
   const COINGECKO_RATE_LIMIT_DELAY = 5000; // 5 seconds between requests (faster)
@@ -401,31 +432,60 @@ async function handlePrice(request, env) {
     const url = new URL(request.url);
     const coinId = url.searchParams.get('coin') || 'bitcoin';
     const origin = request.headers.get('Origin');
-    
+
     console.log(`Fetching price for ${coinId} from origin: ${origin || 'direct'}`);
-    
-    try {
-      // Use smart caching - always returns data immediately
-      console.log(`[Price] Getting cached data for ${coinId}`);
-      const result = await getCachedPriceData(coinId, env);
-      
-      // Add cache status headers for debugging
-      const headers = {
-        'X-Cache-Status': result.fromCache ? (result.fresh ? 'fresh' : 'stale') : 'miss',
-        'X-Cache-Source': result.fromCache ? 'cache' : 'api'
-      };
-      
-      console.log(`✅ [Price] Successfully got price for ${coinId}: $${result.data.price} (${result.fromCache ? 'cached' : 'fresh'})`);
-      return jsonResponse(result.data, 200, headers);
-      
-    } catch (error) {
-      console.log(`❌ [Price] Cache failed for ${coinId}: ${error.message}`);
-      console.log(`[Price] Using fallback price for ${coinId}`);
-      return generateFallbackPriceData(coinId);
+
+    // Respect client cache-bust
+    let force = isForceRefresh(request.url);
+
+    // Delete KV if older than threshold (e.g., 48h stale safety)
+    const VERY_OLD_MS = 48 * 60 * 60 * 1000; // 48 hours
+    await deleteIfVeryOld(env.RATE_LIMIT_KV, `price_${coinId}`, VERY_OLD_MS);
+
+    // Implement a short freshness threshold (30s)
+    const SHORT_TTL_MS = 30 * 1000; // 30 seconds
+    // If not force, check existing KV age and force refresh if older than SHORT_TTL_MS
+    if (!force) {
+      try {
+        const raw = await env.RATE_LIMIT_KV.get(`price_${coinId}`);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          const cachedTs = parsed.timestamp || 0;
+          if (cachedTs && (Date.now() - cachedTs > SHORT_TTL_MS)) {
+            console.log(`[Price] Cached price too old (${Math.floor((Date.now()-cachedTs)/1000)}s), forcing refresh`);
+            force = true;
+          }
+        }
+      } catch (e) {
+        console.warn('[Price] error reading KV for age check:', e.message);
+      }
     }
-    
+
+    let result;
+    if (force) {
+      // always attempt to fetch fresh and update cache
+      console.log(`[Price] Force refresh for ${coinId}`);
+      result = await fetchFreshPriceData(coinId, env);
+    } else {
+      // use smart cached data
+      result = await getCachedPriceData(coinId, env);
+    }
+
+    // Build observability headers
+    const dataTs = result.data?.timestamp ? new Date(result.data.timestamp).getTime() : Date.now();
+    const xdoage = Math.floor((Date.now() - dataTs) / 1000);
+    const headers = {
+      'X-Cache-Status': result.fromCache ? (result.fresh ? 'fresh' : 'stale') : 'miss',
+      'X-Cache-Source': result.fromCache ? 'cache' : 'api',
+      'X-DO-Age': String(xdoage),
+      'X-Client-Cache': 'no-store'
+    };
+
+    console.log(`✅ [Price] Got price for ${coinId}: $${result.data.price} (fromCache=${result.fromCache}, age=${xdoage}s)`);
+    return jsonResponse(result.data, 200, headers);
+
   } catch (error) {
-    console.log(`❌ [Price] Error handling price request: ${error.message}`);
+    console.error('❌ [Price] Error handling price request:', error);
     return errorResponse('Failed to fetch price data');
   }
 }
@@ -440,24 +500,52 @@ async function handleHistory(request, env) {
       return errorResponse(`Unsupported coin: ${coinId}`);
     }
     
-    try {
-      // Use cached history data with smart caching
-      const result = await getCachedHistoryData(coinId, days, env);
-      
-      // Add cache status headers for debugging
-      const headers = {
-        'X-Cache-Status': result.fromCache ? (result.fresh ? 'fresh' : 'stale') : 'miss',
-        'X-Cache-Source': result.fromCache ? 'cache' : 'api'
-      };
-      
-      console.log(`✅ [History] Successfully got history for ${coinId} (${result.data.prices.length} points, ${result.fromCache ? 'cached' : 'fresh'})`);
-      return jsonResponse(result.data, 200, headers);
-      
-    } catch (error) {
-      console.log(`❌ [History] Cache failed for ${coinId}: ${error.message}`);
-      console.log(`[History] Using fallback history data for ${coinId}`);
-      return generateFallbackHistoryData(coinId, days);
+    // Respect client cache-bust
+    let force = isForceRefresh(request.url);
+
+    // Delete KV if older than threshold
+    const VERY_OLD_MS = 48 * 60 * 60 * 1000; // 48 hours
+    await deleteIfVeryOld(env.RATE_LIMIT_KV, `history_${coinId}_${days}`, VERY_OLD_MS);
+
+    // Implement a short freshness threshold (30s)
+    const SHORT_TTL_MS = 30 * 1000; // 30 seconds
+    if (!force) {
+      try {
+        const raw = await env.RATE_LIMIT_KV.get(`history_${coinId}_${days}`);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          const cachedTs = parsed.timestamp || 0;
+          if (cachedTs && (Date.now() - cachedTs > SHORT_TTL_MS)) {
+            console.log(`[History] Cached history too old (${Math.floor((Date.now()-cachedTs)/1000)}s), forcing refresh`);
+            force = true;
+          }
+        }
+      } catch (e) {
+        console.warn('[History] error reading KV for age check:', e.message);
+      }
     }
+    
+    let result;
+    if (force) {
+      console.log(`[History] Force refresh for ${coinId} (${days} days)`);
+      result = await fetchFreshHistoryData(coinId, days, env);
+    } else {
+      result = await getCachedHistoryData(coinId, days, env);
+    }
+    
+    // Build observability headers (use first price timestamp for age)
+    const firstPrice = result.data.prices && result.data.prices.length > 0 ? result.data.prices[0] : null;
+    const dataTs = firstPrice?.timestamp ? new Date(firstPrice.timestamp).getTime() : Date.now();
+    const xdoage = Math.floor((Date.now() - dataTs) / 1000);
+    const headers = {
+      'X-Cache-Status': result.fromCache ? (result.fresh ? 'fresh' : 'stale') : 'miss',
+      'X-Cache-Source': result.fromCache ? 'cache' : 'api',
+      'X-DO-Age': String(xdoage),
+      'X-Client-Cache': 'no-store'
+    };
+    
+    console.log(`✅ [History] Got history for ${coinId} (${result.data.prices.length} points, fromCache=${result.fromCache}, age=${xdoage}s)`);
+    return jsonResponse(result.data, 200, headers);
     
   } catch (error) {
     console.error('Error in handleHistory:', error);
@@ -1068,7 +1156,7 @@ async function classifyMarketMoodWithCohere(rsi, smaSignal, bbSignal, priceData,
   
   // Cap confidence at 90%
   baseConfidence = Math.min(90, baseConfidence);
-
+  
   // Create a comprehensive prompt for Chat API classification
   const prompt = `You are a cryptocurrency market sentiment classifier. Based on the technical analysis indicators provided, classify the market sentiment as exactly one of: "bullish", "bearish", or "neutral".
 
