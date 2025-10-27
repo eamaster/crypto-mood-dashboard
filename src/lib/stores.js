@@ -36,8 +36,14 @@ const fetchCoins = async () => {
 const fetchPrice = async (coinId) => {
     try {
         console.log(`🔍 Fetching price for ${coinId} from ${WORKER_URL}/price`);
-        // Timestamp parameter is sufficient for cache-busting
-        const response = await fetch(`${WORKER_URL}/price?coin=${coinId}&_=${Date.now()}`);
+        // Use cache: no-store to ensure fresh data
+        const response = await fetch(`${WORKER_URL}/price?coin=${coinId}&_=${Date.now()}`, {
+            cache: 'no-store',
+            headers: {
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Pragma': 'no-cache'
+            }
+        });
         console.log(`📊 Price response status: ${response.status}`);
         
         if (!response.ok) {
@@ -66,8 +72,14 @@ const fetchPrice = async (coinId) => {
 const fetchHistory = async (coinId) => {
     try {
         console.log(`🔍 Fetching history for ${coinId} from ${WORKER_URL}/history`);
-        // Timestamp parameter is sufficient for cache-busting
-        const response = await fetch(`${WORKER_URL}/history?coin=${coinId}&days=7&_=${Date.now()}`);
+        // Use cache: no-store to ensure fresh data
+        const response = await fetch(`${WORKER_URL}/history?coin=${coinId}&days=7&_=${Date.now()}`, {
+            cache: 'no-store',
+            headers: {
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Pragma': 'no-cache'
+            }
+        });
         console.log(`📊 History response status: ${response.status}`);
         
         if (!response.ok) {
@@ -106,8 +118,14 @@ const fetchHistory = async (coinId) => {
 
 const fetchNews = async (coinId) => {
     try {
-        // Timestamp parameter is sufficient for cache-busting
-        const response = await fetch(`${WORKER_URL}/news?coin=${coinId}&_=${Date.now()}`);
+        // Use cache: no-store to ensure fresh data
+        const response = await fetch(`${WORKER_URL}/news?coin=${coinId}&_=${Date.now()}`, {
+            cache: 'no-store',
+            headers: {
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Pragma': 'no-cache'
+            }
+        });
         if (!response.ok) {
             throw new Error(`Failed to fetch news for ${coinId}. Status: ${response.status}`);
         }
