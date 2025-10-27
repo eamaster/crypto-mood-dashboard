@@ -21,7 +21,13 @@
 		priceData = null;
 
 		try {
-			const response = await fetch(`${WORKER_URL}/price?coin=${coin}`);
+			const response = await fetch(`${WORKER_URL}/price?coin=${coin}`, {
+				cache: 'no-store',
+				headers: {
+					'Cache-Control': 'no-cache, no-store, must-revalidate',
+					'Pragma': 'no-cache'
+				}
+			});
 			
 			if (!response.ok) {
 				throw new Error(`HTTP error! status: ${response.status}`);

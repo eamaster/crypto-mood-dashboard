@@ -1,5 +1,5 @@
 <script>
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
 	import Chart from 'chart.js/auto';
@@ -12,10 +12,17 @@
 	let error = null;
 	let chartCanvas;
 	let chartInstance = null;
+	let realTimeInterval = null;
 
 	onMount(async () => {
 		// Auto-load chart on page load
 		await fetchChart();
+	});
+
+	onDestroy(() => {
+		if (realTimeInterval) {
+			clearInterval(realTimeInterval);
+		}
 	});
 
 	async function fetchChart() {
@@ -32,7 +39,13 @@
 				chartInstance = null;
 			}
 
-			const response = await fetch(`${WORKER_URL}/history?coin=${coin}&days=7`);
+			const response = await fetch(`${WORKER_URL}/history?coin=${coin}&days=7`, {
+				cache: 'no-store',
+				headers: {
+					'Cache-Control': 'no-cache, no-store, must-revalidate',
+					'Pragma': 'no-cache'
+				}
+			});
 			
 			if (!response.ok) {
 				const errorText = await response.text();
@@ -149,6 +162,21 @@
 		}
 	}
 
+	function toggleRealTime() {
+		if (realTimeInterval) {
+			clearInterval(realTimeInterval);
+			realTimeInterval = null;
+			console.log('🛑 Real-time updates stopped');
+		} else {
+			console.log('🚀 Real-time updates started (60s interval)');
+			fetchChart(); // Initial fetch
+			realTimeInterval = setInterval(() => {
+				console.log('🔄 Real-time refresh triggered');
+				fetchChart();
+			}, 60000); // 60 seconds
+		}
+	}
+
 	function goBack() {
 		goto('modules');
 	}
@@ -176,6 +204,9 @@
 		>
 		<button on:click={fetchChart} disabled={loading}>
 			{loading ? '⏳ Loading...' : 'Load Chart'}
+		</button>
+		<button on:click={toggleRealTime} disabled={loading} class:active={!!realTimeInterval}>
+			{realTimeInterval ? '🛑 Stop Real-Time' : '🚀 Start Real-Time (60s)'}
 		</button>
 	</div>
 	
@@ -288,6 +319,16 @@
 		opacity: 0.6;
 		cursor: not-allowed;
 		transform: none;
+	}
+
+	button.active {
+		background: var(--success-color);
+		animation: pulse 2s infinite;
+	}
+
+	@keyframes pulse {
+		0%, 100% { opacity: 1; }
+		50% { opacity: 0.7; }
 	}
 
 	.loading {

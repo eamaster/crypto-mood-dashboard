@@ -4,30 +4,35 @@
 // =============================================================================
 
 // CORS headers for frontend requests - Enhanced for GitHub Pages compatibility
-const CORS_HEADERS = {
+const DEFAULT_CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS, HEAD',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Referer, User-Agent, Cache-Control, Pragma',
-  'Access-Control-Expose-Headers': 'Content-Length, Content-Type',
+  'Access-Control-Expose-Headers': 'Content-Length, Content-Type, X-Cache-Status, X-DO-Age, X-Cache-Source',
   'Access-Control-Max-Age': '86400', // 24 hours
-  'Vary': 'Origin',
-  'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
-  'Pragma': 'no-cache',
-  'Expires': '0'
+  'Vary': 'Origin, Accept-Encoding'
 };
 
-// Response helper
-function jsonResponse(data, status = 200) {
-  return new Response(JSON.stringify(data), {
+function jsonResponse(data, status = 200, extraHeaders = {}) {
+  // Ensure client and CDN are instructed not to cache client-facing API responses
+  const cacheHeaders = {
+    'Cache-Control': 'no-store, max-age=0, must-revalidate',
+    'Surrogate-Control': 'no-store',
+    'Pragma': 'no-cache',
+    'Expires': '0'
+  };
+
+  return new Response(typeof data === 'string' ? data : JSON.stringify(data), {
     status,
     headers: {
-      'Content-Type': 'application/json',
-      ...CORS_HEADERS,
-    },
+      'Content-Type': 'application/json; charset=utf-8',
+      ...DEFAULT_CORS,
+      ...cacheHeaders,
+      ...extraHeaders
+    }
   });
 }
 
-// Error response helper
 function errorResponse(message, status = 400) {
   return jsonResponse({ error: message }, status);
 }
