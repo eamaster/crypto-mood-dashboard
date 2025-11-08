@@ -14,21 +14,25 @@ const DEFAULT_CORS = {
 };
 
 function jsonResponse(data, status = 200, extraHeaders = {}) {
-  // Ensure client and CDN are instructed not to cache client-facing API responses
-  const cacheHeaders = {
+  // Default cache headers (can be overridden by extraHeaders)
+  const defaultCacheHeaders = {
     'Cache-Control': 'no-store, max-age=0, must-revalidate',
-    'Surrogate-Control': 'no-store',
     'Pragma': 'no-cache',
     'Expires': '0'
   };
+  
+  // Only add Surrogate-Control if not using s-maxage in extraHeaders
+  if (!extraHeaders['Cache-Control'] || !extraHeaders['Cache-Control'].includes('s-maxage')) {
+    defaultCacheHeaders['Surrogate-Control'] = 'no-store';
+  }
 
   return new Response(typeof data === 'string' ? data : JSON.stringify(data), {
     status,
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
       ...DEFAULT_CORS,
-      ...cacheHeaders,
-      ...extraHeaders
+      ...defaultCacheHeaders,
+      ...extraHeaders // extraHeaders override defaults
     }
   });
 }
@@ -145,7 +149,14 @@ async function rateLimitedFetch(url, options = {}, env, coingeckoId) {
       const attemptStart = Date.now();
       try {
         console.log(`[rateLimitedFetch] Attempt ${attempt}/${maxAttempts} for ${url}`);
-        const resp = await fetch(url, options);
+        // Add POP cache hints for Cloudflare edge to cache 2xx responses for 60s
+        const fetchOptions = {
+          method: 'GET',
+          headers: { 'Accept': 'application/json', ...(options.headers || {}) },
+          cf: { cacheTtlByStatus: { "200-299": 60 }, cacheEverything: true },
+          ...options
+        };
+        const resp = await fetch(url, fetchOptions);
 
         // If success, return parsed Response-like object
         if (resp.status >= 200 && resp.status < 300) {
@@ -593,7 +604,7 @@ async function handlePrice(request, env) {
     }
 
     // SHORT TTL: force refresh if cached entry older than SHORT_TTL_MS
-    const SHORT_TTL_MS = 30 * 1000; // 30s
+    const SHORT_TTL_MS = 60 * 1000; // 60s (matches POP cache TTL)
     if (!force) {
       try {
         const raw = await env.RATE_LIMIT_KV.get(`price_${coinId}`);
@@ -651,15 +662,15 @@ async function handlePrice(request, env) {
     }
     const stageEnd = Date.now();
 
-    // Prepare observability headers
+    // Prepare observability headers with POP caching
     const dataTs = result?.data?.timestamp ? new Date(result.data.timestamp).getTime() : null;
     const xdoage = dataTs ? String(Math.floor((Date.now() - dataTs) / 1000)) : '';
     const xcacheStatus = result.fromCache ? (result.fresh ? 'fresh' : (result.staleIfError ? 'stale-if-error' : 'stale')) : 'miss';
     const headers = {
+      'Cache-Control': 's-maxage=60, max-age=0, must-revalidate',
       'X-Cache-Status': xcacheStatus,
       'X-Cache-Source': result.fromCache ? 'cache' : 'api',
       'X-DO-Age': xdoage,
-      'X-Client-Cache': 'no-store',
       'X-Latency-ms': String(Date.now() - start)
     };
 
@@ -698,7 +709,7 @@ async function handleHistory(request, env) {
     }
 
     // SHORT TTL: force refresh if cached entry older than SHORT_TTL_MS
-    const SHORT_TTL_MS = 30 * 1000;
+    const SHORT_TTL_MS = 60 * 1000; // 60s (matches POP cache TTL)
     if (!force) {
       try {
         const raw = await env.RATE_LIMIT_KV.get(`history_${coinId}_${days}`);
@@ -748,16 +759,16 @@ async function handleHistory(request, env) {
       }
     }
     
-    // Build observability headers (use last price timestamp for age)
+    // Build observability headers with POP caching (use last price timestamp for age)
     const lastPrice = result.data.prices && result.data.prices.length > 0 ? result.data.prices[result.data.prices.length-1] : null;
     const dataTs = lastPrice?.timestamp ? new Date(lastPrice.timestamp).getTime() : null;
     const xdoage = dataTs ? String(Math.floor((Date.now() - dataTs) / 1000)) : '';
     const xcacheStatus = result.fromCache ? (result.fresh ? 'fresh' : (result.staleIfError ? 'stale-if-error' : 'stale')) : 'miss';
     const headers = {
+      'Cache-Control': 's-maxage=60, max-age=0, must-revalidate',
       'X-Cache-Status': xcacheStatus,
       'X-Cache-Source': result.fromCache ? 'cache' : 'api',
       'X-DO-Age': xdoage,
-      'X-Client-Cache': 'no-store',
       'X-Latency-ms': String(Date.now() - start)
     };
     

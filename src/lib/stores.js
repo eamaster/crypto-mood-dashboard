@@ -15,14 +15,17 @@ const initialState = {
 // Create the store
 const { subscribe, set, update } = writable(initialState);
 
-// Helper: fetch with timeout and no-store cache
+// Per-coin client throttle (8s between fetches)
+const _lastPriceFetch = new Map();
+const _lastHistoryFetch = new Map();
+
+// Helper: fetch with timeout and no-store cache (no custom headers for GET to avoid preflight)
 async function fetchWithTimeout(url, opts = {}, timeoutMs = 8000) {
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), timeoutMs);
     try {
         const res = await fetch(url, {
             cache: 'no-store',
-            headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache', ...(opts.headers || {}) },
             signal: controller.signal,
             ...opts
         });
@@ -52,7 +55,7 @@ const fetchCoins = async () => {
     }
 };
 
-const fetchPrice = async (coinId) => {
+const fetchPriceInternal = async (coinId) => {
     try {
         console.log(`🔍 Fetching price for ${coinId} from ${WORKER_URL}/price`);
         const response = await fetchWithTimeout(`${WORKER_URL}/price?coin=${coinId}&_=${Date.now()}`);
@@ -87,7 +90,27 @@ const fetchPrice = async (coinId) => {
     }
 };
 
-const fetchHistory = async (coinId) => {
+// Client-side throttle wrapper (8s per coin to prevent bursts)
+const fetchPrice = async (coinId, force = false) => {
+    const now = Date.now();
+    const last = _lastPriceFetch.get(coinId) || 0;
+    
+    // Skip if last fetch within 8s (unless forced)
+    if (!force && now - last < 8000) {
+        const waitTime = Math.floor((8000 - (now - last)) / 1000);
+        console.log(`⏱️ Client throttle: skipping price fetch for ${coinId} (retry in ${waitTime}s)`);
+        throw new Error(`Please wait ${waitTime} seconds before refreshing ${coinId}`);
+    }
+    
+    _lastPriceFetch.set(coinId, now);
+    try {
+        return await fetchPriceInternal(coinId);
+    } finally {
+        setTimeout(() => _lastPriceFetch.delete(coinId), 8000);
+    }
+};
+
+const fetchHistoryInternal = async (coinId) => {
     try {
         console.log(`🔍 Fetching history for ${coinId} from ${WORKER_URL}/history`);
         const response = await fetchWithTimeout(`${WORKER_URL}/history?coin=${coinId}&days=7&_=${Date.now()}`);
@@ -130,6 +153,26 @@ const fetchHistory = async (coinId) => {
     } catch (error) {
         console.error(`❌ Error fetching history for ${coinId}:`, error);
         throw new Error(`Failed to fetch history data for ${coinId}.`);
+    }
+};
+
+// Client-side throttle wrapper for history (8s per coin to prevent bursts)
+const fetchHistory = async (coinId, force = false) => {
+    const now = Date.now();
+    const last = _lastHistoryFetch.get(coinId) || 0;
+    
+    // Skip if last fetch within 8s (unless forced)
+    if (!force && now - last < 8000) {
+        const waitTime = Math.floor((8000 - (now - last)) / 1000);
+        console.log(`⏱️ Client throttle: skipping history fetch for ${coinId} (retry in ${waitTime}s)`);
+        throw new Error(`Please wait ${waitTime} seconds before refreshing ${coinId}`);
+    }
+    
+    _lastHistoryFetch.set(coinId, now);
+    try {
+        return await fetchHistoryInternal(coinId);
+    } finally {
+        setTimeout(() => _lastHistoryFetch.delete(coinId), 8000);
     }
 };
 
@@ -187,9 +230,10 @@ export const initStore = async () => {
 
     try {
         // Parallelize price & history fetches (they don't depend on each other)
+        // force=true on initial load to bypass throttle
         const [priceData, historyData] = await Promise.all([
-            fetchPrice(selectedCoin),
-            fetchHistory(selectedCoin)
+            fetchPrice(selectedCoin, true),
+            fetchHistory(selectedCoin, true)
         ]);
 
         // News and sentiment can run after price/history are loaded
@@ -237,10 +281,14 @@ export const setCoin = async (coinId) => {
     }));
 
     try {
+        // Clear throttle for this coin when user explicitly switches
+        _lastPriceFetch.delete(coinId);
+        _lastHistoryFetch.delete(coinId);
+        
         // Parallelize price & history fetches (they don't depend on each other)
         const [priceData, historyData] = await Promise.all([
-            fetchPrice(coinId),
-            fetchHistory(coinId)
+            fetchPrice(coinId, true), // force=true bypasses throttle
+            fetchHistory(coinId, true)
         ]);
 
         // News and sentiment can run after price/history are loaded

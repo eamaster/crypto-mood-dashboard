@@ -13,20 +13,25 @@ const CORS_HEADERS = {
 
 // Response helper
 function jsonResponse(data, status = 200, extraHeaders = {}) {
-  const cacheHeaders = {
+  // Default cache headers (can be overridden by extraHeaders)
+  const defaultCacheHeaders = {
     'Cache-Control': 'no-store, max-age=0, must-revalidate',
-    'Surrogate-Control': 'no-store',
     'Pragma': 'no-cache',
     'Expires': '0'
   };
+  
+  // Only add Surrogate-Control if not using s-maxage in extraHeaders
+  if (!extraHeaders['Cache-Control'] || !extraHeaders['Cache-Control'].includes('s-maxage')) {
+    defaultCacheHeaders['Surrogate-Control'] = 'no-store';
+  }
   
   return new Response(JSON.stringify(data), {
     status,
     headers: {
       'Content-Type': 'application/json',
       ...CORS_HEADERS,
-      ...cacheHeaders,
-      ...extraHeaders
+      ...defaultCacheHeaders,
+      ...extraHeaders // extraHeaders override defaults
     },
   });
 }
@@ -132,7 +137,14 @@ async function rateLimitedFetch(url, options = {}, env, coingeckoId) {
       const attemptStart = Date.now();
       try {
         console.log(`[rateLimitedFetch] Attempt ${attempt}/${maxAttempts} for ${url}`);
-        const resp = await fetch(url, options);
+        // Add POP cache hints for Cloudflare edge to cache 2xx responses for 60s
+        const fetchOptions = {
+          method: 'GET',
+          headers: { 'Accept': 'application/json', ...(options.headers || {}) },
+          cf: { cacheTtlByStatus: { "200-299": 60 }, cacheEverything: true },
+          ...options
+        };
+        const resp = await fetch(url, fetchOptions);
 
         // If success, return parsed Response-like object
         if (resp.status >= 200 && resp.status < 300) {
@@ -293,9 +305,9 @@ async function handlePrice(request, env) {
       }
       
       const headers = {
+        'Cache-Control': 's-maxage=60, max-age=0, must-revalidate',
         'X-Cache-Status': 'miss',
         'X-Cache-Source': 'api',
-        'X-Client-Cache': 'no-store',
         'X-Latency-ms': String(Date.now() - start)
       };
       
@@ -373,10 +385,10 @@ async function handleHistory(request, env) {
       const xdoage = dataTs ? String(Math.floor((Date.now() - dataTs) / 1000)) : '';
       
       const headers = {
+        'Cache-Control': 's-maxage=60, max-age=0, must-revalidate',
         'X-Cache-Status': 'miss',
         'X-Cache-Source': 'api',
         'X-DO-Age': xdoage,
-        'X-Client-Cache': 'no-store',
         'X-Latency-ms': String(Date.now() - start)
       };
       
