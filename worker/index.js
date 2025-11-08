@@ -68,41 +68,155 @@ async function deleteIfVeryOld(kv, cacheKey, thresholdMs) {
   return false;
 }
 
+// Coalesce inflight upstream calls per URL (avoid duplicate fetches)
+const INFLIGHT_UPSTREAM = {}; // key: url -> Promise<{ ok, status, text, json? }>
+
+// Convert seconds-or-date Retry-After to ms
+function parseRetryAfterHeader(h) {
+  if (!h) return undefined;
+  const n = Number(h);
+  if (!Number.isNaN(n)) return n * 1000;
+  const when = Date.parse(h);
+  if (!Number.isNaN(when)) return Math.max(0, when - Date.now());
+  return undefined;
+}
+
+function jitter(ms) {
+  return Math.floor(ms + Math.random() * (ms / 2));
+}
+
+// Write a per-coingecko backoff timestamp into KV
+async function setBackoff(kv, coingeckoId, untilMs) {
+  try {
+    await kv.put(`backoff_${coingeckoId}`, String(untilMs));
+  } catch (e) {
+    console.warn('Failed to set backoff KV:', e.message);
+  }
+}
+
+async function getBackoff(kv, coingeckoId) {
+  try {
+    const raw = await kv.get(`backoff_${coingeckoId}`);
+    if (!raw) return 0;
+    const n = Number(raw);
+    return Number.isNaN(n) ? 0 : n;
+  } catch (e) {
+    console.warn('Failed to get backoff KV:', e.message);
+    return 0;
+  }
+}
+
   // CoinGecko API configuration
 const COINGECKO_API_BASE = 'https://api.coingecko.com/api/v3';
-  
-  // Rate limiting configuration
-  const COINGECKO_RATE_LIMIT_DELAY = 5000; // 5 seconds between requests (faster)
-  
-  // Rate-limited fetch function
-  async function rateLimitedFetch(url, options = {}, env) {
-    const cacheKey = `rate_limit_${Date.now()}`;
-    
+
+// rateLimitedFetch: coalescing + retries + per-coingecko backoff
+async function rateLimitedFetch(url, options = {}, env, coingeckoId) {
+  // Coalesce: if there is already an inflight fetch for this url, await it
+  if (INFLIGHT_UPSTREAM[url]) {
     try {
-      // Check if we need to wait based on KV storage
-      if (env.RATE_LIMIT_KV) {
-        const lastRequest = await env.RATE_LIMIT_KV.get('last_coingecko_request');
-        if (lastRequest) {
-          const lastRequestTime = parseInt(lastRequest);
-          const timeSinceLastRequest = Date.now() - lastRequestTime;
-          
-          if (timeSinceLastRequest < COINGECKO_RATE_LIMIT_DELAY) {
-            const waitTime = COINGECKO_RATE_LIMIT_DELAY - timeSinceLastRequest;
-            console.log(`⏳ Rate limiting: waiting ${waitTime}ms before CoinGecko request`);
-            await new Promise(resolve => setTimeout(resolve, waitTime));
-          }
-        }
-        
-        // Update last request time
-        await env.RATE_LIMIT_KV.put('last_coingecko_request', Date.now().toString());
-      }
-      
-      return await fetch(url, options);
-    } catch (error) {
-      console.log(`❌ Rate limited fetch error: ${error.message}`);
-      throw error;
+      console.log(`[rateLimitedFetch] Coalescing request for ${url}`);
+      return await INFLIGHT_UPSTREAM[url];
+    } catch (e) {
+      // if the shared fetch failed, fall through to attempt a new one
+      console.warn(`[rateLimitedFetch] Coalesced request failed, attempting new fetch`);
     }
   }
+
+  // Create the promise and store it
+  const p = (async () => {
+    const maxAttempts = 5;
+    let attempt = 0;
+
+    // If K/V says we must backoff, do not call upstream: return an object indicating backoff
+    const now = Date.now();
+    const backoffUntil = coingeckoId ? await getBackoff(env.RATE_LIMIT_KV, coingeckoId) : 0;
+    if (backoffUntil && backoffUntil > now) {
+      const waitMs = backoffUntil - now;
+      console.warn(`[rateLimitedFetch] Backoff in effect for ${coingeckoId}, ${Math.ceil(waitMs/1000)}s left`);
+      // Throw a special error so callers can serve stale-if-error
+      const err = new Error('backoff-in-effect');
+      err.code = 'backoff';
+      err.until = backoffUntil;
+      throw err;
+    }
+
+    while (attempt < maxAttempts) {
+      attempt++;
+      const attemptStart = Date.now();
+      try {
+        console.log(`[rateLimitedFetch] Attempt ${attempt}/${maxAttempts} for ${url}`);
+        const resp = await fetch(url, options);
+
+        // If success, return parsed Response-like object
+        if (resp.status >= 200 && resp.status < 300) {
+          const text = await resp.text();
+          let json = null;
+          try { json = JSON.parse(text); } catch (e) { /* not json */ }
+          console.log(`[rateLimitedFetch] Success on attempt ${attempt}, latency=${Date.now() - attemptStart}ms`);
+          return { ok: true, status: resp.status, text, json, latency: Date.now() - attemptStart };
+        }
+
+        // Handle Retry/429/5xx
+        if (resp.status === 429) {
+          const ra = parseRetryAfterHeader(resp.headers.get('retry-after'));
+          // compute backoff until
+          const baseMs = 1000 * Math.pow(2, attempt); // exponential
+          const backoffMs = ra ?? jitter(Math.min(16000, baseMs));
+          const until = Date.now() + backoffMs;
+          if (coingeckoId && env.RATE_LIMIT_KV) {
+            await setBackoff(env.RATE_LIMIT_KV, coingeckoId, until);
+            console.warn(`[rateLimitedFetch] 429 received. Setting KV backoff for ${coingeckoId} until ${new Date(until).toISOString()} (${Math.ceil(backoffMs/1000)}s)`);
+          }
+          // Wait before retrying
+          if (attempt < maxAttempts) {
+            console.log(`[rateLimitedFetch] Waiting ${Math.ceil(backoffMs/1000)}s before retry...`);
+            await new Promise(r => setTimeout(r, backoffMs));
+          }
+          continue;
+        }
+
+        if (resp.status >= 500 && resp.status < 600) {
+          // Server error: backoff smaller
+          const backoffMs = jitter(Math.min(8000, 500 * Math.pow(2, attempt)));
+          console.warn(`[rateLimitedFetch] 5xx error (${resp.status}), backing off ${Math.ceil(backoffMs/1000)}s`);
+          if (attempt < maxAttempts) {
+            await new Promise(r => setTimeout(r, backoffMs));
+          }
+          continue;
+        }
+
+        // Non-retryable 4xx other than 429 -> return as-is
+        const text = await resp.text();
+        let json = null;
+        try { json = JSON.parse(text); } catch (e) {}
+        console.warn(`[rateLimitedFetch] Non-retryable error ${resp.status}`);
+        return { ok: false, status: resp.status, text, json, latency: Date.now() - attemptStart };
+      } catch (err) {
+        // network or abort — backoff and retry
+        console.warn(`[rateLimitedFetch] Network error on attempt ${attempt} for ${url}: ${err.message}`);
+        if (attempt < maxAttempts) {
+          const backoffMs = jitter(Math.min(4000, 500 * Math.pow(2, attempt)));
+          await new Promise(r => setTimeout(r, backoffMs));
+        }
+        continue;
+      }
+    }
+
+    // exhausted retries
+    console.error(`[rateLimitedFetch] Exhausted ${maxAttempts} retries for ${url}`);
+    const err = new Error('exhausted-retries');
+    err.code = 'retries_exhausted';
+    throw err;
+  })();
+
+  INFLIGHT_UPSTREAM[url] = p;
+  try {
+    const res = await p;
+    return res;
+  } finally {
+    delete INFLIGHT_UPSTREAM[url];
+  }
+}
 
 // Supported cryptocurrencies mapping (CoinGecko IDs)
 const SUPPORTED_COINS = {
@@ -189,19 +303,20 @@ async function refreshPriceInBackground(coinId, env) {
   
   try {
     console.log(`🔄 [Background] Refreshing price for ${coinId}`);
-    const response = await fetch(url);
+    const raw = await rateLimitedFetch(url, {}, env, coingeckoId);
     
-    if (!response.ok) {
-      const rawBody = await response.text().catch(() => '');
-      console.error(`[Background] CoinGecko HTTP error ${response.status}:`, rawBody);
+    if (!raw || !raw.ok) {
+      if (raw && raw.status) {
+        console.error(`[Background] CoinGecko HTTP error ${raw.status}:`, raw.text || '');
+      }
       return;
     }
     
-    const data = await response.json();
+    const data = raw.json ?? (raw.text ? JSON.parse(raw.text) : null);
     const coinData = data[coingeckoId];
     
     if (!coinData) {
-      console.error(`[Background] CoinGecko missing coin data for ${coingeckoId}. Full response:`, JSON.stringify(data));
+      console.error(`[Background] CoinGecko missing coin data for ${coingeckoId}. Full response:`, raw.text || JSON.stringify(data));
       return;
     }
     
@@ -229,6 +344,11 @@ async function refreshPriceInBackground(coinId, env) {
       console.error(`[Background] Invalid price data for ${coingeckoId}:`, JSON.stringify(coinData));
     }
   } catch (error) {
+    // Gracefully handle backoff errors
+    if (error.code === 'backoff' || error.code === 'retries_exhausted') {
+      console.warn(`[Background] Suppressed upstream error for ${coinId}: ${error.message}`);
+      return;
+    }
     console.log(`❌ [Background] Failed to refresh ${coinId}:`, error);
   }
 }
@@ -239,20 +359,21 @@ async function fetchFreshPriceData(coinId, env) {
   
   try {
     console.log(`🚀 [Fresh] Fetching price for ${coinId}`);
-    const response = await fetch(url);
+    const raw = await rateLimitedFetch(url, {}, env, coingeckoId);
     
-    if (!response.ok) {
-      const rawBody = await response.text().catch(() => '');
-      console.error(`[Fresh] CoinGecko HTTP error ${response.status}:`, rawBody);
-      throw new Error(`CoinGecko API error: ${response.status} - ${rawBody}`);
+    if (!raw || !raw.ok) {
+      if (!raw) throw new Error('Empty upstream result');
+      const respText = raw.text || JSON.stringify(raw.json || {});
+      console.error(`[Fresh] CoinGecko HTTP error ${raw.status}:`, respText);
+      throw new Error(`CoinGecko API error: ${raw.status} - ${respText}`);
     }
     
-    const data = await response.json();
+    const data = raw.json ?? (raw.text ? JSON.parse(raw.text) : null);
     const coinData = data[coingeckoId];
     
     if (!coinData) {
-      console.error(`[Fresh] CoinGecko missing coin data for ${coingeckoId}. Full response:`, JSON.stringify(data));
-      throw new Error(`Invalid CoinGecko response: missing ${coingeckoId} in ${JSON.stringify(data)}`);
+      console.error(`[Fresh] CoinGecko missing coin data for ${coingeckoId}. Full response:`, raw.text || JSON.stringify(data));
+      throw new Error(`Invalid CoinGecko response: missing ${coingeckoId} in ${raw.text || JSON.stringify(data)}`);
     }
     
     if (!validatePriceData(coinData)) {
@@ -340,19 +461,20 @@ async function fetchFreshHistoryData(coinId, days, env) {
   
   try {
     console.log(`🚀 [Fresh History] Fetching history for ${coinId} (${days} days)`);
-    const response = await rateLimitedFetch(url, {}, env);
+    const raw = await rateLimitedFetch(url, {}, env, coingeckoId);
     
-    if (!response.ok) {
-      const rawBody = await response.text().catch(() => '');
-      console.error(`[Fresh History] CoinGecko HTTP error ${response.status}:`, rawBody);
-      throw new Error(`CoinGecko API error: ${response.status} - ${rawBody}`);
+    if (!raw || !raw.ok) {
+      if (!raw) throw new Error('Empty upstream result');
+      const respText = raw.text || JSON.stringify(raw.json || {});
+      console.error(`[Fresh History] CoinGecko HTTP error ${raw.status}:`, respText);
+      throw new Error(`CoinGecko API error: ${raw.status} - ${respText}`);
     }
     
-    const data = await response.json();
+    const data = raw.json ?? (raw.text ? JSON.parse(raw.text) : null);
     
     if (!validateHistoryData(data)) {
-      console.error(`[Fresh History] Invalid history data for ${coingeckoId}:`, JSON.stringify(data).substring(0, 500));
-      throw new Error(`Invalid CoinGecko response: ${JSON.stringify(data).substring(0, 200)}`);
+      console.error(`[Fresh History] Invalid history data for ${coingeckoId}:`, raw.text ? raw.text.substring(0, 500) : JSON.stringify(data).substring(0, 500));
+      throw new Error(`Invalid CoinGecko response: ${(raw.text || JSON.stringify(data)).substring(0, 200)}`);
     }
     
     // Transform data to expected format
@@ -386,10 +508,17 @@ async function fetchFreshHistoryData(coinId, days, env) {
 }
 
 async function refreshHistoryInBackground(coinId, days, env) {
-  // Don't await this - let it run in background
-  fetchFreshHistoryData(coinId, days, env).catch(error => {
-    console.log(`⚠️ [Background History] Failed to refresh ${coinId}: ${error.message}`);
-  });
+  try {
+    await fetchFreshHistoryData(coinId, days, env);
+    console.log(`✅ [Background History] Refreshed history for ${coinId}`);
+  } catch (error) {
+    // Gracefully handle backoff errors
+    if (error.code === 'backoff' || error.code === 'retries_exhausted') {
+      console.warn(`[Background History] Suppressed upstream error for ${coinId}: ${error.message}`);
+      return;
+    }
+    console.warn(`⚠️ [Background History] Failed to refresh ${coinId}: ${error.message}`);
+  }
 }
 
 // Data validation helpers
