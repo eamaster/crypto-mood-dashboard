@@ -15,36 +15,59 @@ const initialState = {
 // Create the store
 const { subscribe, set, update } = writable(initialState);
 
-// Per-coin client throttle (8s between fetches)
-const _lastPriceFetch = new Map();
-const _lastHistoryFetch = new Map();
+// Per-coin cached results (live in-memory). Keeps last successful payload so throttle can return it.
+const _lastPriceFetch = new Map();    // coinId -> { ts, data }
+const _lastHistoryFetch = new Map();  // coinId_days -> { ts, data }
+const THROTTLE_MS = 8000; // 8s
 
-// Helper: fetch with timeout and no-store cache (no custom headers for GET to avoid preflight)
+// Robust fetch with timeout and clear timeout correctly
 async function fetchWithTimeout(url, opts = {}, timeoutMs = 8000) {
     const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), timeoutMs);
+    const signal = controller.signal;
+    let timeoutId = null;
+    
     try {
-        const res = await fetch(url, {
-            cache: 'no-store',
-            signal: controller.signal,
-            ...opts
-        });
-        clearTimeout(id);
-        return res;
-    } catch (e) {
-        clearTimeout(id);
-        throw e;
+        const mergedOpts = { cache: 'no-store', ...opts, signal };
+        timeoutId = setTimeout(() => {
+            controller.abort(new DOMException('Request timed out', 'AbortError'));
+        }, timeoutMs);
+
+        const res = await fetch(url, mergedOpts);
+        clearTimeout(timeoutId);
+
+        // Convert non-2xx to an error with body text for easier debugging
+        if (!res.ok) {
+            let bodyText = '';
+            try { bodyText = await res.text(); } catch (e) { bodyText = String(e); }
+            const err = new Error(`HTTP ${res.status}: ${bodyText}`);
+            err.status = res.status;
+            err.body = bodyText;
+            throw err;
+        }
+
+        // Parse JSON safely but return both text/json in case caller wants raw
+        const text = await res.text().catch(() => '');
+        let json = null;
+        try { json = text ? JSON.parse(text) : null; } catch (e) { json = null; }
+        return { ok: true, status: res.status, text, json, headers: res.headers };
+    } catch (err) {
+        // Normalize AbortError so callers can detect it
+        if (err.name === 'AbortError' || err instanceof DOMException) {
+            const abortErr = new Error('AbortError: request aborted or timed out');
+            abortErr.name = 'AbortError';
+            throw abortErr;
+        }
+        throw err;
+    } finally {
+        if (timeoutId) clearTimeout(timeoutId);
     }
 }
 
 // Helper functions to fetch data
 const fetchCoins = async () => {
     try {
-        const response = await fetchWithTimeout(`${WORKER_URL}/coins`);
-        if (!response.ok) {
-            throw new Error('Failed to fetch coins list');
-        }
-        const coins = await response.json();
+        const res = await fetchWithTimeout(`${WORKER_URL}/coins`, { method: 'GET' });
+        const coins = res.json ?? JSON.parse(res.text || '[]');
         if (!validateCoins(coins)) {
             throw new Error('Invalid coins data');
         }
@@ -55,89 +78,86 @@ const fetchCoins = async () => {
     }
 };
 
-const fetchPriceInternal = async (coinId) => {
+const fetchPrice = async (coinId) => {
+    const url = `${WORKER_URL}/price?coin=${encodeURIComponent(coinId)}&_=${Date.now()}`;
     try {
-        console.log(`🔍 Fetching price for ${coinId} from ${WORKER_URL}/price`);
-        const response = await fetchWithTimeout(`${WORKER_URL}/price?coin=${coinId}&_=${Date.now()}`);
-        console.log(`📊 Price response status: ${response.status}, headers:`, {
-            cache: response.headers.get('cache-control'),
-            xcache: response.headers.get('X-Cache-Status'),
-            xsource: response.headers.get('X-Cache-Source'),
-            xdoage: response.headers.get('X-DO-Age'),
-            xlat: response.headers.get('X-Latency-ms')
+        console.log(`🔍 Fetching price for ${coinId}`);
+        const res = await fetchWithTimeout(url, { method: 'GET', credentials: 'omit' }, 8000);
+        console.log(`📊 Price response: ${res.status}, headers:`, {
+            cache: res.headers.get('cache-control'),
+            xcache: res.headers.get('X-Cache-Status'),
+            xsource: res.headers.get('X-Cache-Source'),
+            xdoage: res.headers.get('X-DO-Age'),
+            xlat: res.headers.get('X-Latency-ms')
         });
         
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error(`❌ Price API error: ${response.status} - ${errorText}`);
-            throw new Error(`Failed to fetch price data. Status: ${response.status}`);
-        }
-        
-        const data = await response.json();
+        const data = res.json ?? JSON.parse(res.text || '{}');
         console.log(`✅ Price data received:`, data);
         
-        if (data.error) {
-            throw new Error(data.error);
+        // Basic validation
+        if (!data || typeof data.price !== 'number') {
+            throw new Error('Invalid price payload');
         }
         if (!validatePrice(data)) {
             console.error(`❌ Invalid price data:`, data);
             throw new Error('Invalid price data');
         }
+        
+        // Update cache
+        _lastPriceFetch.set(coinId, { ts: Date.now(), data });
         return data;
-    } catch (error) {
-        console.error(`❌ Error fetching price for ${coinId}:`, error);
-        throw new Error(`Failed to fetch price data for ${coinId}.`);
+    } catch (err) {
+        if (err.name === 'AbortError') {
+            console.warn('fetchPrice aborted:', err.message);
+            throw err;
+        }
+        console.error(`❌ Error fetching price for ${coinId}:`, err);
+        throw err;
     }
 };
 
-// Client-side throttle wrapper (8s per coin to prevent bursts)
-const fetchPrice = async (coinId, force = false) => {
+// Throttled wrapper for fetchPrice (returns cached data instead of throwing)
+const fetchPriceThrottled = async (coinId, force = false) => {
     const now = Date.now();
-    const last = _lastPriceFetch.get(coinId) || 0;
-    
-    // Skip if last fetch within 8s (unless forced)
-    if (!force && now - last < 8000) {
-        const waitTime = Math.floor((8000 - (now - last)) / 1000);
-        console.log(`⏱️ Client throttle: skipping price fetch for ${coinId} (retry in ${waitTime}s)`);
-        throw new Error(`Please wait ${waitTime} seconds before refreshing ${coinId}`);
+    const last = _lastPriceFetch.get(coinId);
+
+    if (!force && last && (now - last.ts) < THROTTLE_MS) {
+        console.log(`⏱️ Client throttle: returning cached price for ${coinId}`);
+        return last.data;
     }
-    
-    _lastPriceFetch.set(coinId, now);
+
     try {
-        return await fetchPriceInternal(coinId);
-    } finally {
-        setTimeout(() => _lastPriceFetch.delete(coinId), 8000);
+        const data = await fetchPrice(coinId);
+        return data;
+    } catch (err) {
+        // If we have a cached value, return stale value instead of throwing
+        if (last && last.data) {
+            console.warn(`fetchPriceThrottled: upstream failed, returning cached data for ${coinId}`, err.message);
+            return last.data;
+        }
+        // No cached data: propagate error so UI shows network error
+        throw err;
     }
 };
 
-const fetchHistoryInternal = async (coinId) => {
+const fetchHistory = async (coinId, days = 7) => {
+    const url = `${WORKER_URL}/history?coin=${encodeURIComponent(coinId)}&days=${days}&_=${Date.now()}`;
     try {
-        console.log(`🔍 Fetching history for ${coinId} from ${WORKER_URL}/history`);
-        const response = await fetchWithTimeout(`${WORKER_URL}/history?coin=${coinId}&days=7&_=${Date.now()}`);
-        console.log(`📊 History response status: ${response.status}, headers:`, {
-            cache: response.headers.get('cache-control'),
-            xcache: response.headers.get('X-Cache-Status'),
-            xsource: response.headers.get('X-Cache-Source'),
-            xdoage: response.headers.get('X-DO-Age'),
-            xlat: response.headers.get('X-Latency-ms')
+        console.log(`🔍 Fetching history for ${coinId}`);
+        const res = await fetchWithTimeout(url, { method: 'GET', credentials: 'omit' }, 10000);
+        console.log(`📊 History response: ${res.status}, headers:`, {
+            cache: res.headers.get('cache-control'),
+            xcache: res.headers.get('X-Cache-Status'),
+            xsource: res.headers.get('X-Cache-Source'),
+            xdoage: res.headers.get('X-DO-Age'),
+            xlat: res.headers.get('X-Latency-ms')
         });
         
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error(`❌ History API error: ${response.status} - ${errorText}`);
-            throw new Error(`Failed to fetch history data. Status: ${response.status}`);
-        }
-        
-        const data = await response.json();
+        const data = res.json ?? JSON.parse(res.text || '{}');
         console.log(`✅ History data received:`, data);
         
-        if (data.error) {
-            throw new Error(data.error);
-        }
-        
-        if (!data.prices || !Array.isArray(data.prices)) {
-            console.error(`❌ Invalid history data format:`, data);
-            throw new Error('Invalid history data format');
+        if (!data || !Array.isArray(data.prices)) {
+            throw new Error('Invalid history payload');
         }
         
         const historyData = data.prices.map(item => ({
@@ -149,76 +169,76 @@ const fetchHistoryInternal = async (coinId) => {
             console.error(`❌ Invalid history data after transformation:`, historyData);
             throw new Error('Invalid history data');
         }
+        
+        // Update cache
+        _lastHistoryFetch.set(`${coinId}_${days}`, { ts: Date.now(), data: historyData });
         return historyData;
-    } catch (error) {
-        console.error(`❌ Error fetching history for ${coinId}:`, error);
-        throw new Error(`Failed to fetch history data for ${coinId}.`);
+    } catch (err) {
+        if (err.name === 'AbortError') {
+            console.warn('fetchHistory aborted:', err.message);
+            throw err;
+        }
+        console.error(`❌ Error fetching history for ${coinId}:`, err);
+        throw err;
     }
 };
 
-// Client-side throttle wrapper for history (8s per coin to prevent bursts)
-const fetchHistory = async (coinId, force = false) => {
+// Throttled wrapper for fetchHistory (returns cached data instead of throwing)
+const fetchHistoryThrottled = async (coinId, days = 7, force = false) => {
+    const key = `${coinId}_${days}`;
     const now = Date.now();
-    const last = _lastHistoryFetch.get(coinId) || 0;
-    
-    // Skip if last fetch within 8s (unless forced)
-    if (!force && now - last < 8000) {
-        const waitTime = Math.floor((8000 - (now - last)) / 1000);
-        console.log(`⏱️ Client throttle: skipping history fetch for ${coinId} (retry in ${waitTime}s)`);
-        throw new Error(`Please wait ${waitTime} seconds before refreshing ${coinId}`);
+    const last = _lastHistoryFetch.get(key);
+
+    if (!force && last && (now - last.ts) < THROTTLE_MS) {
+        console.log(`⏱️ Client throttle: returning cached history for ${coinId}`);
+        return last.data;
     }
-    
-    _lastHistoryFetch.set(coinId, now);
+
     try {
-        return await fetchHistoryInternal(coinId);
-    } finally {
-        setTimeout(() => _lastHistoryFetch.delete(coinId), 8000);
+        const data = await fetchHistory(coinId, days);
+        return data;
+    } catch (err) {
+        // If we have a cached value, return stale value instead of throwing
+        if (last && last.data) {
+            console.warn(`fetchHistoryThrottled: upstream failed, returning cached history for ${key}`, err.message);
+            return last.data;
+        }
+        // No cached data: propagate error so UI shows network error
+        throw err;
     }
 };
 
 const fetchNews = async (coinId) => {
+    const url = `${WORKER_URL}/news?coin=${encodeURIComponent(coinId)}&_=${Date.now()}`;
     try {
-        const response = await fetchWithTimeout(`${WORKER_URL}/news?coin=${coinId}&_=${Date.now()}`);
-        if (!response.ok) {
-            throw new Error(`Failed to fetch news for ${coinId}. Status: ${response.status}`);
-        }
-        const data = await response.json();
-        if (data.error) {
-            throw new Error(data.error);
-        }
+        const res = await fetchWithTimeout(url, { method: 'GET', credentials: 'omit' }, 8000);
+        const data = res.json ?? JSON.parse(res.text || '{}');
         if (!validateNews(data)) {
             throw new Error('Invalid news data');
         }
         return data;
     } catch (error) {
         console.error(`Error fetching news for ${coinId}:`, error);
-        throw new Error(`Failed to fetch news for ${coinId}.`);
+        throw error;
     }
 };
 
 const fetchSentiment = async (headlines) => {
+    const url = `${WORKER_URL}/sentiment`;
     try {
-        const response = await fetchWithTimeout(`${WORKER_URL}/sentiment`, {
+        const res = await fetchWithTimeout(url, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ headlines })
-        });
-        if (!response.ok) {
-            throw new Error('Failed to fetch sentiment data');
-        }
-        const data = await response.json();
-        if (data.error) {
-            throw new Error(data.error);
-        }
+        }, 10000);
+        const data = res.json ?? JSON.parse(res.text || '{}');
         if (!validateSentiment(data)) {
             throw new Error('Invalid sentiment data');
         }
         return data;
     } catch (error) {
         console.error('Error fetching sentiment:', error);
-        return null;
+        return null; // Sentiment is optional, return null on failure
     }
 };
 
@@ -229,19 +249,40 @@ export const initStore = async () => {
     const selectedCoin = coins.find(c => c.id === 'bitcoin') ? 'bitcoin' : (coins[0]?.id || 'bitcoin');
 
     try {
-        // Parallelize price & history fetches (they don't depend on each other)
-        // force=true on initial load to bypass throttle
-        const [priceData, historyData] = await Promise.all([
-            fetchPrice(selectedCoin, true),
-            fetchHistory(selectedCoin, true)
-        ]);
+        // Use Promise.allSettled to tolerate partial failures
+        const pricePromise = fetchPriceThrottled(selectedCoin, true);
+        const historyPromise = fetchHistoryThrottled(selectedCoin, 7, true);
 
-        // News and sentiment can run after price/history are loaded
-        const newsData = await fetchNews(selectedCoin);
+        const settled = await Promise.allSettled([pricePromise, historyPromise]);
 
+        const priceResult = settled[0];
+        const historyResult = settled[1];
+
+        let priceData = null;
+        let historyData = null;
+
+        if (priceResult.status === 'fulfilled') {
+            priceData = priceResult.value;
+        } else {
+            console.error('Price fetch failed:', priceResult.reason?.message || priceResult.reason);
+        }
+
+        if (historyResult.status === 'fulfilled') {
+            historyData = historyResult.value;
+        } else {
+            console.error('History fetch failed:', historyResult.reason?.message || historyResult.reason);
+        }
+
+        // Fetch news and sentiment (optional, don't block on failures)
+        let newsData = null;
         let sentimentData = null;
-        if (newsData?.headlines) {
-            sentimentData = await fetchSentiment(newsData.headlines);
+        try {
+            newsData = await fetchNews(selectedCoin);
+            if (newsData?.headlines) {
+                sentimentData = await fetchSentiment(newsData.headlines);
+            }
+        } catch (newsErr) {
+            console.warn('News/sentiment fetch failed:', newsErr.message);
         }
 
         set({
@@ -249,9 +290,9 @@ export const initStore = async () => {
             selectedCoin,
             priceData,
             historyData,
-            newsData: { ...newsData, sentiment: sentimentData },
+            newsData: newsData ? { ...newsData, sentiment: sentimentData } : null,
             loading: false,
-            error: null
+            error: (!priceData && !historyData) ? 'Failed to load price data' : null
         });
     } catch (error) {
         console.error('❌ Failed to initialize store:', error);
@@ -281,31 +322,49 @@ export const setCoin = async (coinId) => {
     }));
 
     try {
-        // Clear throttle for this coin when user explicitly switches
-        _lastPriceFetch.delete(coinId);
-        _lastHistoryFetch.delete(coinId);
-        
-        // Parallelize price & history fetches (they don't depend on each other)
-        const [priceData, historyData] = await Promise.all([
-            fetchPrice(coinId, true), // force=true bypasses throttle
-            fetchHistory(coinId, true)
-        ]);
+        // Use Promise.allSettled to tolerate partial failures
+        const pricePromise = fetchPriceThrottled(coinId, true); // force=true bypasses throttle
+        const historyPromise = fetchHistoryThrottled(coinId, 7, true);
 
-        // News and sentiment can run after price/history are loaded
-        const newsData = await fetchNews(coinId);
+        const settled = await Promise.allSettled([pricePromise, historyPromise]);
 
+        const priceResult = settled[0];
+        const historyResult = settled[1];
+
+        let priceData = null;
+        let historyData = null;
+
+        if (priceResult.status === 'fulfilled') {
+            priceData = priceResult.value;
+        } else {
+            console.error('Price fetch failed:', priceResult.reason?.message || priceResult.reason);
+        }
+
+        if (historyResult.status === 'fulfilled') {
+            historyData = historyResult.value;
+        } else {
+            console.error('History fetch failed:', historyResult.reason?.message || historyResult.reason);
+        }
+
+        // Fetch news and sentiment (optional, don't block on failures)
+        let newsData = null;
         let sentimentData = null;
-        if (newsData?.headlines) {
-            sentimentData = await fetchSentiment(newsData.headlines);
+        try {
+            newsData = await fetchNews(coinId);
+            if (newsData?.headlines) {
+                sentimentData = await fetchSentiment(newsData.headlines);
+            }
+        } catch (newsErr) {
+            console.warn('News/sentiment fetch failed:', newsErr.message);
         }
 
         update(state => ({
             ...state,
             priceData,
             historyData,
-            newsData: { ...newsData, sentiment: sentimentData },
+            newsData: newsData ? { ...newsData, sentiment: sentimentData } : null,
             loading: false,
-            error: null
+            error: (!priceData && !historyData) ? 'Failed to load price data' : null
         }));
     } catch (error) {
         console.error(`❌ Error in setCoin for ${coinId}:`, error);
