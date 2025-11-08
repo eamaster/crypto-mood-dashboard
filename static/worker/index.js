@@ -1,6 +1,6 @@
 // =============================================================================
 // Crypto Mood Dashboard - Cloudflare Worker
-// Handles API calls to CoinGecko, NewsAPI.org, and Cohere AI
+// Handles API calls to CoinCap, NewsAPI.org, and Cohere AI
 // =============================================================================
 
 // CORS headers for frontend requests
@@ -41,8 +41,18 @@ function errorResponse(message, status = 400) {
   return jsonResponse({ error: message }, status);
 }
 
-// CoinGecko API configuration
-const COINGECKO_API_BASE = 'https://api.coingecko.com/api/v3';
+// CoinCap API configuration
+const COINCAP_API_BASE = 'https://api.coincap.io/v2';
+const COINCAP_BATCH_ENDPOINT = `${COINCAP_API_BASE}/assets`; // supports ?ids=bitcoin,ethereum,...
+
+// Helper to attach CoinCap API key for authenticated requests (500 rpm with Pro key)
+function coinCapAuthHeaders(env) {
+  const headers = { 'Accept': 'application/json' };
+  if (env && env.COINCAP_API_KEY) {
+    headers['Authorization'] = `Bearer ${env.COINCAP_API_KEY}`;
+  }
+  return headers;
+}
 
 // Coalesce inflight upstream calls per URL (avoid duplicate fetches)
 const INFLIGHT_UPSTREAM = {}; // key: url -> Promise<{ ok, status, text, json? }>
@@ -82,28 +92,28 @@ async function getBackoff(kv, coingeckoId) {
   }
 }
 
-// Supported cryptocurrencies mapping (CoinGecko IDs)
+// Supported cryptocurrencies mapping (CoinCap IDs)
 const SUPPORTED_COINS = {
-  'bitcoin': { id: 'bitcoin', name: 'Bitcoin', symbol: 'BTC', coingecko_id: 'bitcoin' },
-  'ethereum': { id: 'ethereum', name: 'Ethereum', symbol: 'ETH', coingecko_id: 'ethereum' },
-  'litecoin': { id: 'litecoin', name: 'Litecoin', symbol: 'LTC', coingecko_id: 'litecoin' },
-  'bitcoin-cash': { id: 'bitcoin-cash', name: 'Bitcoin Cash', symbol: 'BCH', coingecko_id: 'bitcoin-cash' },
-  'cardano': { id: 'cardano', name: 'Cardano', symbol: 'ADA', coingecko_id: 'cardano' },
-  'ripple': { id: 'ripple', name: 'Ripple', symbol: 'XRP', coingecko_id: 'ripple' },
-  'dogecoin': { id: 'dogecoin', name: 'Dogecoin', symbol: 'DOGE', coingecko_id: 'dogecoin' },
-  'polkadot': { id: 'polkadot', name: 'Polkadot', symbol: 'DOT', coingecko_id: 'polkadot' },
-  'chainlink': { id: 'chainlink', name: 'Chainlink', symbol: 'LINK', coingecko_id: 'chainlink' },
-  'stellar': { id: 'stellar', name: 'Stellar', symbol: 'XLM', coingecko_id: 'stellar' },
-  'monero': { id: 'monero', name: 'Monero', symbol: 'XMR', coingecko_id: 'monero' },
-  'tezos': { id: 'tezos', name: 'Tezos', symbol: 'XTZ', coingecko_id: 'tezos' },
-  'eos': { id: 'eos', name: 'EOS', symbol: 'EOS', coingecko_id: 'eos' },
-  'zcash': { id: 'zcash', name: 'Zcash', symbol: 'ZEC', coingecko_id: 'zcash' },
-  'dash': { id: 'dash', name: 'Dash', symbol: 'DASH', coingecko_id: 'dash' },
-  'solana': { id: 'solana', name: 'Solana', symbol: 'SOL', coingecko_id: 'solana' },
+  'bitcoin': { id: 'bitcoin', name: 'Bitcoin', symbol: 'BTC', coincap_id: 'bitcoin' },
+  'ethereum': { id: 'ethereum', name: 'Ethereum', symbol: 'ETH', coincap_id: 'ethereum' },
+  'litecoin': { id: 'litecoin', name: 'Litecoin', symbol: 'LTC', coincap_id: 'litecoin' },
+  'bitcoin-cash': { id: 'bitcoin-cash', name: 'Bitcoin Cash', symbol: 'BCH', coincap_id: 'bitcoin-cash' },
+  'cardano': { id: 'cardano', name: 'Cardano', symbol: 'ADA', coincap_id: 'cardano' },
+  'ripple': { id: 'ripple', name: 'Ripple', symbol: 'XRP', coincap_id: 'xrp' },
+  'dogecoin': { id: 'dogecoin', name: 'Dogecoin', symbol: 'DOGE', coincap_id: 'dogecoin' },
+  'polkadot': { id: 'polkadot', name: 'Polkadot', symbol: 'DOT', coincap_id: 'polkadot' },
+  'chainlink': { id: 'chainlink', name: 'Chainlink', symbol: 'LINK', coincap_id: 'chainlink' },
+  'stellar': { id: 'stellar', name: 'Stellar', symbol: 'XLM', coincap_id: 'stellar' },
+  'monero': { id: 'monero', name: 'Monero', symbol: 'XMR', coincap_id: 'monero' },
+  'tezos': { id: 'tezos', name: 'Tezos', symbol: 'XTZ', coincap_id: 'tezos' },
+  'eos': { id: 'eos', name: 'EOS', symbol: 'EOS', coincap_id: 'eos' },
+  'zcash': { id: 'zcash', name: 'Zcash', symbol: 'ZEC', coincap_id: 'zcash' },
+  'dash': { id: 'dash', name: 'Dash', symbol: 'DASH', coincap_id: 'dash' },
+  'solana': { id: 'solana', name: 'Solana', symbol: 'SOL', coincap_id: 'solana' },
 };
 
-// rateLimitedFetch: coalescing + retries + per-coingecko backoff
-async function rateLimitedFetch(url, options = {}, env, coingeckoId) {
+// rateLimitedFetch: coalescing + retries + per-coincap backoff
+async function rateLimitedFetch(url, options = {}, env, coincapId) {
   // Coalesce: if there is already an inflight fetch for this url, await it
   if (INFLIGHT_UPSTREAM[url]) {
     try {
@@ -122,10 +132,10 @@ async function rateLimitedFetch(url, options = {}, env, coingeckoId) {
 
     // If K/V says we must backoff, do not call upstream
     const now = Date.now();
-    const backoffUntil = coingeckoId ? await getBackoff(env.RATE_LIMIT_KV, coingeckoId) : 0;
+    const backoffUntil = coincapId ? await getBackoff(env.RATE_LIMIT_KV, coincapId) : 0;
     if (backoffUntil && backoffUntil > now) {
       const waitMs = backoffUntil - now;
-      console.warn(`[rateLimitedFetch] Backoff in effect for ${coingeckoId}, ${Math.ceil(waitMs/1000)}s left`);
+      console.warn(`[rateLimitedFetch] Backoff in effect for ${coincapId}, ${Math.ceil(waitMs/1000)}s left`);
       const err = new Error('backoff-in-effect');
       err.code = 'backoff';
       err.until = backoffUntil;
@@ -161,9 +171,9 @@ async function rateLimitedFetch(url, options = {}, env, coingeckoId) {
           const baseMs = 1000 * Math.pow(2, attempt);
           const backoffMs = ra ?? jitter(Math.min(16000, baseMs));
           const until = Date.now() + backoffMs;
-          if (coingeckoId && env.RATE_LIMIT_KV) {
-            await setBackoff(env.RATE_LIMIT_KV, coingeckoId, until);
-            console.warn(`[rateLimitedFetch] 429 received. Setting KV backoff for ${coingeckoId} until ${new Date(until).toISOString()} (${Math.ceil(backoffMs/1000)}s)`);
+          if (coincapId && env.RATE_LIMIT_KV) {
+            await setBackoff(env.RATE_LIMIT_KV, coincapId, until);
+            console.warn(`[rateLimitedFetch] 429 received. Setting KV backoff for ${coincapId} until ${new Date(until).toISOString()} (${Math.ceil(backoffMs/1000)}s)`);
           }
           if (attempt < maxAttempts) {
             console.log(`[rateLimitedFetch] Waiting ${Math.ceil(backoffMs/1000)}s before retry...`);
@@ -214,13 +224,109 @@ async function rateLimitedFetch(url, options = {}, env, coingeckoId) {
   }
 }
 
-// Data validation helpers
+// Fetch asset data from CoinCap (batched API call for one or more coins)
+async function fetchAssetsBatch(idsCsv, env) {
+  const url = `${COINCAP_BATCH_ENDPOINT}?ids=${encodeURIComponent(idsCsv)}`;
+  const fetchOpts = {
+    method: 'GET',
+    headers: coinCapAuthHeaders(env),
+    cf: { cacheTtlByStatus: { "200-299": 60 }, cacheEverything: true }
+  };
+  
+  try {
+    const raw = await rateLimitedFetch(url, fetchOpts, env, idsCsv.split(',')[0]);
+    
+    if (!raw || !raw.ok) {
+      const body = raw?.text || JSON.stringify(raw?.json || {});
+      console.error(`[fetchAssetsBatch] CoinCap API error ${raw?.status}:`, body);
+      throw new Error(`CoinCap API error: ${raw?.status || 'no-response'} - ${body}`);
+    }
+    
+    const data = raw.json || (raw.text ? JSON.parse(raw.text) : null);
+    const items = (data && data.data) || [];
+    
+    // Build normalized map
+    const resultMap = {};
+    for (const it of items) {
+      const price = Number(it.priceUsd || 0);
+      const change24h = Number(it.changePercent24Hr || 0);
+      const market_cap = Number(it.marketCapUsd || 0);
+      const volume_24h = Number(it.volumeUsd24Hr || 0);
+      
+      resultMap[it.id.toLowerCase()] = {
+        coin: it.id.toLowerCase(),
+        price: Math.round(price * 100) / 100,
+        change24h: Math.round(change24h * 100) / 100,
+        market_cap,
+        volume_24h,
+        symbol: it.symbol || it.id.toUpperCase(),
+        timestamp: new Date().toISOString(),
+        source: 'coincap'
+      };
+    }
+    
+    console.log(`✅ [fetchAssetsBatch] Got ${items.length} assets from CoinCap`);
+    return resultMap;
+  } catch (err) {
+    console.error(`❌ [fetchAssetsBatch] Failed:`, err.message);
+    throw err;
+  }
+}
+
+// Fetch historical data from CoinCap for a single coin
+async function fetchAssetHistory(coinId, days, env) {
+  const interval = days >= 7 ? 'd1' : 'h1';
+  const end = Date.now();
+  const start = end - (days * 24 * 60 * 60 * 1000);
+  const url = `${COINCAP_API_BASE}/assets/${encodeURIComponent(coinId)}/history?interval=${encodeURIComponent(interval)}&start=${start}&end=${end}`;
+  
+  const fetchOpts = {
+    method: 'GET',
+    headers: coinCapAuthHeaders(env),
+    cf: { cacheTtlByStatus: { "200-299": 60 }, cacheEverything: true }
+  };
+  
+  try {
+    console.log(`🚀 [fetchAssetHistory] Fetching ${days}-day history for ${coinId}`);
+    const raw = await rateLimitedFetch(url, fetchOpts, env, coinId);
+    
+    if (!raw || !raw.ok) {
+      const body = raw?.text || JSON.stringify(raw?.json || {});
+      console.error(`[fetchAssetHistory] CoinCap history API error ${raw?.status}:`, body);
+      throw new Error(`CoinCap history API error: ${raw?.status || 'no-response'} - ${body}`);
+    }
+    
+    const data = raw.json || (raw.text ? JSON.parse(raw.text) : null);
+    const points = (data && data.data) ? data.data.map(p => ({
+      timestamp: new Date(Number(p.time)).toISOString(),
+      price: Math.round(Number(p.priceUsd) * 100) / 100
+    })) : [];
+    
+    if (points.length === 0) {
+      throw new Error(`No history data returned for ${coinId}`);
+    }
+    
+    console.log(`✅ [fetchAssetHistory] Got ${points.length} points for ${coinId}`);
+    return {
+      coin: coinId,
+      prices: points,
+      days,
+      symbol: SUPPORTED_COINS[coinId]?.symbol || coinId.toUpperCase(),
+      source: 'coincap',
+      note: 'Real market data from CoinCap'
+    };
+  } catch (err) {
+    console.error(`❌ [fetchAssetHistory] Failed:`, err.message);
+    throw err;
+  }
+}
+
+// Data validation helpers for CoinCap API
 function validatePriceData(data) {
   if (!data || typeof data !== 'object') return false;
-  if (typeof data.usd !== 'number' || data.usd <= 0) return false;
-  // usd_24h_change can be null or undefined, we allow that
-  if (data.usd_24h_change !== null && data.usd_24h_change !== undefined && typeof data.usd_24h_change !== 'number') return false;
-  // Relaxed validation: allow any positive price
+  if (typeof data.price !== 'number' || data.price <= 0) return false;
+  if (typeof data.change24h !== 'number') return false;
+  if (typeof data.symbol !== 'string') return false;
   return true;
 }
 
@@ -228,13 +334,12 @@ function validateHistoryData(data) {
   if (!data || !data.prices || !Array.isArray(data.prices)) return false;
   if (data.prices.length === 0) return false;
   
-  // Check if all price points are valid
+  // Check if all price points have timestamp and price
   return data.prices.every(point => 
-    Array.isArray(point) && 
-    point.length === 2 && 
-    typeof point[0] === 'number' && 
-    typeof point[1] === 'number' && 
-    point[1] > 0
+    point && 
+    point.timestamp && 
+    typeof point.price === 'number' && 
+    point.price > 0
   );
 }
 
@@ -267,41 +372,28 @@ async function handlePrice(request, env) {
   const start = Date.now();
   try {
     const url = new URL(request.url);
-    const coinId = url.searchParams.get('coin') || 'bitcoin';
+    const coinId = (url.searchParams.get('coin') || 'bitcoin').toLowerCase();
     
     if (!SUPPORTED_COINS[coinId]) {
       return errorResponse(`Unsupported coin: ${coinId}`);
     }
     
-    const coingeckoId = SUPPORTED_COINS[coinId].coingecko_id;
-    const apiUrl = `${COINGECKO_API_BASE}/simple/price?ids=${coingeckoId}&vs_currencies=usd&include_24hr_change=true&include_market_cap=true&include_24hr_vol=true`;
-    
-    console.log(`[Price] Fetching ${coinId} from CoinGecko...`);
+    const coincapId = SUPPORTED_COINS[coinId].coincap_id;
+    console.log(`[Price] Fetching ${coinId} from CoinCap...`);
     
     try {
-      // Fetch current price from CoinGecko using rateLimitedFetch
-      const raw = await rateLimitedFetch(apiUrl, {}, env, coingeckoId);
+      // Fetch current price from CoinCap
+      const resultMap = await fetchAssetsBatch(coincapId, env);
+      const priceData = resultMap[coincapId];
       
-      if (!raw || !raw.ok) {
-        if (!raw) throw new Error('Empty upstream result');
-        const respText = raw.text || JSON.stringify(raw.json || {});
-        console.error(`[Price] CoinGecko HTTP error ${raw.status}:`, respText);
-        throw new Error(`CoinGecko API error: ${raw.status} - ${respText}`);
+      if (!priceData) {
+        throw new Error(`No price data for ${coincapId} in CoinCap response`);
       }
-      
-      const data = raw.json ?? (raw.text ? JSON.parse(raw.text) : null);
-      
-      if (!data[coingeckoId]) {
-        console.error(`[Price] CoinGecko missing coin data for ${coingeckoId}. Full response:`, raw.text || JSON.stringify(data));
-        throw new Error(`Invalid CoinGecko response: missing ${coingeckoId} in ${raw.text || JSON.stringify(data)}`);
-      }
-      
-      const coinData = data[coingeckoId];
       
       // Validate price data
-      if (!validatePriceData(coinData)) {
-        console.error(`[Price] Invalid price data for ${coingeckoId}:`, JSON.stringify(coinData));
-        throw new Error(`Invalid price data: ${JSON.stringify(coinData)}`);
+      if (!validatePriceData(priceData)) {
+        console.error(`[Price] Invalid price data for ${coincapId}:`, JSON.stringify(priceData));
+        throw new Error(`Invalid price data: ${JSON.stringify(priceData)}`);
       }
       
       const headers = {
@@ -311,27 +403,17 @@ async function handlePrice(request, env) {
         'X-Latency-ms': String(Date.now() - start)
       };
       
-      console.log(`✅ [Price] Got ${coinId} price: $${coinData.usd}, latency=${Date.now()-start}ms`);
+      console.log(`✅ [Price] Got ${coinId} price: $${priceData.price}, latency=${Date.now()-start}ms`);
       
-      return jsonResponse({
-        coin: coinId,
-        price: coinData.usd,
-        change24h: coinData.usd_24h_change || 0,
-        market_cap: coinData.usd_market_cap || null,
-        volume_24h: coinData.usd_24h_vol || null,
-        symbol: SUPPORTED_COINS[coinId].symbol,
-        timestamp: new Date().toISOString(),
-        source: 'coingecko'
-      }, 200, headers);
+      return jsonResponse(priceData, 200, headers);
     } catch (fetchError) {
       // If upstream fails, this is where we would serve stale-if-error
-      // For now, return the error
       throw fetchError;
     }
     
   } catch (error) {
     console.error('❌ [Price] Error:', error);
-    const status = (error.message && error.message.includes('CoinGecko')) ? 502 : 500;
+    const status = (error.message && error.message.includes('CoinCap')) ? 502 : 500;
     return jsonResponse({ 
       error: 'Failed to fetch price data', 
       details: error.message || 'unknown' 
@@ -343,44 +425,27 @@ async function handleHistory(request, env) {
   const start = Date.now();
   try {
     const url = new URL(request.url);
-    const coinId = url.searchParams.get('coin') || 'bitcoin';
+    const coinId = (url.searchParams.get('coin') || 'bitcoin').toLowerCase();
     const days = Math.min(parseInt(url.searchParams.get('days')) || 7, 30); // Max 30 days
     
     if (!SUPPORTED_COINS[coinId]) {
       return errorResponse(`Unsupported coin: ${coinId}`);
     }
     
-    const coingeckoId = SUPPORTED_COINS[coinId].coingecko_id;
-    const apiUrl = `${COINGECKO_API_BASE}/coins/${coingeckoId}/market_chart?vs_currency=usd&days=${days}&interval=daily`;
-    
-    console.log(`[History] Fetching ${coinId} history (${days} days) from CoinGecko...`);
+    const coincapId = SUPPORTED_COINS[coinId].coincap_id;
+    console.log(`[History] Fetching ${coinId} history (${days} days) from CoinCap...`);
     
     try {
-      // Fetch historical price data from CoinGecko using rateLimitedFetch
-      const raw = await rateLimitedFetch(apiUrl, {}, env, coingeckoId);
-      
-      if (!raw || !raw.ok) {
-        if (!raw) throw new Error('Empty upstream result');
-        const respText = raw.text || JSON.stringify(raw.json || {});
-        console.error(`[History] CoinGecko HTTP error ${raw.status}:`, respText);
-        throw new Error(`CoinGecko API error: ${raw.status} - ${respText}`);
-      }
-      
-      const data = raw.json ?? (raw.text ? JSON.parse(raw.text) : null);
+      // Fetch historical price data from CoinCap
+      const historyData = await fetchAssetHistory(coincapId, days, env);
       
       // Validate historical data
-      if (!validateHistoryData(data)) {
-        console.error(`[History] Invalid history data for ${coingeckoId}:`, raw.text ? raw.text.substring(0, 500) : JSON.stringify(data).substring(0, 500));
-        throw new Error(`Invalid history data: ${(raw.text || JSON.stringify(data)).substring(0, 200)}`);
+      if (!validateHistoryData(historyData)) {
+        console.error(`[History] Invalid history data for ${coincapId}:`, JSON.stringify(historyData).substring(0, 500));
+        throw new Error(`Invalid history data: ${JSON.stringify(historyData).substring(0, 200)}`);
       }
       
-      // Transform data to expected format
-      const prices = data.prices.map(([timestamp, price]) => ({
-          timestamp: new Date(timestamp).toISOString(),
-          price: Math.round(price * 100) / 100, // Round to 2 decimal places
-      }));
-      
-      const lastPrice = prices.length > 0 ? prices[prices.length - 1] : null;
+      const lastPrice = historyData.prices.length > 0 ? historyData.prices[historyData.prices.length - 1] : null;
       const dataTs = lastPrice?.timestamp ? new Date(lastPrice.timestamp).getTime() : null;
       const xdoage = dataTs ? String(Math.floor((Date.now() - dataTs) / 1000)) : '';
       
@@ -392,16 +457,9 @@ async function handleHistory(request, env) {
         'X-Latency-ms': String(Date.now() - start)
       };
       
-      console.log(`✅ [History] Got ${coinId} history (${prices.length} points), latency=${Date.now()-start}ms`);
+      console.log(`✅ [History] Got ${coinId} history (${historyData.prices.length} points), latency=${Date.now()-start}ms`);
       
-      return jsonResponse({
-        coin: coinId,
-        prices: prices,
-        days: days,
-        symbol: SUPPORTED_COINS[coinId].symbol,
-        source: 'coingecko',
-        note: 'Real market data from CoinGecko'
-      }, 200, headers);
+      return jsonResponse(historyData, 200, headers);
     } catch (fetchError) {
       // If upstream fails, this is where we would serve stale-if-error
       throw fetchError;
@@ -409,7 +467,7 @@ async function handleHistory(request, env) {
     
   } catch (error) {
     console.error('❌ [History] Error:', error);
-    const status = (error.message && error.message.includes('CoinGecko')) ? 502 : 500;
+    const status = (error.message && error.message.includes('CoinCap')) ? 502 : 500;
     return jsonResponse({ 
       error: 'Failed to fetch price history', 
       details: error.message || 'unknown' 

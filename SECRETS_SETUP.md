@@ -8,22 +8,29 @@ This guide explains how to properly configure API keys and secrets for the Crypt
 
 ## 🔑 Required API Keys
 
-### 1. Cohere AI API Key (Required)
+### 1. CoinCap Pro API Key (Required)
+- **Purpose**: Fetches cryptocurrency prices and historical data
+- **Get it from**: [https://pro.coincap.io/](https://pro.coincap.io/)
+- **Environment Variable**: `COINCAP_API_KEY`
+- **Rate Limit**: 500 requests/minute with Pro key
+- **API Docs**: [https://pro.coincap.io/api-docs/](https://pro.coincap.io/api-docs/)
+
+### 2. Cohere AI API Key (Required)
 - **Purpose**: Powers sentiment analysis and market mood classification
 - **Get it from**: [https://cohere.ai/](https://cohere.ai/)
 - **Environment Variable**: `COHERE_API_KEY`
 
-### 2. NewsAPI.org API Key (Required)
+### 3. NewsAPI.org API Key (Required)
 - **Purpose**: Fetches cryptocurrency-related news articles
 - **Get it from**: [https://newsapi.org/](https://newsapi.org/)
 - **Environment Variable**: `NEWSAPI_KEY`
 
-### 3. Blockchair API Key (Optional)
+### 4. Blockchair API Key (Optional)
 - **Purpose**: Provides blockchain data and OHLC price information
 - **Get it from**: [https://blockchair.com/api](https://blockchair.com/api)
 - **Environment Variable**: `BLOCKCHAIR_KEY`
 
-### 4. NewsData.io API Key (Optional)
+### 5. NewsData.io API Key (Optional)
 - **Purpose**: Backup news source
 - **Get it from**: [https://newsdata.io/](https://newsdata.io/)
 - **Environment Variable**: `NEWSDATA_KEY`
@@ -39,6 +46,7 @@ This guide explains how to properly configure API keys and secrets for the Crypt
 
 2. **Edit the `.env` file and add your actual API keys:**
    ```bash
+   COINCAP_API_KEY=your_actual_coincap_api_key_here
    COHERE_API_KEY=your_actual_cohere_api_key_here
    NEWSAPI_KEY=your_actual_newsapi_key_here
    BLOCKCHAIR_KEY=your_actual_blockchair_key_here
@@ -52,6 +60,7 @@ Use Wrangler's secret management system to securely store your API keys:
 
 ```bash
 # Set required secrets
+wrangler secret put COINCAP_API_KEY
 wrangler secret put COHERE_API_KEY
 wrangler secret put NEWSAPI_KEY
 

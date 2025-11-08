@@ -68,7 +68,7 @@ Bitcoin, Ethereum, Litecoin, Bitcoin Cash, Cardano, Ripple, Dogecoin, Polkadot, 
 
 ## 📊 Data Sources
 
-- **CoinGecko**: Cryptocurrency prices and historical data
+- **CoinCap Pro**: Cryptocurrency prices and historical data (500 rpm)
 - **NewsAPI.org**: Latest cryptocurrency news
 - **Cohere AI**: Sentiment analysis and market mood classification
 

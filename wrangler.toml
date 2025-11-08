@@ -13,12 +13,14 @@ id = "dbbe66243f7a4ecaa97f1e14a3ea2a19"
 # Secrets are managed via wrangler secret commands
 # To set secrets, use: wrangler secret put <SECRET_NAME>
 # Required secrets:
+# - COINCAP_API_KEY: Your CoinCap Pro API key for price/market data (500 rpm)
 # - COHERE_API_KEY: Your Cohere API key for AI processing
 # - NEWSAPI_KEY: Your NewsAPI.org API key for news data
 # - BLOCKCHAIR_KEY: Your Blockchair API key for blockchain data (optional)
 # - NEWSDATA_KEY: Your NewsData.io API key (optional, backup news source)
 #
 # Example setup commands:
+# wrangler secret put COINCAP_API_KEY
 # wrangler secret put COHERE_API_KEY
 # wrangler secret put NEWSAPI_KEY
 # wrangler secret put BLOCKCHAIR_KEY
