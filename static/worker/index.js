@@ -7,16 +7,26 @@
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
+  'Access-Control-Allow-Headers': 'Content-Type, Cache-Control, Pragma',
+  'Access-Control-Expose-Headers': 'X-Cache-Status, X-Cache-Source, X-DO-Age, X-Latency-ms, X-Client-Cache',
 };
 
 // Response helper
-function jsonResponse(data, status = 200) {
+function jsonResponse(data, status = 200, extraHeaders = {}) {
+  const cacheHeaders = {
+    'Cache-Control': 'no-store, max-age=0, must-revalidate',
+    'Surrogate-Control': 'no-store',
+    'Pragma': 'no-cache',
+    'Expires': '0'
+  };
+  
   return new Response(JSON.stringify(data), {
     status,
     headers: {
       'Content-Type': 'application/json',
       ...CORS_HEADERS,
+      ...cacheHeaders,
+      ...extraHeaders
     },
   });
 }
@@ -70,8 +80,9 @@ async function rateLimitedFetch(url, options = {}) {
 function validatePriceData(data) {
   if (!data || typeof data !== 'object') return false;
   if (typeof data.usd !== 'number' || data.usd <= 0) return false;
-  // usd_24h_change can be null, so we allow that
-  if (data.usd_24h_change !== null && typeof data.usd_24h_change !== 'number') return false;
+  // usd_24h_change can be null or undefined, we allow that
+  if (data.usd_24h_change !== null && data.usd_24h_change !== undefined && typeof data.usd_24h_change !== 'number') return false;
+  // Relaxed validation: allow any positive price
   return true;
 }
 
@@ -115,6 +126,7 @@ async function handleCoins() {
 }
 
 async function handlePrice(request, env) {
+  const start = Date.now();
   try {
     const url = new URL(request.url);
     const coinId = url.searchParams.get('coin') || 'bitcoin';
@@ -125,27 +137,52 @@ async function handlePrice(request, env) {
     
     const coingeckoId = SUPPORTED_COINS[coinId].coingecko_id;
     
+    console.log(`[Price] Fetching ${coinId} from CoinGecko...`);
+    
     // Fetch current price from CoinGecko
     const response = await rateLimitedFetch(
       `${COINGECKO_API_BASE}/simple/price?ids=${coingeckoId}&vs_currencies=usd&include_24hr_change=true&include_market_cap=true&include_24hr_vol=true`
     );
     
     if (!response.ok) {
-      throw new Error(`CoinGecko API error: ${response.status}`);
+      const rawBody = await response.text().catch(() => '');
+      console.error(`[Price] CoinGecko HTTP error ${response.status}:`, rawBody);
+      const status = 502;
+      return jsonResponse({ 
+        error: 'Failed to fetch price data', 
+        details: `CoinGecko API error: ${response.status} - ${rawBody}` 
+      }, status, { 'X-Client-Cache': 'no-store', 'X-Latency-ms': String(Date.now() - start) });
     }
     
     const data = await response.json();
     
     if (!data[coingeckoId]) {
-      throw new Error(`No price data found for ${coinId}`);
+      console.error(`[Price] CoinGecko missing coin data for ${coingeckoId}. Full response:`, JSON.stringify(data));
+      return jsonResponse({ 
+        error: 'Failed to fetch price data', 
+        details: `Invalid CoinGecko response: missing ${coingeckoId} in ${JSON.stringify(data)}` 
+      }, 502, { 'X-Client-Cache': 'no-store', 'X-Latency-ms': String(Date.now() - start) });
     }
     
     const coinData = data[coingeckoId];
     
     // Validate price data
     if (!validatePriceData(coinData)) {
-      throw new Error('Invalid price data received from CoinGecko');
+      console.error(`[Price] Invalid price data for ${coingeckoId}:`, JSON.stringify(coinData));
+      return jsonResponse({ 
+        error: 'Failed to fetch price data', 
+        details: `Invalid price data: ${JSON.stringify(coinData)}` 
+      }, 502, { 'X-Client-Cache': 'no-store', 'X-Latency-ms': String(Date.now() - start) });
     }
+    
+    const headers = {
+      'X-Cache-Status': 'miss',
+      'X-Cache-Source': 'api',
+      'X-Client-Cache': 'no-store',
+      'X-Latency-ms': String(Date.now() - start)
+    };
+    
+    console.log(`✅ [Price] Got ${coinId} price: $${coinData.usd}, latency=${Date.now()-start}ms`);
     
     return jsonResponse({
       coin: coinId,
@@ -156,15 +193,20 @@ async function handlePrice(request, env) {
       symbol: SUPPORTED_COINS[coinId].symbol,
       timestamp: new Date().toISOString(),
       source: 'coingecko'
-    });
+    }, 200, headers);
     
   } catch (error) {
-    console.error('Error fetching price:', error);
-    return errorResponse(`Failed to fetch price: ${error.message}`);
+    console.error('❌ [Price] Error:', error);
+    const status = (error.message && error.message.includes('CoinGecko')) ? 502 : 500;
+    return jsonResponse({ 
+      error: 'Failed to fetch price data', 
+      details: error.message || 'unknown' 
+    }, status, { 'X-Client-Cache': 'no-store', 'X-Latency-ms': String(Date.now() - start) });
   }
 }
 
 async function handleHistory(request, env) {
+  const start = Date.now();
   try {
     const url = new URL(request.url);
     const coinId = url.searchParams.get('coin') || 'bitcoin';
@@ -176,20 +218,32 @@ async function handleHistory(request, env) {
     
     const coingeckoId = SUPPORTED_COINS[coinId].coingecko_id;
     
+    console.log(`[History] Fetching ${coinId} history (${days} days) from CoinGecko...`);
+    
     // Fetch historical price data from CoinGecko
     const response = await rateLimitedFetch(
       `${COINGECKO_API_BASE}/coins/${coingeckoId}/market_chart?vs_currency=usd&days=${days}&interval=daily`
     );
     
     if (!response.ok) {
-      throw new Error(`CoinGecko API error: ${response.status}`);
+      const rawBody = await response.text().catch(() => '');
+      console.error(`[History] CoinGecko HTTP error ${response.status}:`, rawBody);
+      const status = 502;
+      return jsonResponse({ 
+        error: 'Failed to fetch price history', 
+        details: `CoinGecko API error: ${response.status} - ${rawBody}` 
+      }, status, { 'X-Client-Cache': 'no-store', 'X-Latency-ms': String(Date.now() - start) });
     }
     
     const data = await response.json();
     
     // Validate historical data
     if (!validateHistoryData(data)) {
-      throw new Error('Invalid historical data received from CoinGecko');
+      console.error(`[History] Invalid history data for ${coingeckoId}:`, JSON.stringify(data).substring(0, 500));
+      return jsonResponse({ 
+        error: 'Failed to fetch price history', 
+        details: `Invalid history data: ${JSON.stringify(data).substring(0, 200)}` 
+      }, 502, { 'X-Client-Cache': 'no-store', 'X-Latency-ms': String(Date.now() - start) });
     }
     
     // Transform data to expected format
@@ -198,6 +252,20 @@ async function handleHistory(request, env) {
         price: Math.round(price * 100) / 100, // Round to 2 decimal places
     }));
     
+    const lastPrice = prices.length > 0 ? prices[prices.length - 1] : null;
+    const dataTs = lastPrice?.timestamp ? new Date(lastPrice.timestamp).getTime() : null;
+    const xdoage = dataTs ? String(Math.floor((Date.now() - dataTs) / 1000)) : '';
+    
+    const headers = {
+      'X-Cache-Status': 'miss',
+      'X-Cache-Source': 'api',
+      'X-DO-Age': xdoage,
+      'X-Client-Cache': 'no-store',
+      'X-Latency-ms': String(Date.now() - start)
+    };
+    
+    console.log(`✅ [History] Got ${coinId} history (${prices.length} points), latency=${Date.now()-start}ms`);
+    
     return jsonResponse({
       coin: coinId,
       prices: prices,
@@ -205,11 +273,15 @@ async function handleHistory(request, env) {
       symbol: SUPPORTED_COINS[coinId].symbol,
       source: 'coingecko',
       note: 'Real market data from CoinGecko'
-    });
+    }, 200, headers);
     
   } catch (error) {
-    console.error('Error fetching history:', error);
-    return errorResponse(`Failed to fetch price history: ${error.message}`);
+    console.error('❌ [History] Error:', error);
+    const status = (error.message && error.message.includes('CoinGecko')) ? 502 : 500;
+    return jsonResponse({ 
+      error: 'Failed to fetch price history', 
+      details: error.message || 'unknown' 
+    }, status, { 'X-Client-Cache': 'no-store', 'X-Latency-ms': String(Date.now() - start) });
   }
 }
 
@@ -1237,7 +1309,13 @@ export default {
     if (request.method === 'OPTIONS') {
       return new Response(null, {
         status: 200,
-        headers: CORS_HEADERS,
+        headers: {
+          ...CORS_HEADERS,
+          'Cache-Control': 'no-store, max-age=0, must-revalidate',
+          'Surrogate-Control': 'no-store',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        },
       });
     }
     

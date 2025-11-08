@@ -139,10 +139,10 @@ async function getCachedPriceData(coinId, env) {
         const { data, timestamp } = JSON.parse(cached);
         const age = now - timestamp;
         
-        // Validate cached price data - Bitcoin should be between $30,000 and $150,000
-        if (coinId === 'bitcoin' && (data.price < 30000 || data.price > 150000)) {
-          console.log(`⚠️ [Cache] Invalid cached Bitcoin price: $${data.price}, fetching fresh data`);
-          // Clear invalid cache and fetch fresh data
+        // Relaxed validation: removed overly strict price bounds
+        // Just check if price is positive
+        if (!data || !data.price || data.price <= 0) {
+          console.log(`⚠️ [Cache] Invalid cached price for ${coinId}: $${data?.price}, fetching fresh data`);
           await env.RATE_LIMIT_KV.delete(cacheKey);
           return await fetchFreshPriceData(coinId, env);
         }
@@ -191,30 +191,42 @@ async function refreshPriceInBackground(coinId, env) {
     console.log(`🔄 [Background] Refreshing price for ${coinId}`);
     const response = await fetch(url);
     
-    if (response.ok) {
-      const data = await response.json();
-      const coinData = data[coingeckoId];
+    if (!response.ok) {
+      const rawBody = await response.text().catch(() => '');
+      console.error(`[Background] CoinGecko HTTP error ${response.status}:`, rawBody);
+      return;
+    }
+    
+    const data = await response.json();
+    const coinData = data[coingeckoId];
+    
+    if (!coinData) {
+      console.error(`[Background] CoinGecko missing coin data for ${coingeckoId}. Full response:`, JSON.stringify(data));
+      return;
+    }
+    
+    if (validatePriceData(coinData)) {
+      const now = Date.now();
+      const priceData = {
+        coin: coinId,
+        price: Math.round(coinData.usd * 100) / 100,
+        change24h: coinData.usd_24h_change || 0,
+        market_cap: coinData.usd_market_cap || 0,
+        volume_24h: coinData.usd_24h_vol || 0,
+        symbol: SUPPORTED_COINS[coinId].symbol,
+        source: 'coingecko',
+        timestamp: new Date(now).toISOString()
+      };
       
-      if (validatePriceData(coinData)) {
-        const priceData = {
-          coin: coinId,
-          price: Math.round(coinData.usd * 100) / 100,
-          change24h: coinData.usd_24h_change || 0,
-          market_cap: coinData.usd_market_cap || 0,
-          volume_24h: coinData.usd_24h_vol || 0,
-          symbol: SUPPORTED_COINS[coinId].symbol,
-          source: 'coingecko',
-          timestamp: new Date().toISOString()
-        };
-        
-        // Update cache
-        await env.RATE_LIMIT_KV.put(`price_${coinId}`, JSON.stringify({
-          data: priceData,
-          timestamp: Date.now()
-        }));
-        
-        console.log(`✅ [Background] Updated cache for ${coinId}`);
-      }
+      // Update cache with current timestamp
+      await env.RATE_LIMIT_KV.put(`price_${coinId}`, JSON.stringify({
+        data: priceData,
+        timestamp: now
+      }));
+      
+      console.log(`✅ [Background] Updated cache for ${coinId} at ${new Date(now).toISOString()}`);
+    } else {
+      console.error(`[Background] Invalid price data for ${coingeckoId}:`, JSON.stringify(coinData));
     }
   } catch (error) {
     console.log(`❌ [Background] Failed to refresh ${coinId}:`, error);
@@ -230,14 +242,22 @@ async function fetchFreshPriceData(coinId, env) {
     const response = await fetch(url);
     
     if (!response.ok) {
-      throw new Error(`CoinGecko API error: ${response.status}`);
+      const rawBody = await response.text().catch(() => '');
+      console.error(`[Fresh] CoinGecko HTTP error ${response.status}:`, rawBody);
+      throw new Error(`CoinGecko API error: ${response.status} - ${rawBody}`);
     }
     
     const data = await response.json();
     const coinData = data[coingeckoId];
     
+    if (!coinData) {
+      console.error(`[Fresh] CoinGecko missing coin data for ${coingeckoId}. Full response:`, JSON.stringify(data));
+      throw new Error(`Invalid CoinGecko response: missing ${coingeckoId} in ${JSON.stringify(data)}`);
+    }
+    
     if (!validatePriceData(coinData)) {
-      throw new Error('Invalid CoinGecko response');
+      console.error(`[Fresh] Invalid price data for ${coingeckoId}:`, JSON.stringify(coinData));
+      throw new Error(`Invalid CoinGecko response: ${JSON.stringify(coinData)}`);
     }
     
     const priceData = {
@@ -281,14 +301,11 @@ async function getCachedHistoryData(coinId, days, env) {
         const { data, timestamp } = JSON.parse(cached);
         const age = now - timestamp;
         
-        // Validate cached history data - Bitcoin prices should be reasonable
-        if (coinId === 'bitcoin' && data.prices && data.prices.length > 0) {
-          const avgPrice = data.prices.reduce((sum, p) => sum + p.price, 0) / data.prices.length;
-          if (avgPrice < 30000 || avgPrice > 150000) {
-            console.log(`⚠️ [History Cache] Invalid cached Bitcoin prices (avg: $${avgPrice}), fetching fresh data`);
-            await env.RATE_LIMIT_KV.delete(cacheKey);
-            return await fetchFreshHistoryData(coinId, days, env);
-          }
+        // Relaxed validation: just check if we have valid price data
+        if (!data || !data.prices || !Array.isArray(data.prices) || data.prices.length === 0) {
+          console.log(`⚠️ [History Cache] Invalid cached history for ${coinId}, fetching fresh data`);
+          await env.RATE_LIMIT_KV.delete(cacheKey);
+          return await fetchFreshHistoryData(coinId, days, env);
         }
         
         if (age < CACHE_TTL) {
@@ -326,13 +343,16 @@ async function fetchFreshHistoryData(coinId, days, env) {
     const response = await rateLimitedFetch(url, {}, env);
     
     if (!response.ok) {
-      throw new Error(`CoinGecko API error: ${response.status}`);
+      const rawBody = await response.text().catch(() => '');
+      console.error(`[Fresh History] CoinGecko HTTP error ${response.status}:`, rawBody);
+      throw new Error(`CoinGecko API error: ${response.status} - ${rawBody}`);
     }
     
     const data = await response.json();
     
     if (!validateHistoryData(data)) {
-      throw new Error('Invalid CoinGecko response');
+      console.error(`[Fresh History] Invalid history data for ${coingeckoId}:`, JSON.stringify(data).substring(0, 500));
+      throw new Error(`Invalid CoinGecko response: ${JSON.stringify(data).substring(0, 200)}`);
     }
     
     // Transform data to expected format
@@ -376,15 +396,11 @@ async function refreshHistoryInBackground(coinId, days, env) {
 function validatePriceData(data) {
   if (!data || typeof data !== 'object') return false;
   if (typeof data.usd !== 'number' || data.usd <= 0) return false;
-  // usd_24h_change can be null, so we allow that
-  if (data.usd_24h_change !== null && typeof data.usd_24h_change !== 'number') return false;
+  // usd_24h_change can be null or undefined, we allow that
+  if (data.usd_24h_change !== null && data.usd_24h_change !== undefined && typeof data.usd_24h_change !== 'number') return false;
   
-  // Validate Bitcoin price is reasonable (between $30,000 and $150,000)
-  if (data.usd < 30000 || data.usd > 150000) {
-    console.log(`⚠️ Unrealistic Bitcoin price from CoinGecko: $${data.usd}`);
-    return false;
-  }
-  
+  // Relaxed validation: allow any positive price (removed overly strict bounds)
+  // This allows non-Bitcoin coins and edge cases
   return true;
 }
 

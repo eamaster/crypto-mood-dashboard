@@ -15,10 +15,29 @@ const initialState = {
 // Create the store
 const { subscribe, set, update } = writable(initialState);
 
+// Helper: fetch with timeout and no-store cache
+async function fetchWithTimeout(url, opts = {}, timeoutMs = 8000) {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        const res = await fetch(url, {
+            cache: 'no-store',
+            headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache', ...(opts.headers || {}) },
+            signal: controller.signal,
+            ...opts
+        });
+        clearTimeout(id);
+        return res;
+    } catch (e) {
+        clearTimeout(id);
+        throw e;
+    }
+}
+
 // Helper functions to fetch data
 const fetchCoins = async () => {
     try {
-        const response = await fetch(`${WORKER_URL}/coins`);
+        const response = await fetchWithTimeout(`${WORKER_URL}/coins`);
         if (!response.ok) {
             throw new Error('Failed to fetch coins list');
         }
@@ -36,15 +55,14 @@ const fetchCoins = async () => {
 const fetchPrice = async (coinId) => {
     try {
         console.log(`🔍 Fetching price for ${coinId} from ${WORKER_URL}/price`);
-        // Use cache: no-store to ensure fresh data
-        const response = await fetch(`${WORKER_URL}/price?coin=${coinId}&_=${Date.now()}`, {
-            cache: 'no-store',
-            headers: {
-                'Cache-Control': 'no-cache, no-store, must-revalidate',
-                'Pragma': 'no-cache'
-            }
+        const response = await fetchWithTimeout(`${WORKER_URL}/price?coin=${coinId}&_=${Date.now()}`);
+        console.log(`📊 Price response status: ${response.status}, headers:`, {
+            cache: response.headers.get('cache-control'),
+            xcache: response.headers.get('X-Cache-Status'),
+            xsource: response.headers.get('X-Cache-Source'),
+            xdoage: response.headers.get('X-DO-Age'),
+            xlat: response.headers.get('X-Latency-ms')
         });
-        console.log(`📊 Price response status: ${response.status}`);
         
         if (!response.ok) {
             const errorText = await response.text();
@@ -72,15 +90,14 @@ const fetchPrice = async (coinId) => {
 const fetchHistory = async (coinId) => {
     try {
         console.log(`🔍 Fetching history for ${coinId} from ${WORKER_URL}/history`);
-        // Use cache: no-store to ensure fresh data
-        const response = await fetch(`${WORKER_URL}/history?coin=${coinId}&days=7&_=${Date.now()}`, {
-            cache: 'no-store',
-            headers: {
-                'Cache-Control': 'no-cache, no-store, must-revalidate',
-                'Pragma': 'no-cache'
-            }
+        const response = await fetchWithTimeout(`${WORKER_URL}/history?coin=${coinId}&days=7&_=${Date.now()}`);
+        console.log(`📊 History response status: ${response.status}, headers:`, {
+            cache: response.headers.get('cache-control'),
+            xcache: response.headers.get('X-Cache-Status'),
+            xsource: response.headers.get('X-Cache-Source'),
+            xdoage: response.headers.get('X-DO-Age'),
+            xlat: response.headers.get('X-Latency-ms')
         });
-        console.log(`📊 History response status: ${response.status}`);
         
         if (!response.ok) {
             const errorText = await response.text();
@@ -118,14 +135,7 @@ const fetchHistory = async (coinId) => {
 
 const fetchNews = async (coinId) => {
     try {
-        // Use cache: no-store to ensure fresh data
-        const response = await fetch(`${WORKER_URL}/news?coin=${coinId}&_=${Date.now()}`, {
-            cache: 'no-store',
-            headers: {
-                'Cache-Control': 'no-cache, no-store, must-revalidate',
-                'Pragma': 'no-cache'
-            }
-        });
+        const response = await fetchWithTimeout(`${WORKER_URL}/news?coin=${coinId}&_=${Date.now()}`);
         if (!response.ok) {
             throw new Error(`Failed to fetch news for ${coinId}. Status: ${response.status}`);
         }
@@ -145,7 +155,7 @@ const fetchNews = async (coinId) => {
 
 const fetchSentiment = async (headlines) => {
     try {
-        const response = await fetch(`${WORKER_URL}/sentiment`, {
+        const response = await fetchWithTimeout(`${WORKER_URL}/sentiment`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -175,30 +185,42 @@ export const initStore = async () => {
     const coins = await fetchCoins();
     const selectedCoin = coins.find(c => c.id === 'bitcoin') ? 'bitcoin' : (coins[0]?.id || 'bitcoin');
 
-    // Fetch sequentially to avoid overwhelming CoinGecko API with simultaneous requests
-    const priceData = await fetchPrice(selectedCoin);
-    
-    // Small delay to respect rate limiting
-    await new Promise(resolve => setTimeout(resolve, 200));
-    const historyData = await fetchHistory(selectedCoin);
-    
-    // News doesn't call CoinGecko, can fetch immediately
-    const newsData = await fetchNews(selectedCoin);
+    try {
+        // Parallelize price & history fetches (they don't depend on each other)
+        const [priceData, historyData] = await Promise.all([
+            fetchPrice(selectedCoin),
+            fetchHistory(selectedCoin)
+        ]);
 
-    let sentimentData = null;
-    if (newsData?.headlines) {
-        sentimentData = await fetchSentiment(newsData.headlines);
+        // News and sentiment can run after price/history are loaded
+        const newsData = await fetchNews(selectedCoin);
+
+        let sentimentData = null;
+        if (newsData?.headlines) {
+            sentimentData = await fetchSentiment(newsData.headlines);
+        }
+
+        set({
+            coins,
+            selectedCoin,
+            priceData,
+            historyData,
+            newsData: { ...newsData, sentiment: sentimentData },
+            loading: false,
+            error: null
+        });
+    } catch (error) {
+        console.error('❌ Failed to initialize store:', error);
+        set({
+            coins,
+            selectedCoin,
+            priceData: null,
+            historyData: null,
+            newsData: null,
+            loading: false,
+            error: error.message || 'Failed to load data'
+        });
     }
-
-    set({
-        coins,
-        selectedCoin,
-        priceData,
-        historyData,
-        newsData: { ...newsData, sentiment: sentimentData },
-        loading: false,
-        error: null
-    });
 };
 
 // Function to update the selected coin
@@ -215,14 +237,13 @@ export const setCoin = async (coinId) => {
     }));
 
     try {
-        // Fetch sequentially to avoid overwhelming CoinGecko API with simultaneous requests
-        const priceData = await fetchPrice(coinId);
-        
-        // Small delay to respect rate limiting
-        await new Promise(resolve => setTimeout(resolve, 500));
-        const historyData = await fetchHistory(coinId);
-        
-        // News doesn't call CoinGecko, can fetch immediately
+        // Parallelize price & history fetches (they don't depend on each other)
+        const [priceData, historyData] = await Promise.all([
+            fetchPrice(coinId),
+            fetchHistory(coinId)
+        ]);
+
+        // News and sentiment can run after price/history are loaded
         const newsData = await fetchNews(coinId);
 
         let sentimentData = null;
