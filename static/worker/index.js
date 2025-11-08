@@ -148,11 +148,12 @@ async function rateLimitedFetch(url, options = {}, env, coincapId) {
       try {
         console.log(`[rateLimitedFetch] Attempt ${attempt}/${maxAttempts} for ${url}`);
         // Add POP cache hints for Cloudflare edge to cache 2xx responses for 60s
+        // Merge headers from options (includes auth headers)
         const fetchOptions = {
-          method: 'GET',
-          headers: { 'Accept': 'application/json', ...(options.headers || {}) },
-          cf: { cacheTtlByStatus: { "200-299": 60 }, cacheEverything: true },
-          ...options
+          ...options,
+          method: options.method || 'GET',
+          headers: { ...options.headers },
+          cf: { cacheTtlByStatus: { "200-299": 60 }, cacheEverything: true }
         };
         const resp = await fetch(url, fetchOptions);
 
