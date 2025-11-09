@@ -2036,6 +2036,73 @@ function canonicalFormatNumber(n, dp = 2) {
   return Number(n).toFixed(dp);
 }
 
+// Get canonical live price from KV → CoinCap → history (server-authoritative)
+async function getCanonicalPrice(coinId, env) {
+  console.log(`[getCanonicalPrice] Fetching canonical price for ${coinId}`);
+  
+  // 1. Check KV price cache (fresh if age <= 60s)
+  const kvKey = `price_${coinId}`;
+  try {
+    const kvRaw = await env.RATE_LIMIT_KV.get(kvKey);
+    if (kvRaw) {
+      const parsed = JSON.parse(kvRaw);
+      if (parsed?.data?.price && parsed?.data?.timestamp) {
+        const ageMs = Date.now() - new Date(parsed.data.timestamp).getTime();
+        if (ageMs <= 60 * 1000) {
+          console.log(`[getCanonicalPrice] Using fresh KV price for ${coinId}: ${parsed.data.price} (age: ${Math.floor(ageMs/1000)}s)`);
+          return {
+            price: Number(parsed.data.price),
+            timestamp: parsed.data.timestamp,
+            source: 'kv-fresh'
+          };
+        }
+      }
+    }
+  } catch (e) {
+    console.warn(`[getCanonicalPrice] KV read failed for ${coinId}:`, e.message);
+  }
+  
+  // 2. Fetch live from CoinCap
+  try {
+    const map = await fetchAssetsBatch(coinId, env);
+    if (map && map[coinId]) {
+      console.log(`[getCanonicalPrice] Using live CoinCap price for ${coinId}: ${map[coinId].price}`);
+      // Cache it
+      await env.RATE_LIMIT_KV.put(kvKey, JSON.stringify({
+        data: map[coinId],
+        timestamp: Date.now(),
+        source: 'coincap'
+      }));
+      return {
+        price: Number(map[coinId].price),
+        timestamp: new Date().toISOString(),
+        source: 'coincap-live'
+      };
+    }
+  } catch (e) {
+    console.warn(`[getCanonicalPrice] CoinCap fetch failed for ${coinId}:`, e.message);
+  }
+  
+  // 3. Fallback to last history point
+  try {
+    const history = await fetchAssetHistory(coinId, 7, env);
+    if (history && history.prices && history.prices.length > 0) {
+      const last = history.prices[history.prices.length - 1];
+      console.log(`[getCanonicalPrice] Using history last price for ${coinId}: ${last.price} (fallback)`);
+      return {
+        price: Number(last.price),
+        timestamp: last.timestamp,
+        source: 'history-fallback'
+      };
+    }
+  } catch (e) {
+    console.warn(`[getCanonicalPrice] History fetch failed for ${coinId}:`, e.message);
+  }
+  
+  // 4. If all fail, throw
+  throw new Error(`Unable to fetch canonical price for ${coinId}`);
+}
+
 // Build canonical technical context for AI (server-authoritative)
 function buildTechnicalContextForAI({ price, rsi, sma, smaPeriod, bb }, timeframe) {
   // Round/format identically to chart
@@ -2096,17 +2163,33 @@ async function handleAIExplain(request, env) {
       return errorResponse('Missing required data: coin and timeframe');
     }
     
-    // Server-authoritative: Extract canonical values from client data
+    // SERVER-AUTHORITATIVE: Get canonical live price (KV → CoinCap → history)
+    let canonicalPriceObj;
+    try {
+      canonicalPriceObj = await getCanonicalPrice(coin, env);
+      console.log(`[AI] canonicalPriceObj = { price: ${canonicalPriceObj.price}, ts: ${canonicalPriceObj.timestamp}, source: ${canonicalPriceObj.source} }`);
+    } catch (priceErr) {
+      console.warn(`[AI] Failed to get canonical price for ${coin}:`, priceErr.message);
+      // Fallback to client-provided currentPrice if available
+      if (currentPrice) {
+        canonicalPriceObj = { price: Number(currentPrice), timestamp: new Date().toISOString(), source: 'client-fallback' };
+        console.log(`[AI] Using client-provided price as fallback: ${canonicalPriceObj.price}`);
+      } else {
+        throw new Error('Unable to determine canonical price');
+      }
+    }
+    
+    // Use canonical price (server-authoritative)
+    const priceValue = canonicalPriceObj.price;
+    
+    // Extract other indicators from client data (validated server-side)
     // Use latest values from arrays or fallback to provided current values
     const rsiValue = (rsi && Array.isArray(rsi) && rsi.length > 0) 
       ? rsi[rsi.length - 1].y 
       : (currentRSI || 50);
     const smaValue = (sma && Array.isArray(sma) && sma.length > 0)
       ? sma[sma.length - 1].y
-      : (currentSMA || currentPrice);
-    const priceValue = (priceData && Array.isArray(priceData) && priceData.length > 0)
-      ? priceData[priceData.length - 1].y
-      : (currentPrice || 0);
+      : (currentSMA || priceValue);
     const bbUpper = (bb && bb.upper && Array.isArray(bb.upper) && bb.upper.length > 0)
       ? bb.upper[bb.upper.length - 1].y
       : (currentBBUpper || priceValue * 1.05);
@@ -2119,7 +2202,12 @@ async function handleAIExplain(request, env) {
       ? (signals.find(s => s.type === 'SMA')?.period || 4)
       : 4;
     
-    console.log(`[AI] Received technicalContext for ${coin}: P=${priceValue}, RSI=${rsiValue}, SMA=${smaValue}, SMA(${smaPeriod}), BB=[${bbLower}-${bbUpper}], timeframe=${timeframe}`);
+    console.log(`[AI] Built technicalContext for ${coin}: P=${priceValue} (canonical), RSI=${rsiValue}, SMA=${smaValue}, SMA(${smaPeriod}), BB=[${bbLower}-${bbUpper}], timeframe=${timeframe}`);
+    
+    // Price mismatch detection (client vs server)
+    if (currentPrice && Math.abs(currentPrice - priceValue) > 0.01) {
+      console.log(`[AI] Price mismatch detected: client=${currentPrice}, canonical=${priceValue} (using canonical)`);
+    }
     
     // Build canonical technical context
     const ctx = buildTechnicalContextForAI({
