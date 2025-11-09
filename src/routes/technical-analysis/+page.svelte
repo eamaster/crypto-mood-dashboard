@@ -137,10 +137,12 @@
 				const leftRect = leftColumnEl.getBoundingClientRect();
 				const listTopRect = patternsListEl.getBoundingClientRect();
 				
-				// If patterns panel top is below left bottom, available will be negative, keep floor
-				const availablePx = Math.max(120, Math.floor(leftRect.bottom - listTopRect.top - 16));
+				// Calculate available height: left column bottom minus patterns list top, minus padding
+				// Use 840px as base or compute more accurately
+				const computedHeight = Math.floor(leftRect.bottom - listTopRect.top - 16);
+				const availablePx = Math.max(840, computedHeight); // Use 840px minimum or computed value if larger
 				
-				// Set max-height on the *inner* list so it scrolls internally
+				// Set max-height on the *inner* scroll container so it scrolls internally
 				// Only set if it's different to avoid unnecessary reflows
 				const currentMaxHeight = patternsListEl.style.maxHeight;
 				const newMaxHeight = `${availablePx}px`;
@@ -2182,7 +2184,7 @@
 							<div class="patterns-panel">
 								<div class="patterns-section">
 									<h4>🕯️ Patterns Detected ({candlePatterns.length})</h4>
-									<div class="patterns-list" bind:this={patternsListEl}>
+									<div class="patterns-scroll-container" bind:this={patternsListEl}>
 										{#each candlePatterns as pattern}
 											<div class="pattern-entry">
 												<div class="signal {pattern.signal.toLowerCase()}">{pattern.type}</div>
