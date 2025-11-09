@@ -54,6 +54,7 @@ npm run check    # Type checking
 - **[SECRETS_SETUP.md](./SECRETS_SETUP.md)**: API keys configuration guide
 - **[DEPLOYMENT.md](./DEPLOYMENT.md)**: Production deployment instructions
 - **[DEVELOPER.md](./DEVELOPER.md)**: Development and testing guide
+- **[SECURITY.md](./SECURITY.md)**: Security best practices and key rotation procedures
 
 ## 🏗️ Architecture
 

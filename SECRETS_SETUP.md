@@ -4,7 +4,20 @@ This guide explains how to properly configure API keys and secrets for the Crypt
 
 ## ⚠️ Important Security Notice
 
-**NEVER commit API keys or secrets to version control!** This repository is now safe for public use because all secrets have been removed from the codebase.
+**NEVER commit API keys or secrets to version control!** 
+
+### 🚨 If You've Accidentally Committed a Key
+
+If you've accidentally committed an API key to the repository:
+
+1. **Rotate the key immediately** in the provider's dashboard (delete old key, create new one)
+2. **Update the key** in Cloudflare Workers: `wrangler secret put COINCAP_API_KEY`
+3. **Remove from git history** if the repository is private (see [SECURITY.md](./SECURITY.md) for instructions)
+4. **Monitor usage** for any unauthorized access
+
+**Important**: Even if you delete a file containing a key, it remains in git history and can be accessed by anyone with repository access.
+
+See [SECURITY.md](./SECURITY.md) for detailed security guidelines and key rotation procedures.
 
 ## 🔑 Required API Keys
 
