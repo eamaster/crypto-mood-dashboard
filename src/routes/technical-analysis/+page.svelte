@@ -2441,7 +2441,7 @@
 		grid-auto-rows: minmax(0, auto); /* Critical: allows rows to shrink to content */
 		gap: 1.5rem; /* Reduced from 2rem for tighter spacing */
 		margin-bottom: 2rem;
-		align-items: start; /* Critical: align columns to top, not stretch */
+		align-items: stretch; /* Critical: stretch columns to full row height */
 	}
 
 	.ta-chart-column {
