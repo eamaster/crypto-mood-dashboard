@@ -14,7 +14,7 @@
 			id: 'price-fetcher',
 			title: '🚀 Price Fetcher',
 			description: 'Fetch real-time cryptocurrency prices with 24h change data',
-			features: ['Real-time Prices', 'CoinGecko Integration', '24h Change Data', 'Multi-coin Support'],
+			features: ['Real-time Prices', 'CoinCap Integration', '24h Change Data', 'Multi-coin Support'],
 			path: `${base}/price-fetcher`
 		},
 		{

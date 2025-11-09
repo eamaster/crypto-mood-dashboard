@@ -59,7 +59,7 @@ npm run check    # Type checking
 
 - **Frontend**: SvelteKit (static site)
 - **Backend**: Cloudflare Worker (API proxy)
-- **APIs**: CoinGecko, NewsAPI, Cohere AI
+- **APIs**: CoinCap, NewsAPI, Cohere AI
 - **Deployment**: GitHub Pages (frontend) + Cloudflare Workers (backend)
 
 ## 🎯 Supported Cryptocurrencies
@@ -86,7 +86,7 @@ Bitcoin, Ethereum, Litecoin, Bitcoin Cash, Cardano, Ripple, Dogecoin, Polkadot, 
 
 - **Frontend**: SvelteKit, Chart.js, date-fns
 - **Backend**: Cloudflare Workers, KV Storage
-- **APIs**: CoinGecko, NewsAPI, Cohere AI
+- **APIs**: CoinCap, NewsAPI, Cohere AI
 - **Deployment**: GitHub Pages, Cloudflare Workers
 
 ## 📝 License

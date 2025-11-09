@@ -192,7 +192,7 @@
 		<button class="back-button" on:click={goBack}>← Back to Modules</button>
 	</div>
 	
-	<p>Enter a CoinGecko coin ID to view its 7-day price history:</p>
+	<p>Enter a coin ID (e.g., bitcoin, ethereum) to view its 7-day price history:</p>
 	
 	<div class="input-group">
 		<input 

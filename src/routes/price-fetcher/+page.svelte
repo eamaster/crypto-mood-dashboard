@@ -75,7 +75,7 @@
 		<button class="back-button" on:click={goBack}>← Back to Modules</button>
 	</div>
 	
-	<p>Enter a CoinGecko coin ID to fetch its current price:</p>
+	<p>Enter a coin ID (e.g., bitcoin, ethereum) to fetch its current price:</p>
 	
 	<div class="input-group">
 		<input 

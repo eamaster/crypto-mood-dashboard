@@ -6,8 +6,7 @@
 	import 'chartjs-adapter-date-fns';
 	import { WORKER_URL } from '../../lib/config.js';
 
-	// API URLs
-	const COINGECKO_API = 'https://api.coingecko.com/api/v3';
+	// API URL - using worker endpoint
 	const ENABLE_NEWS = true; // Enable news analysis
 
 	// Reactive variables
@@ -105,9 +104,9 @@
 
 	async function fetchPriceData(coin) {
 		try {
-			console.log(`📈 Fetching price data for ${coin} from CoinGecko...`);
+			console.log(`📈 Fetching price data for ${coin} from CoinCap (via worker)...`);
 			const response = await fetch(
-				`${COINGECKO_API}/coins/${coin}/market_chart?vs_currency=usd&days=7&interval=daily`
+				`${WORKER_URL}/history?coin=${encodeURIComponent(coin)}&days=7&_=${Date.now()}`
 			);
 			
 			if (!response.ok) {
@@ -120,10 +119,10 @@
 				throw new Error('Invalid price data format from API');
 			}
 			
-			// Format the data for the chart
-			const chartData = data.prices.map(([timestamp, price]) => ({
-				x: new Date(timestamp),
-				y: price
+			// Format the data for the chart (CoinCap format: { timestamp, price })
+			const chartData = data.prices.map(item => ({
+				x: new Date(item.timestamp),
+				y: item.price
 			}));
 			
 			console.log(`✅ Fetched ${chartData.length} price points for ${coin}`);

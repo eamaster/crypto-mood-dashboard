@@ -82,7 +82,7 @@ const fetchPrice = async (coinId) => {
     const url = `${WORKER_URL}/price?coin=${encodeURIComponent(coinId)}&_=${Date.now()}`;
     try {
         console.log(`🔍 Fetching price for ${coinId}`);
-        const res = await fetchWithTimeout(url, { method: 'GET', credentials: 'omit' }, 20000); // Increased to 20s
+        const res = await fetchWithTimeout(url, { method: 'GET', credentials: 'omit' }, 10000); // Reduced to 10s - worker responds in ~2s
         console.log(`📊 Price response: ${res.status}, headers:`, {
             cache: res.headers.get('cache-control'),
             xcache: res.headers.get('X-Cache-Status'),
@@ -144,7 +144,7 @@ const fetchHistory = async (coinId, days = 7) => {
     const url = `${WORKER_URL}/history?coin=${encodeURIComponent(coinId)}&days=${days}&_=${Date.now()}`;
     try {
         console.log(`🔍 Fetching history for ${coinId}`);
-        const res = await fetchWithTimeout(url, { method: 'GET', credentials: 'omit' }, 30000); // Increased to 30s
+        const res = await fetchWithTimeout(url, { method: 'GET', credentials: 'omit' }, 15000); // Reduced to 15s - worker responds in ~2s
         console.log(`📊 History response: ${res.status}, headers:`, {
             cache: res.headers.get('cache-control'),
             xcache: res.headers.get('X-Cache-Status'),
@@ -242,14 +242,19 @@ const fetchSentiment = async (headlines) => {
     }
 };
 
-// Function to initialize the store
+// Function to initialize the store (optimized for fast initial load)
 export const initStore = async () => {
     update(state => ({ ...state, loading: true, error: null }));
+    
+    // Fetch coins first (required for UI)
     const coins = await fetchCoins();
     const selectedCoin = coins.find(c => c.id === 'bitcoin') ? 'bitcoin' : (coins[0]?.id || 'bitcoin');
 
+    // Set coins immediately so UI can render
+    update(state => ({ ...state, coins, selectedCoin }));
+
     try {
-        // Use Promise.allSettled to tolerate partial failures
+        // Fetch price and history in parallel (critical data)
         const pricePromise = fetchPriceThrottled(selectedCoin, true);
         const historyPromise = fetchHistoryThrottled(selectedCoin, 7, true);
 
@@ -273,38 +278,53 @@ export const initStore = async () => {
             console.error('History fetch failed:', historyResult.reason?.message || historyResult.reason);
         }
 
-        // Fetch news and sentiment (optional, don't block on failures)
-        let newsData = null;
-        let sentimentData = null;
-        try {
-            newsData = await fetchNews(selectedCoin);
-            if (newsData?.headlines) {
-                sentimentData = await fetchSentiment(newsData.headlines);
-            }
-        } catch (newsErr) {
-            console.warn('News/sentiment fetch failed:', newsErr.message);
-        }
-
-        set({
-            coins,
-            selectedCoin,
+        // Update UI immediately with price/history (non-blocking)
+        update(state => ({
+            ...state,
             priceData,
             historyData,
-            newsData: newsData ? { ...newsData, sentiment: sentimentData } : null,
             loading: false,
             error: (!priceData && !historyData) ? 'Failed to load price data' : null
-        });
+        }));
+
+        // Fetch news and sentiment in background (non-blocking, async)
+        // This happens after UI is rendered to improve perceived load time
+        fetchNews(selectedCoin)
+            .then(newsData => {
+                if (newsData?.headlines) {
+                    return fetchSentiment(newsData.headlines)
+                        .then(sentimentData => {
+                            update(state => ({
+                                ...state,
+                                newsData: newsData ? { ...newsData, sentiment: sentimentData } : null
+                            }));
+                        })
+                        .catch(sentimentErr => {
+                            console.warn('Sentiment fetch failed:', sentimentErr.message);
+                            update(state => ({
+                                ...state,
+                                newsData: newsData ? { ...newsData, sentiment: null } : null
+                            }));
+                        });
+                } else {
+                    update(state => ({ ...state, newsData: null }));
+                }
+            })
+            .catch(newsErr => {
+                console.warn('News fetch failed:', newsErr.message);
+                // Don't update state - keep existing newsData or null
+            });
+
     } catch (error) {
         console.error('❌ Failed to initialize store:', error);
-        set({
-            coins,
-            selectedCoin,
+        update(state => ({
+            ...state,
             priceData: null,
             historyData: null,
             newsData: null,
             loading: false,
             error: error.message || 'Failed to load data'
-        });
+        }));
     }
 };
 
@@ -346,26 +366,42 @@ export const setCoin = async (coinId) => {
             console.error('History fetch failed:', historyResult.reason?.message || historyResult.reason);
         }
 
-        // Fetch news and sentiment (optional, don't block on failures)
-        let newsData = null;
-        let sentimentData = null;
-        try {
-            newsData = await fetchNews(coinId);
-            if (newsData?.headlines) {
-                sentimentData = await fetchSentiment(newsData.headlines);
-            }
-        } catch (newsErr) {
-            console.warn('News/sentiment fetch failed:', newsErr.message);
-        }
-
+        // Update UI immediately with price/history (non-blocking)
         update(state => ({
             ...state,
             priceData,
             historyData,
-            newsData: newsData ? { ...newsData, sentiment: sentimentData } : null,
             loading: false,
             error: (!priceData && !historyData) ? 'Failed to load price data' : null
         }));
+
+        // Fetch news and sentiment in background (non-blocking, async)
+        // This happens after UI is updated to improve perceived load time
+        fetchNews(coinId)
+            .then(newsData => {
+                if (newsData?.headlines) {
+                    return fetchSentiment(newsData.headlines)
+                        .then(sentimentData => {
+                            update(state => ({
+                                ...state,
+                                newsData: newsData ? { ...newsData, sentiment: sentimentData } : null
+                            }));
+                        })
+                        .catch(sentimentErr => {
+                            console.warn('Sentiment fetch failed:', sentimentErr.message);
+                            update(state => ({
+                                ...state,
+                                newsData: newsData ? { ...newsData, sentiment: null } : null
+                            }));
+                        });
+                } else {
+                    update(state => ({ ...state, newsData: null }));
+                }
+            })
+            .catch(newsErr => {
+                console.warn('News fetch failed:', newsErr.message);
+                // Don't update state - keep existing newsData or null
+            });
     } catch (error) {
         console.error(`❌ Error in setCoin for ${coinId}:`, error);
         update(state => ({

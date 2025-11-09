@@ -48,7 +48,7 @@
 
 <footer>
 	<p>
-		Data from <a href="https://coingecko.com/" target="_blank" rel="noopener">CoinGecko</a> & 
+		Data from <a href="https://pro.coincap.io/" target="_blank" rel="noopener">CoinCap</a> & 
 		<a href="https://newsapi.org/" target="_blank" rel="noopener">NewsAPI.org</a> • 
 		AI by Cohere • Built with Chart.js & Cloudflare Workers
 	</p>
