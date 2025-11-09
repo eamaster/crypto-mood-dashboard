@@ -170,4 +170,23 @@ describe('TechSnapshotCard', () => {
 			expect(screen.getByText(/Bands:/)).toBeInTheDocument();
 		});
 	});
+
+	it('requests 60-day OHLC when history has fewer than 50 closes', async () => {
+		// History is short (8 points) so the card should fetch OHLC
+		const closes = Array.from({ length: 8 }, (_, i) => 50000 + i * 100);
+		mockStoreValue.historyData = closes.map((price, i) => ({
+			x: new Date(2024, 0, i + 1),
+			y: price
+		}));
+		mockStoreValue.loading = false;
+
+		// Ensure fetch resolves with 60 candles (as other tests already mock)
+		render(TechSnapshotCard);
+
+		await waitFor(() => {
+			expect(global.fetch).toHaveBeenCalled();
+			const calledUrl = String(global.fetch.mock.calls[0][0]);
+			expect(calledUrl).toMatch(/\bdays=60\b/);
+		}, { timeout: 2000 });
+	});
 });

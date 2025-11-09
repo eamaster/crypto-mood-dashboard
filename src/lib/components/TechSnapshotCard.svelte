@@ -38,7 +38,10 @@
 		ohlcLoading = true;
 		ohlcError = null;
 		try {
-			const url = `${WORKER_URL}/ohlc?coin=${encodeURIComponent(coinId)}&days=7&_=${Date.now()}`;
+			// Fetch 60 days of OHLC data to ensure we have enough points for SMA50 (50 points),
+			// RSI14 (15 points), and Bollinger Bands (20 points). The worker uses daily bars
+			// when days >= 7, which is perfect for technical analysis indicators.
+			const url = `${WORKER_URL}/ohlc?coin=${encodeURIComponent(coinId)}&days=60&_=${Date.now()}`;
 			const res = await fetch(url);
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
 			const data = await res.json();
