@@ -113,6 +113,7 @@
 	$: newsItems = $cryptoStore.newsData?.headlines || [];
 	$: historyData = $cryptoStore.historyData || [];
 	$: sentimentData = $cryptoStore.newsData?.sentiment || null;
+	$: largePatch = $cryptoStore.largePatch || null;
 </script>
 
 <section class="controls">

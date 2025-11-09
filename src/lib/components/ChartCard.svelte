@@ -10,6 +10,7 @@
 	export let coinId = 'bitcoin';
 	export let error = null;
 	export let loading = false;
+	export let largePatch = null; // { diffAbs, diffPct, priceSource } when patch is large
 	
 	let chartCanvas;
 	let chartInstance = null;
@@ -254,6 +255,12 @@
 			</div>
 		</div>
 	{:else}
+		{#if largePatch}
+			<div class="patch-banner">
+				Chart updated to live price (adjusted {formatPrice(largePatch.diffAbs)}). Data provenance: {largePatch.priceSource}
+			</div>
+		{/if}
+		
 		<div class="chart-container" bind:this={chartContainer}>
 			<canvas bind:this={chartCanvas} id="mainChart"></canvas>
 		</div>

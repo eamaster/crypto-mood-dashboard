@@ -9,7 +9,8 @@ const initialState = {
     historyData: null,
     newsData: null,
     loading: true,
-    error: null
+    error: null,
+    largePatch: null // { diffAbs, diffPct, priceSource } when patch is large
 };
 
 // Create the store
@@ -19,6 +20,22 @@ const { subscribe, set, update } = writable(initialState);
 const _lastPriceFetch = new Map();    // coinId -> { ts, data }
 const _lastHistoryFetch = new Map();  // coinId_days -> { ts, data }
 const THROTTLE_MS = 8000; // 8s
+
+// Price patching thresholds for quiet logging
+const PRICE_PATCH_ABS_THRESHOLD = 1.00;   // only log patches > $1.00
+const PRICE_PATCH_PCT_THRESHOLD = 0.5;    // or > 0.5% difference
+const LARGE_PATCH_ABS_THRESHOLD = 50.00;  // banner threshold: > $50
+const LARGE_PATCH_PCT_THRESHOLD = 1.0;    // banner threshold: > 1.0%
+
+// Helper function to format price for display
+function formatPriceForLog(price) {
+    return Number(price).toLocaleString('en-US', { 
+        style: 'currency', 
+        currency: 'USD',
+        minimumFractionDigits: 2, 
+        maximumFractionDigits: 2 
+    });
+}
 
 // Robust fetch with timeout and clear timeout correctly
 async function fetchWithTimeout(url, opts = {}, timeoutMs = 8000) {
@@ -410,6 +427,7 @@ export const initStore = async () => {
 
         // CANONICAL PRICE RECONCILIATION: Ensure history last point uses canonical price
         // Only reconcile if price normalization succeeded
+        let largePatch = null;
         if (priceData && priceData.priceNumeric && historyData && Array.isArray(historyData) && historyData.length > 0) {
             const canonicalPrice = priceData.priceNumeric; // use normalized price
             const canonicalPriceFmt = priceData.priceFmt || Number(canonicalPrice).toFixed(2);
@@ -419,12 +437,36 @@ export const initStore = async () => {
 
             // Format to 2 decimals for comparison
             if (canonicalPriceFmt !== lastCloseFmt) {
-                console.warn(`[store] Price/history mismatch: canonicalPrice=$${canonicalPriceFmt} lastClose=$${lastCloseFmt} -> patching last point`);
+                // Calculate difference metrics
+                const diffAbs = Math.abs(canonicalPrice - lastClose);
+                const diffPct = lastClose > 0 ? Math.abs((canonicalPrice - lastClose) / lastClose) * 100 : 0;
+                const canonicalTimestampMs = priceData.timestampMs || Date.now();
+                
+                // Only log detailed patch messages when difference is meaningful
+                if (diffAbs > PRICE_PATCH_ABS_THRESHOLD || diffPct > PRICE_PATCH_PCT_THRESHOLD) {
+                    console.warn(`[store] Price/history mismatch: canonicalPrice=${formatPriceForLog(canonicalPrice)} lastClose=${formatPriceForLog(lastClose)} -> patching last point (diff=${formatPriceForLog(diffAbs)}, ${diffPct.toFixed(2)}%)`);
+                } else {
+                    console.debug(`[store] Minor price mismatch: patching last point (diff=${formatPriceForLog(diffAbs)})`);
+                }
+                
                 // Replace last point close with canonical price (keep timestamp)
                 historyData[historyData.length - 1] = { x: lastPoint.x, y: canonicalPrice };
                 // Update cache with modified history so throttling returns consistent data
                 _lastHistoryFetch.set(`${selectedCoin}_7`, { ts: Date.now(), data: historyData });
-                console.log(`✅ [store] Patched history last point to canonical price: $${canonicalPriceFmt}`);
+                
+                // Log confirmation only for material diffs
+                if (diffAbs > PRICE_PATCH_ABS_THRESHOLD || diffPct > PRICE_PATCH_PCT_THRESHOLD) {
+                    console.info(`[store] Patched history last point to canonical price: ${formatPriceForLog(canonicalPrice)}`);
+                }
+                
+                // Track large patches for UI banner
+                if (diffAbs > LARGE_PATCH_ABS_THRESHOLD || diffPct > LARGE_PATCH_PCT_THRESHOLD) {
+                    largePatch = {
+                        diffAbs: diffAbs,
+                        diffPct: diffPct,
+                        priceSource: priceData.source || 'unknown'
+                    };
+                }
             } else {
                 console.log(`✅ [store] Price consistency verified: canonicalPrice=$${canonicalPriceFmt} matches history lastClose=$${lastCloseFmt}`);
             }
@@ -504,6 +546,7 @@ export const initStore = async () => {
             ...state,
             priceData,
             historyData,
+            largePatch: largePatch, // Include large patch info for UI banner
             loading: false,
             error: (!priceData && !historyData) ? 'Failed to load price data' : null
         }));
@@ -594,6 +637,7 @@ export const setCoin = async (coinId) => {
 
         // CANONICAL PRICE RECONCILIATION: Ensure history last point uses canonical price
         // Only reconcile if price normalization succeeded
+        let largePatch = null;
         if (priceData && priceData.priceNumeric && historyData && Array.isArray(historyData) && historyData.length > 0) {
             const canonicalPrice = priceData.priceNumeric; // use normalized price
             const canonicalPriceFmt = priceData.priceFmt || Number(canonicalPrice).toFixed(2);
@@ -603,12 +647,36 @@ export const setCoin = async (coinId) => {
 
             // Format to 2 decimals for comparison
             if (canonicalPriceFmt !== lastCloseFmt) {
-                console.warn(`[store] Price/history mismatch: canonicalPrice=$${canonicalPriceFmt} lastClose=$${lastCloseFmt} -> patching last point`);
+                // Calculate difference metrics
+                const diffAbs = Math.abs(canonicalPrice - lastClose);
+                const diffPct = lastClose > 0 ? Math.abs((canonicalPrice - lastClose) / lastClose) * 100 : 0;
+                const canonicalTimestampMs = priceData.timestampMs || Date.now();
+                
+                // Only log detailed patch messages when difference is meaningful
+                if (diffAbs > PRICE_PATCH_ABS_THRESHOLD || diffPct > PRICE_PATCH_PCT_THRESHOLD) {
+                    console.warn(`[store] Price/history mismatch: canonicalPrice=${formatPriceForLog(canonicalPrice)} lastClose=${formatPriceForLog(lastClose)} -> patching last point (diff=${formatPriceForLog(diffAbs)}, ${diffPct.toFixed(2)}%)`);
+                } else {
+                    console.debug(`[store] Minor price mismatch: patching last point (diff=${formatPriceForLog(diffAbs)})`);
+                }
+                
                 // Replace last point close with canonical price (keep timestamp)
                 historyData[historyData.length - 1] = { x: lastPoint.x, y: canonicalPrice };
                 // Update cache with modified history so throttling returns consistent data
                 _lastHistoryFetch.set(`${coinId}_7`, { ts: Date.now(), data: historyData });
-                console.log(`✅ [store] Patched history last point to canonical price: $${canonicalPriceFmt}`);
+                
+                // Log confirmation only for material diffs
+                if (diffAbs > PRICE_PATCH_ABS_THRESHOLD || diffPct > PRICE_PATCH_PCT_THRESHOLD) {
+                    console.info(`[store] Patched history last point to canonical price: ${formatPriceForLog(canonicalPrice)}`);
+                }
+                
+                // Track large patches for UI banner
+                if (diffAbs > LARGE_PATCH_ABS_THRESHOLD || diffPct > LARGE_PATCH_PCT_THRESHOLD) {
+                    largePatch = {
+                        diffAbs: diffAbs,
+                        diffPct: diffPct,
+                        priceSource: priceData.source || 'unknown'
+                    };
+                }
             } else {
                 console.log(`✅ [store] Price consistency verified: canonicalPrice=$${canonicalPriceFmt} matches history lastClose=$${lastCloseFmt}`);
             }
@@ -701,6 +769,7 @@ export const setCoin = async (coinId) => {
                 ...state,
                 priceData,
                 historyData,
+                largePatch: largePatch, // Include large patch info for UI banner
                 loading: false,
                 error: (!priceData && !historyData) ? 'Failed to load price data' : null
             }));
