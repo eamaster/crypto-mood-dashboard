@@ -3,6 +3,7 @@
 	import { goto } from '$app/navigation';
 	import PriceCard from '$lib/components/PriceCard.svelte';
 	import MoodCard from '$lib/components/MoodCard.svelte';
+	import TechSnapshotCard from '$lib/components/TechSnapshotCard.svelte';
 	import ChartCard from '$lib/components/ChartCard.svelte';
 	import { cryptoStore } from '$lib/stores.js';
 
@@ -189,6 +190,9 @@
 		loading={$cryptoStore.loading}
 		error={$cryptoStore.error}
 	/>
+
+	<!-- Technical Snapshot Card -->
+	<TechSnapshotCard />
 
 	<!-- Chart Card -->
 	<ChartCard 
