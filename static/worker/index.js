@@ -795,28 +795,40 @@ async function handlePrice(request, env) {
       return errorResponse(`Failed to fetch price: ${error.message}`, 500);
     }
 
-    // Build response data matching the expected format
+    // Build canonical price response with both timestamp formats and formatted price
+    const canonicalPrice = Number(canonicalPriceObj.price);
+    const timestampMs = canonicalPriceObj.timestamp ? new Date(canonicalPriceObj.timestamp).getTime() : Date.now();
+    const timestampIso = new Date(timestampMs).toISOString();
+    const priceFmt = canonicalFormatNumber(canonicalPrice, 2);
+    const priceSource = canonicalPriceObj.priceSource || canonicalPriceObj.source || 'unknown';
+    
+    // Get additional data if available from CoinCap response (for change24h, etc.)
+    // Note: getCanonicalPrice returns minimal data, so we may not have change24h
     const priceData = {
       coin: coinId,
-      price: canonicalPriceObj.price,
-      timestamp: canonicalPriceObj.timestamp,
-      source: canonicalPriceObj.priceSource || canonicalPriceObj.source || 'unknown',
-      symbol: SUPPORTED_COINS[coinId]?.symbol || coinId.toUpperCase()
+      price: canonicalPrice, // numeric
+      priceFmt: priceFmt, // string formatted to 2 decimals
+      timestamp: canonicalPriceObj.timestamp, // backward compatibility (ISO string)
+      timestampIso: timestampIso, // ISO string format
+      timestampMs: timestampMs, // epoch milliseconds (numeric)
+      source: priceSource,
+      symbol: SUPPORTED_COINS[coinId]?.symbol || coinId.toUpperCase(),
+      change24h: 0 // Default to 0 if not available (will be computed from history if needed)
     };
 
     // Prepare observability headers with POP caching
-    const dataTs = canonicalPriceObj.timestamp ? new Date(canonicalPriceObj.timestamp).getTime() : null;
-    const xdoage = dataTs ? String(Math.floor((Date.now() - dataTs) / 1000)) : '';
+    const dataTs = timestampMs;
+    const xdoage = String(Math.floor((Date.now() - dataTs) / 1000));
     const headers = {
       'Cache-Control': 'public, s-maxage=60, max-age=60',
       'X-Cache-Status': canonicalPriceObj.source === 'kv-fresh' ? 'fresh' : 'miss',
       'X-Cache-Source': canonicalPriceObj.source === 'kv-fresh' ? 'cache' : 'api',
       'X-DO-Age': xdoage,
       'X-Latency-ms': String(Date.now() - start),
-      'X-Price-Source': canonicalPriceObj.priceSource || canonicalPriceObj.source || 'unknown'
+      'X-Price-Source': priceSource
     };
 
-    console.log(`✅ [Price] Got canonical price for ${coinId}: $${canonicalPriceObj.price} (source=${canonicalPriceObj.priceSource || canonicalPriceObj.source}, age=${xdoage}s), totalLatency=${Date.now()-start}ms`);
+    console.log(`✅ [Price] Returning canonical price priceFmt=$${priceFmt} timestampIso=${timestampIso} timestampMs=${timestampMs} (source=${priceSource}, age=${xdoage}s), totalLatency=${Date.now()-start}ms`);
     return jsonResponse(priceData, 200, headers);
 
   } catch (error) {
@@ -3727,11 +3739,14 @@ async function handleOHLC(request, env) {
     }
     
     const lastCandle = ohlc.length > 0 ? ohlc[ohlc.length - 1] : null;
-    const lastClosePrice = canonicalPriceFormatted; // Always use canonical price
+    const lastClosePrice = canonicalPriceFormatted; // Always use canonical price (string formatted)
+    const lastClosePriceNumeric = currentPrice; // Numeric canonical price
     const lastPointTimestamp = lastCandle ? lastCandle.timestamp : new Date().toISOString();
+    const lastPointTimestampMs = lastCandle ? new Date(lastPointTimestamp).getTime() : Date.now();
+    const lastPointTimestampIso = new Date(lastPointTimestampMs).toISOString();
     const priceSource = canonicalPriceObj?.priceSource || canonicalPriceObj?.source || 'unknown';
     
-    console.log(`[OHLC] Returning ohlc with lastClosePrice = ${lastClosePrice} (source=${priceSource})`);
+    console.log(`[OHLC] Returning ohlc with lastClosePrice=$${lastClosePrice} (source=${priceSource})`);
     
     return jsonResponse({
       coin: coinId,
@@ -3739,8 +3754,11 @@ async function handleOHLC(request, env) {
       days: days,
       symbol: SUPPORTED_COINS[coinId].symbol,
       candles: ohlc.length,
-      lastClosePrice: lastClosePrice,
-      lastPointTimestamp: lastPointTimestamp,
+      lastClosePrice: lastClosePrice, // string formatted to 2 decimals
+      lastClosePriceNumeric: lastClosePriceNumeric, // numeric
+      lastPointTimestamp: lastPointTimestamp, // backward compatibility (ISO string)
+      lastPointTimestampIso: lastPointTimestampIso, // ISO string format
+      lastPointTimestampMs: lastPointTimestampMs, // epoch milliseconds (numeric)
       priceSource: priceSource,
       note: 'OHLC data is simulated with consistent daily patterns'
     }, 200, {

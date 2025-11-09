@@ -78,6 +78,60 @@ const fetchCoins = async () => {
     }
 };
 
+// Normalize and validate price response (accepts ISO or epoch timestamps)
+function normalizePriceResponse(resp) {
+    // resp: the parsed JSON from /price
+    if (!resp || typeof resp !== 'object') {
+        throw new Error('Invalid price data: empty response');
+    }
+
+    // Price check: accept numeric or numeric-string
+    const priceNumeric = Number(resp.price);
+    if (!Number.isFinite(priceNumeric) || priceNumeric <= 0) {
+        throw new Error(`Invalid price data: price not numeric or <=0 (price=${resp.price})`);
+    }
+
+    // Timestamp normalization: accept timestampMs (number) or timestampIso (string)
+    let tsMs = null;
+    if (typeof resp.timestampMs === 'number' && Number.isFinite(resp.timestampMs)) {
+        tsMs = resp.timestampMs;
+    } else if (typeof resp.timestampIso === 'string') {
+        const parsed = Date.parse(resp.timestampIso);
+        if (!Number.isFinite(parsed)) {
+            throw new Error(`Invalid price data: timestampIso unparseable (timestampIso=${resp.timestampIso})`);
+        }
+        tsMs = parsed;
+    } else if (typeof resp.timestamp === 'number') {
+        tsMs = resp.timestamp; // backward compatibility (epoch ms)
+    } else if (typeof resp.timestamp === 'string') {
+        const p = Date.parse(resp.timestamp);
+        if (!Number.isFinite(p)) {
+            throw new Error(`Invalid price data: timestamp unparseable (timestamp=${resp.timestamp})`);
+        }
+        tsMs = p;
+    } else {
+        // No timestamp provided — that's acceptable but log as warning and continue
+        console.warn('[store] Price response has no timestamp; proceeding but this is less robust.');
+        tsMs = Date.now();
+    }
+
+    // priceFmt canonical (use server-provided or compute)
+    const priceFmt = resp.priceFmt || Number(priceNumeric).toFixed(2);
+
+    return {
+        coin: resp.coin,
+        price: priceNumeric, // numeric for compatibility
+        priceNumeric: priceNumeric,
+        priceFmt: priceFmt,
+        timestampMs: Number(tsMs),
+        timestampIso: new Date(tsMs).toISOString(),
+        source: resp.source || resp.priceSource || 'unknown',
+        symbol: resp.symbol,
+        change24h: resp.change24h,
+        raw: resp
+    };
+}
+
 const fetchPrice = async (coinId) => {
     const url = `${WORKER_URL}/price?coin=${encodeURIComponent(coinId)}&_=${Date.now()}`;
     try {
@@ -92,20 +146,19 @@ const fetchPrice = async (coinId) => {
         });
         
         const data = res.json ?? JSON.parse(res.text || '{}');
-        console.log(`✅ Fetched canonical price: $${data.price} (source: ${data.source || 'unknown'})`);
         
-        // Basic validation
-        if (!data || typeof data.price !== 'number') {
-            throw new Error('Invalid price payload');
+        // Normalize and validate price response
+        try {
+            const normalized = normalizePriceResponse(data);
+            console.log(`✅ Fetched canonical price: $${normalized.priceFmt} (source: ${normalized.source}, timestampMs: ${normalized.timestampMs})`);
+            
+            // Update cache with normalized data
+            _lastPriceFetch.set(coinId, { ts: Date.now(), data: normalized });
+            return normalized;
+        } catch (normErr) {
+            console.error(`❌ Invalid price data: reason=${normErr.message}, details:`, data);
+            throw new Error(`Price validation failed: ${normErr.message}`);
         }
-        if (!validatePrice(data)) {
-            console.error(`❌ Invalid price data:`, data);
-            throw new Error('Invalid price data');
-        }
-        
-        // Update cache
-        _lastPriceFetch.set(coinId, { ts: Date.now(), data });
-        return data;
     } catch (err) {
         if (err.name === 'AbortError') {
             console.warn('fetchPrice aborted:', err.message);
@@ -343,27 +396,31 @@ export const initStore = async () => {
         }
 
         // CANONICAL PRICE RECONCILIATION: Ensure history last point uses canonical price
-        if (priceData && historyData && Array.isArray(historyData) && historyData.length > 0) {
-            const canonicalPrice = Number(priceData.price); // server canonical price as number
+        // Only reconcile if price normalization succeeded
+        if (priceData && priceData.priceNumeric && historyData && Array.isArray(historyData) && historyData.length > 0) {
+            const canonicalPrice = priceData.priceNumeric; // use normalized price
+            const canonicalPriceFmt = priceData.priceFmt || Number(canonicalPrice).toFixed(2);
             const lastPoint = historyData[historyData.length - 1];
             const lastClose = Number(lastPoint.y);
+            const lastCloseFmt = Number(lastClose).toFixed(2);
 
             // Format to 2 decimals for comparison
-            const fmt = (n) => Number(n).toFixed(2);
-
-            if (fmt(canonicalPrice) !== fmt(lastClose)) {
-                console.warn(`[store] Price/history mismatch: canonicalPrice=${fmt(canonicalPrice)} lastClose=${fmt(lastClose)} -> patching last point`);
+            if (canonicalPriceFmt !== lastCloseFmt) {
+                console.warn(`[store] Price/history mismatch: canonicalPrice=$${canonicalPriceFmt} lastClose=$${lastCloseFmt} -> patching last point`);
                 // Replace last point close with canonical price (keep timestamp)
                 historyData[historyData.length - 1] = { x: lastPoint.x, y: canonicalPrice };
                 // Update cache with modified history so throttling returns consistent data
                 _lastHistoryFetch.set(`${selectedCoin}_7`, { ts: Date.now(), data: historyData });
-                console.log(`✅ [store] Patched history last point to canonical price: $${fmt(canonicalPrice)}`);
+                console.log(`✅ [store] Patched history last point to canonical price: $${canonicalPriceFmt}`);
             } else {
-                console.log(`✅ [store] Price consistency verified: canonicalPrice=${fmt(canonicalPrice)} matches history lastClose=${fmt(lastClose)}`);
+                console.log(`✅ [store] Price consistency verified: canonicalPrice=$${canonicalPriceFmt} matches history lastClose=$${lastCloseFmt}`);
             }
+        } else if (priceData && !priceData.priceNumeric) {
+            console.warn(`[store] Price data missing priceNumeric, skipping reconciliation`);
         }
 
         // Fallback: If price failed but history succeeded, extract latest price from history
+        // Only use fallback if price normalization truly failed (not just format differences)
         if (!priceData && historyData && historyData.length > 0) {
             const latestHistory = historyData[historyData.length - 1];
             const previousHistory = historyData.length > 1 ? historyData[historyData.length - 2] : latestHistory;
@@ -373,15 +430,19 @@ export const initStore = async () => {
             const coinInfo = coins.find(c => c.id === selectedCoin);
             const symbol = coinInfo?.symbol || selectedCoin.toUpperCase().substring(0, 3);
             
+            const fallbackPrice = latestHistory.y;
             priceData = {
-                price: latestHistory.y,
+                price: fallbackPrice,
+                priceNumeric: fallbackPrice,
+                priceFmt: Number(fallbackPrice).toFixed(2),
                 change24h: changePercent,
                 symbol: symbol,
-                source: 'coincap',
-                timestamp: latestHistory.x.getTime(),
+                source: 'history-fallback',
+                timestampMs: latestHistory.x.getTime(),
+                timestampIso: latestHistory.x.toISOString(),
                 fallback: true // Mark as fallback data
             };
-            console.log('⚠️ Using history data as price fallback:', priceData);
+            console.warn('⚠️ Using history data as price fallback (canonical price fetch failed):', priceData);
         }
 
         // Update UI immediately with price/history (non-blocking)
@@ -478,24 +539,27 @@ export const setCoin = async (coinId) => {
         }
 
         // CANONICAL PRICE RECONCILIATION: Ensure history last point uses canonical price
-        if (priceData && historyData && Array.isArray(historyData) && historyData.length > 0) {
-            const canonicalPrice = Number(priceData.price); // server canonical price as number
+        // Only reconcile if price normalization succeeded
+        if (priceData && priceData.priceNumeric && historyData && Array.isArray(historyData) && historyData.length > 0) {
+            const canonicalPrice = priceData.priceNumeric; // use normalized price
+            const canonicalPriceFmt = priceData.priceFmt || Number(canonicalPrice).toFixed(2);
             const lastPoint = historyData[historyData.length - 1];
             const lastClose = Number(lastPoint.y);
+            const lastCloseFmt = Number(lastClose).toFixed(2);
 
             // Format to 2 decimals for comparison
-            const fmt = (n) => Number(n).toFixed(2);
-
-            if (fmt(canonicalPrice) !== fmt(lastClose)) {
-                console.warn(`[store] Price/history mismatch: canonicalPrice=${fmt(canonicalPrice)} lastClose=${fmt(lastClose)} -> patching last point`);
+            if (canonicalPriceFmt !== lastCloseFmt) {
+                console.warn(`[store] Price/history mismatch: canonicalPrice=$${canonicalPriceFmt} lastClose=$${lastCloseFmt} -> patching last point`);
                 // Replace last point close with canonical price (keep timestamp)
                 historyData[historyData.length - 1] = { x: lastPoint.x, y: canonicalPrice };
                 // Update cache with modified history so throttling returns consistent data
                 _lastHistoryFetch.set(`${coinId}_7`, { ts: Date.now(), data: historyData });
-                console.log(`✅ [store] Patched history last point to canonical price: $${fmt(canonicalPrice)}`);
+                console.log(`✅ [store] Patched history last point to canonical price: $${canonicalPriceFmt}`);
             } else {
-                console.log(`✅ [store] Price consistency verified: canonicalPrice=${fmt(canonicalPrice)} matches history lastClose=${fmt(lastClose)}`);
+                console.log(`✅ [store] Price consistency verified: canonicalPrice=$${canonicalPriceFmt} matches history lastClose=$${lastCloseFmt}`);
             }
+        } else if (priceData && !priceData.priceNumeric) {
+            console.warn(`[store] Price data missing priceNumeric, skipping reconciliation`);
         }
 
         // Fallback: If price failed but history succeeded, extract latest price from history
@@ -511,15 +575,19 @@ export const setCoin = async (coinId) => {
                 const coinInfo = currentState.coins?.find(c => c.id === coinId);
                 const symbol = coinInfo?.symbol || coinId.toUpperCase().substring(0, 3);
                 
+                const fallbackPrice = latestHistory.y;
                 fallbackPriceData = {
-                    price: latestHistory.y,
+                    price: fallbackPrice,
+                    priceNumeric: fallbackPrice,
+                    priceFmt: Number(fallbackPrice).toFixed(2),
                     change24h: changePercent,
                     symbol: symbol,
-                    source: 'coincap',
-                    timestamp: latestHistory.x.getTime(),
+                    source: 'history-fallback',
+                    timestampMs: latestHistory.x.getTime(),
+                    timestampIso: latestHistory.x.toISOString(),
                     fallback: true // Mark as fallback data
                 };
-                console.log('⚠️ Using history data as price fallback:', fallbackPriceData);
+                console.warn('⚠️ Using history data as price fallback (canonical price fetch failed):', fallbackPriceData);
                 
                 // Return updated state
                 return {
@@ -590,7 +658,16 @@ const validateCoins = (coins) => {
 };
 
 const validatePrice = (data) => {
-    return data && typeof data.price === 'number' && typeof data.change24h === 'number' && typeof data.symbol === 'string';
+    // Updated validation: accept normalized price response structure
+    if (!data) return false;
+    // priceNumeric or price must be a valid number
+    const price = data.priceNumeric || data.price;
+    if (typeof price !== 'number' || !Number.isFinite(price) || price <= 0) return false;
+    // symbol should be a string
+    if (data.symbol && typeof data.symbol !== 'string') return false;
+    // change24h is optional but if present should be numeric
+    if (data.change24h !== undefined && (typeof data.change24h !== 'number' || !Number.isFinite(data.change24h))) return false;
+    return true;
 };
 
 const validateHistory = (data) => {
