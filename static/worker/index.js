@@ -700,15 +700,23 @@ async function fetchFreshHistoryData(coinId, days, env) {
 
 async function refreshHistoryInBackground(coinId, days, env) {
   try {
-    await fetchFreshHistoryData(coinId, days, env);
-    console.log(`✅ [Background History] Refreshed history for ${coinId}`);
+    console.log(`🔄 [Background History] Refreshing history for ${coinId} (non-blocking)`);
+    // Use promise without awaiting to ensure non-blocking
+    const refreshPromise = fetchFreshHistoryData(coinId, days, env);
+    
+    // Don't await - let it run in background
+    refreshPromise.then(() => {
+      console.log(`✅ [Background History] Refreshed history for ${coinId}`);
+    }).catch(error => {
+      // Gracefully handle backoff errors
+      if (error.code === 'backoff' || error.code === 'retries_exhausted') {
+        console.warn(`[Background History] Suppressed upstream error for ${coinId}: ${error.message}`);
+        return;
+      }
+      console.warn(`⚠️ [Background History] Failed to refresh ${coinId}: ${error.message}`);
+    });
   } catch (error) {
-    // Gracefully handle backoff errors
-    if (error.code === 'backoff' || error.code === 'retries_exhausted') {
-      console.warn(`[Background History] Suppressed upstream error for ${coinId}: ${error.message}`);
-      return;
-    }
-    console.warn(`⚠️ [Background History] Failed to refresh ${coinId}: ${error.message}`);
+    console.warn(`⚠️ [Background History] Error initiating refresh for ${coinId}: ${error.message}`);
   }
 }
 
@@ -2064,42 +2072,62 @@ function canonicalFormatNumber(n, dp = 2) {
 }
 
 // Get canonical live price from KV → CoinCap → history (server-authoritative)
+// Fast path: KV first (if fresh), then CoinCap with 3s timeout, then history fallback
 async function getCanonicalPrice(coinId, env) {
-  console.log(`[getCanonicalPrice] Fetching canonical price for ${coinId}`);
+  const startTime = Date.now();
+  console.log(`[AI] ai-get-canonical-price-start: coin=${coinId}, ts=${startTime}`);
   
   // 1. Check KV price cache (fresh if age <= 60s)
   const kvKey = `price_${coinId}`;
   try {
+    const kvStart = Date.now();
     const kvRaw = await env.RATE_LIMIT_KV.get(kvKey);
+    const kvLatency = Date.now() - kvStart;
+    
     if (kvRaw) {
       const parsed = JSON.parse(kvRaw);
       if (parsed?.data?.price && parsed?.data?.timestamp) {
         const ageMs = Date.now() - new Date(parsed.data.timestamp).getTime();
         if (ageMs <= 60 * 1000) {
-          console.log(`[getCanonicalPrice] Using fresh KV price for ${coinId}: ${parsed.data.price} (age: ${Math.floor(ageMs/1000)}s)`);
+          console.log(`[AI] ai-get-canonical-price-end: source=kv-fresh, price=${parsed.data.price}, age=${Math.floor(ageMs/1000)}s, kvLatency=${kvLatency}ms, totalLatency=${Date.now() - startTime}ms`);
           return {
             price: Number(parsed.data.price),
             timestamp: parsed.data.timestamp,
             source: 'kv-fresh'
           };
+        } else {
+          console.log(`[AI] ai-get-canonical-price: KV cache stale (age=${Math.floor(ageMs/1000)}s), fetching live`);
         }
       }
     }
   } catch (e) {
-    console.warn(`[getCanonicalPrice] KV read failed for ${coinId}:`, e.message);
+    console.warn(`[AI] ai-get-canonical-price: KV read failed for ${coinId}:`, e.message);
   }
   
-  // 2. Fetch live from CoinCap
+  // 2. Fetch live from CoinCap with fast timeout (3s max)
   try {
-    const map = await fetchAssetsBatch(coinId, env);
+    const coincapStart = Date.now();
+    console.log(`[AI] ai-get-canonical-price: fetching live from CoinCap with ${AI_PRICE_FETCH_TIMEOUT_MS}ms timeout`);
+    
+    // Use Promise.race to enforce fast timeout
+    const coincapFetch = fetchAssetsBatch(coinId, env);
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(Object.assign(new Error('price-fetch-timeout'), { code: 'price-fetch-timeout' })), AI_PRICE_FETCH_TIMEOUT_MS)
+    );
+    
+    const map = await Promise.race([coincapFetch, timeoutPromise]);
+    
     if (map && map[coinId]) {
-      console.log(`[getCanonicalPrice] Using live CoinCap price for ${coinId}: ${map[coinId].price}`);
-      // Cache it
-      await env.RATE_LIMIT_KV.put(kvKey, JSON.stringify({
+      const coincapLatency = Date.now() - coincapStart;
+      console.log(`[AI] ai-get-canonical-price-end: source=coincap-live, price=${map[coinId].price}, coincapLatency=${coincapLatency}ms, totalLatency=${Date.now() - startTime}ms`);
+      
+      // Cache it (non-blocking - don't await if slow)
+      env.RATE_LIMIT_KV.put(kvKey, JSON.stringify({
         data: map[coinId],
         timestamp: Date.now(),
         source: 'coincap'
-      }));
+      })).catch(err => console.warn(`[AI] Failed to cache price (non-blocking):`, err.message));
+      
       return {
         price: Number(map[coinId].price),
         timestamp: new Date().toISOString(),
@@ -2107,15 +2135,48 @@ async function getCanonicalPrice(coinId, env) {
       };
     }
   } catch (e) {
-    console.warn(`[getCanonicalPrice] CoinCap fetch failed for ${coinId}:`, e.message);
+    const coincapLatency = Date.now() - Date.now(); // Approximate
+    console.warn(`[AI] ai-get-canonical-price: CoinCap fetch failed/timeout for ${coinId}: ${e.code || e.message}, falling back to history`);
   }
   
-  // 3. Fallback to last history point
+  // 3. Fallback to last history point (fast path - use cached history if available)
   try {
-    const history = await fetchAssetHistory(coinId, 7, env);
+    const historyStart = Date.now();
+    console.log(`[AI] ai-get-canonical-price: falling back to history`);
+    
+    // Try to get cached history first (fast)
+    const historyKey = `history_${coinId}_7`;
+    try {
+      const historyRaw = await env.RATE_LIMIT_KV.get(historyKey);
+      if (historyRaw) {
+        const historyParsed = JSON.parse(historyRaw);
+        if (historyParsed?.data?.prices && historyParsed.data.prices.length > 0) {
+          const last = historyParsed.data.prices[historyParsed.data.prices.length - 1];
+          const historyLatency = Date.now() - historyStart;
+          console.log(`[AI] ai-get-canonical-price-end: source=history-cached, price=${last.price}, historyLatency=${historyLatency}ms, totalLatency=${Date.now() - startTime}ms`);
+          return {
+            price: Number(last.price),
+            timestamp: last.timestamp,
+            source: 'history-fallback'
+          };
+        }
+      }
+    } catch (historyCacheErr) {
+      // Cache read failed, try live fetch
+    }
+    
+    // Fallback to live history fetch (with timeout)
+    const history = await Promise.race([
+      fetchAssetHistory(coinId, 7, env),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(Object.assign(new Error('history-fetch-timeout'), { code: 'history-fetch-timeout' })), AI_PRICE_FETCH_TIMEOUT_MS)
+      )
+    ]);
+    
     if (history && history.prices && history.prices.length > 0) {
       const last = history.prices[history.prices.length - 1];
-      console.log(`[getCanonicalPrice] Using history last price for ${coinId}: ${last.price} (fallback)`);
+      const historyLatency = Date.now() - historyStart;
+      console.log(`[AI] ai-get-canonical-price-end: source=history-live, price=${last.price}, historyLatency=${historyLatency}ms, totalLatency=${Date.now() - startTime}ms`);
       return {
         price: Number(last.price),
         timestamp: last.timestamp,
@@ -2123,10 +2184,11 @@ async function getCanonicalPrice(coinId, env) {
       };
     }
   } catch (e) {
-    console.warn(`[getCanonicalPrice] History fetch failed for ${coinId}:`, e.message);
+    console.warn(`[AI] ai-get-canonical-price: History fetch failed for ${coinId}:`, e.code || e.message);
   }
   
   // 4. If all fail, throw
+  console.error(`[AI] ai-get-canonical-price-end: FAILED for ${coinId}, totalLatency=${Date.now() - startTime}ms`);
   throw new Error(`Unable to fetch canonical price for ${coinId}`);
 }
 
@@ -2176,32 +2238,43 @@ function buildTechnicalContextForAI({ price, rsi, sma, smaPeriod, bb }, timefram
 
 async function handleAIExplain(request, env) {
   const startTime = Date.now();
-  console.log('[AI] ai-explain-request-start');
+  const requestId = `ai-explain-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  console.log(`[AI] ai-explain-request-start: requestId=${requestId}, ts=${startTime}`);
   
   try {
     if (request.method !== 'POST') {
+      console.log(`[AI] ai-explain-request-end: method-not-allowed, latency=${Date.now() - startTime}ms`);
       return errorResponse('Method not allowed', 405);
     }
     
+    const parseStart = Date.now();
     const body = await request.json();
+    const parseLatency = Date.now() - parseStart;
     const { rsi, sma, bb, signals, coin, timeframe, currentPrice, currentRSI, currentSMA, currentBBUpper, currentBBLower, priceData } = body;
+    console.log(`[AI] ai-explain: parsed request body in ${parseLatency}ms`);
     
     if (!coin || !timeframe) {
+      console.log(`[AI] ai-explain-request-end: missing-required-data, latency=${Date.now() - startTime}ms`);
       return errorResponse('Missing required data: coin and timeframe');
     }
     
     // SERVER-AUTHORITATIVE: Get canonical live price (KV → CoinCap → history)
     let canonicalPriceObj;
+    const priceFetchStart = Date.now();
     try {
       canonicalPriceObj = await getCanonicalPrice(coin, env);
-      console.log(`[AI] canonicalPriceObj = { price: ${canonicalPriceObj.price}, ts: ${canonicalPriceObj.timestamp}, source: ${canonicalPriceObj.source} }`);
+      const priceFetchLatency = Date.now() - priceFetchStart;
+      console.log(`[AI] ai-get-canonical-price-complete: price=${canonicalPriceObj.price}, source=${canonicalPriceObj.source}, latency=${priceFetchLatency}ms`);
     } catch (priceErr) {
-      console.warn(`[AI] Failed to get canonical price for ${coin}:`, priceErr.message);
+      const priceFetchLatency = Date.now() - priceFetchStart;
+      console.warn(`[AI] ai-get-canonical-price-failed: error=${priceErr.code || priceErr.message}, latency=${priceFetchLatency}ms`);
+      
       if (currentPrice) {
         canonicalPriceObj = { price: Number(currentPrice), timestamp: new Date().toISOString(), source: 'client-fallback' };
         console.log(`[AI] Using client-provided price as fallback: ${canonicalPriceObj.price}`);
       } else {
         // Build minimal context for fallback
+        console.log(`[AI] ai-build-technical-context: building minimal context (no price available)`);
         const minimalCtx = buildTechnicalContextForAI({
           price: 0,
           rsi: 50,
@@ -2223,6 +2296,7 @@ async function handleAIExplain(request, env) {
           DU: '0.00',
           BW: '0.00'
         });
+        console.log(`[AI] ai-explain-request-end: status=fallback, reason=price-fetch-failed, latency=${Date.now() - startTime}ms`);
         return jsonResponse({
           ok: true,
           method: 'rule-based-fallback',
@@ -2256,7 +2330,8 @@ async function handleAIExplain(request, env) {
       ? (signals.find(s => s.type === 'SMA')?.period || 4)
       : 4;
     
-    console.log(`[AI] Built technicalContext for ${coin}: P=${priceValue} (canonical), RSI=${rsiValue}, SMA=${smaValue}, SMA(${smaPeriod}), BB=[${bbLower}-${bbUpper}], timeframe=${timeframe}`);
+    const contextBuildStart = Date.now();
+    console.log(`[AI] ai-build-technical-context: P=${priceValue} (canonical), RSI=${rsiValue}, SMA=${smaValue}, SMA(${smaPeriod}), BB=[${bbLower}-${bbUpper}], timeframe=${timeframe}`);
     
     if (currentPrice && Math.abs(currentPrice - priceValue) > 0.01) {
       console.log(`[AI] Price mismatch detected: client=${currentPrice}, canonical=${priceValue} (using canonical)`);
@@ -2270,13 +2345,16 @@ async function handleAIExplain(request, env) {
       smaPeriod: smaPeriod,
       bb: { lower: bbLower, upper: bbUpper }
     }, timeframe);
-    
-    console.log(`[AI] AllowedNumbers: [${ctx.allowedNumbers.join(', ')}]`);
+    const contextBuildLatency = Date.now() - contextBuildStart;
+    console.log(`[AI] ai-build-technical-context-complete: AllowedNumbers=[${ctx.allowedNumbers.slice(0, 5).join(', ')}...], latency=${contextBuildLatency}ms`);
     
     // Execute explain flow with overall timeout
     const doExplain = async () => {
+      const explainStart = Date.now();
       try {
+        console.log(`[AI] ai-do-explain-start: entering Cohere flow, timeout=${AI_TOTAL_TIMEOUT_MS}ms`);
         const cohereResult = await explainPatternWithCohereStrict(coin, ctx, env);
+        const explainLatency = Date.now() - explainStart;
         
         // Price mismatch guard: verify response price matches canonical
         if (cohereResult.explanation && cohereResult.technicalContext) {
@@ -2287,6 +2365,7 @@ async function handleAIExplain(request, env) {
           }
         }
         
+        console.log(`[AI] ai-do-explain-success: status=${cohereResult.repaired ? 'repaired' : 'ok'}, latency=${explainLatency}ms`);
         return {
           result: {
             ok: true,
@@ -2300,20 +2379,29 @@ async function handleAIExplain(request, env) {
           reason: cohereResult.violationReason || null
         };
       } catch (error) {
-        console.log(`[AI] Cohere flow failed: ${error.code || error.message}, using fallback`);
+        const explainLatency = Date.now() - explainStart;
+        console.log(`[AI] ai-do-explain-failed: error=${error.code || error.message}, latency=${explainLatency}ms, will use fallback`);
         throw error;
       }
     };
     
     // Race against total timeout
     let explainResult;
+    const raceStart = Date.now();
     try {
+      console.log(`[AI] ai-explain-race-start: totalTimeout=${AI_TOTAL_TIMEOUT_MS}ms, remainingBudget=${AI_TOTAL_TIMEOUT_MS - (Date.now() - startTime)}ms`);
       explainResult = await Promise.race([
         doExplain(),
         new Promise((_, reject) => 
-          setTimeout(() => reject(Object.assign(new Error('ai-total-timeout'), { code: 'ai-total-timeout' })), AI_TOTAL_TIMEOUT_MS)
+          setTimeout(() => {
+            const elapsed = Date.now() - startTime;
+            console.log(`[AI] ai-total-timeout-triggered: elapsed=${elapsed}ms, timeout=${AI_TOTAL_TIMEOUT_MS}ms`);
+            reject(Object.assign(new Error('ai-total-timeout'), { code: 'ai-total-timeout' }));
+          }, AI_TOTAL_TIMEOUT_MS)
         )
       ]);
+      const raceLatency = Date.now() - raceStart;
+      console.log(`[AI] ai-explain-race-complete: success, raceLatency=${raceLatency}ms`);
       
       // Success path
       const headers = {
@@ -2325,13 +2413,14 @@ async function handleAIExplain(request, env) {
         headers['X-AI-Reason'] = explainResult.reason;
       }
       
-      console.log(`[AI] ai-explain-request-end: status=${explainResult.status}, latency=${Date.now() - startTime}ms`);
+      console.log(`[AI] ai-explain-request-end: status=${explainResult.status}, reason=${explainResult.reason || 'none'}, totalLatency=${Date.now() - startTime}ms`);
       return jsonResponse(explainResult.result, 200, headers);
       
     } catch (error) {
-      // Timeout or error - use fallback
-      console.log(`[AI] ai-fallback-returned: ${error.code || error.message}`);
+      const raceLatency = Date.now() - raceStart;
+      console.log(`[AI] ai-fallback-returned: error=${error.code || error.message}, raceLatency=${raceLatency}ms, building fallback`);
       
+      const fallbackStart = Date.now();
       const fallbackResult = buildRuleBasedExplanationStrict({
         coin,
         P: ctx.P,
@@ -2346,6 +2435,7 @@ async function handleAIExplain(request, env) {
         DU: ctx.DU,
         BW: ctx.BW
       });
+      const fallbackLatency = Date.now() - fallbackStart;
       
       const reason = error.code || error.message || 'unknown';
       const headers = {
@@ -2354,7 +2444,7 @@ async function handleAIExplain(request, env) {
         'X-Latency-ms': String(Date.now() - startTime)
       };
       
-      console.log(`[AI] ai-explain-request-end: status=fallback, reason=${reason}, latency=${Date.now() - startTime}ms`);
+      console.log(`[AI] ai-explain-request-end: status=fallback, reason=${reason}, fallbackLatency=${fallbackLatency}ms, totalLatency=${Date.now() - startTime}ms`);
       return jsonResponse({
         ok: true,
         method: 'rule-based-fallback',
@@ -2367,9 +2457,12 @@ async function handleAIExplain(request, env) {
     }
     
   } catch (error) {
-    console.error('[AI] ai-explain-error:', error);
+    console.error(`[AI] ai-explain-error: requestId=${requestId}, error=${error.message}, stack=${error.stack?.substring(0, 200)}, latency=${Date.now() - startTime}ms`);
     
     // Final safety net - always return something
+    const safetyNetStart = Date.now();
+    console.log(`[AI] ai-explain-safety-net: building minimal fallback`);
+    
     const minimalCtx = buildTechnicalContextForAI({
       price: 0,
       rsi: 50,
@@ -2391,7 +2484,9 @@ async function handleAIExplain(request, env) {
       DU: '0.00',
       BW: '0.00'
     });
+    const safetyNetLatency = Date.now() - safetyNetStart;
     
+    console.log(`[AI] ai-explain-request-end: status=fallback, reason=handler-error, safetyNetLatency=${safetyNetLatency}ms, totalLatency=${Date.now() - startTime}ms`);
     return jsonResponse({
       ok: true,
       method: 'rule-based-fallback',
@@ -2665,45 +2760,60 @@ Return a JSON object (no other top-level text) with this exact schema:
 
 If you cannot produce compliant output, set ok=false and explain short reason.`;
 
-  console.log(`[AI] ai-model-call-start: calling Cohere with timeout=${timeoutMs}ms`);
+  const modelCallStart = Date.now();
+  console.log(`[AI] ai-model-call-start: coin=${coin}, timeout=${timeoutMs}ms, ts=${modelCallStart}`);
   
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  let timeoutId;
   
   try {
-    const response = await Promise.race([
-      fetch('https://api.cohere.com/v2/chat', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${env.COHERE_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'command-a-03-2025',
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userPrompt }
-          ],
-          temperature: 0.3,
-          max_tokens: 1500
-        }),
-        signal: controller.signal
-      }),
-      new Promise((_, reject) => 
-        setTimeout(() => reject(Object.assign(new Error('ai-model-timeout'), { code: 'ai-model-timeout' })), timeoutMs)
-      )
-    ]);
+    // Set up timeout promise
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => {
+        controller.abort();
+        const elapsed = Date.now() - modelCallStart;
+        console.log(`[AI] ai-model-call-timeout: exceeded ${timeoutMs}ms, elapsed=${elapsed}ms`);
+        reject(Object.assign(new Error('ai-model-timeout'), { code: 'ai-model-timeout' }));
+      }, timeoutMs);
+    });
     
-    clearTimeout(timeoutId);
+    // Fetch with AbortController
+    const fetchPromise = fetch('https://api.cohere.com/v2/chat', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${env.COHERE_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'command-a-03-2025',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ],
+        temperature: 0.3,
+        max_tokens: 1500
+      }),
+      signal: controller.signal
+    });
+    
+    const response = await Promise.race([fetchPromise, timeoutPromise]);
+    
+    if (timeoutId) clearTimeout(timeoutId);
+    
+    const fetchLatency = Date.now() - modelCallStart;
+    console.log(`[AI] ai-model-call: fetch completed in ${fetchLatency}ms, status=${response.status}`);
     
     if (!response.ok) {
-      const errorBody = await response.text();
-      console.log('[AI] Cohere API error:', errorBody);
+      const errorBody = await response.text().catch(() => '');
+      console.log(`[AI] ai-model-call-error: HTTP ${response.status}, body=${errorBody.substring(0, 100)}`);
       throw Object.assign(new Error(`Cohere Chat API error: ${response.status}`), { code: 'cohere-api-error' });
     }
     
+    const parseStart = Date.now();
     const data = await response.json();
+    const parseLatency = Date.now() - parseStart;
     const messageContent = data.message?.content?.[0]?.text || '';
+    console.log(`[AI] ai-model-call: parsed response in ${parseLatency}ms, contentLength=${messageContent.length}`);
     
     // Parse JSON from response
     let result;
@@ -2715,16 +2825,17 @@ If you cannot produce compliant output, set ok=false and explain short reason.`;
         throw new Error('No JSON object found in response');
       }
     } catch (parseError) {
-      console.log('[AI] Failed to parse Cohere response:', parseError.message);
+      console.log(`[AI] ai-model-call-parse-error: ${parseError.message}`);
       throw Object.assign(new Error('Invalid response format from Cohere'), { code: 'cohere-parse-error' });
     }
     
     if (result.ok === false) {
-      console.log('[AI] Model returned ok=false, reason:', result.reason);
+      console.log(`[AI] ai-model-call-compliance-error: reason=${result.reason}`);
       throw Object.assign(new Error(`Model compliance failure: ${result.reason || 'unknown'}`), { code: 'model-compliance-failure' });
     }
     
-    console.log('[AI] ai-model-call-end: received valid response');
+    const totalLatency = Date.now() - modelCallStart;
+    console.log(`[AI] ai-model-call-end: success, totalLatency=${totalLatency}ms`);
     return {
       explanation: result.explanation || messageContent,
       technicalContext: result.technicalContext || ctx.technicalContext,
@@ -2732,11 +2843,15 @@ If you cannot produce compliant output, set ok=false and explain short reason.`;
     };
     
   } catch (error) {
-    clearTimeout(timeoutId);
+    if (timeoutId) clearTimeout(timeoutId);
+    const totalLatency = Date.now() - modelCallStart;
+    
     if (error.name === 'AbortError' || error.code === 'ai-model-timeout') {
-      console.log(`[AI] ai-model-call-timeout: exceeded ${timeoutMs}ms`);
+      console.log(`[AI] ai-model-call-timeout: exceeded ${timeoutMs}ms, totalLatency=${totalLatency}ms`);
       throw Object.assign(new Error('ai-model-timeout'), { code: 'ai-model-timeout' });
     }
+    
+    console.log(`[AI] ai-model-call-error: ${error.code || error.message}, totalLatency=${totalLatency}ms`);
     throw error;
   }
 }
@@ -2787,68 +2902,91 @@ Please rewrite the "explanation" ensuring:
 
 Return the same JSON schema. If you cannot comply, set ok=false and reason:"cannot_comply".`;
 
-  console.log(`[AI] ai-repair-start: attempting repair with timeout=${timeoutMs}ms`);
+  const repairStart = Date.now();
+  console.log(`[AI] ai-repair-start: coin=${coin}, timeout=${timeoutMs}ms, violations=${violations.details.length}, ts=${repairStart}`);
   
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  let timeoutId;
   
   try {
-    const response = await Promise.race([
-      fetch('https://api.cohere.com/v2/chat', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${env.COHERE_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'command-a-03-2025',
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userPrompt },
-            { role: 'assistant', content: modelResult.rawResponse || modelResult.explanation },
-            { role: 'user', content: repairPrompt }
-          ],
-          temperature: 0.2,
-          max_tokens: 1500
-        }),
-        signal: controller.signal
-      }),
-      new Promise((_, reject) => 
-        setTimeout(() => reject(Object.assign(new Error('ai-repair-timeout'), { code: 'ai-repair-timeout' })), timeoutMs)
-      )
-    ]);
+    // Set up timeout promise
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => {
+        controller.abort();
+        const elapsed = Date.now() - repairStart;
+        console.log(`[AI] ai-repair-timeout: exceeded ${timeoutMs}ms, elapsed=${elapsed}ms`);
+        reject(Object.assign(new Error('ai-repair-timeout'), { code: 'ai-repair-timeout' }));
+      }, timeoutMs);
+    });
     
-    clearTimeout(timeoutId);
+    // Fetch with AbortController
+    const fetchPromise = fetch('https://api.cohere.com/v2/chat', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${env.COHERE_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'command-a-03-2025',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+          { role: 'assistant', content: modelResult.rawResponse || modelResult.explanation },
+          { role: 'user', content: repairPrompt }
+        ],
+        temperature: 0.2,
+        max_tokens: 1500
+      }),
+      signal: controller.signal
+    });
+    
+    const response = await Promise.race([fetchPromise, timeoutPromise]);
+    
+    if (timeoutId) clearTimeout(timeoutId);
+    
+    const fetchLatency = Date.now() - repairStart;
+    console.log(`[AI] ai-repair: fetch completed in ${fetchLatency}ms, status=${response.status}`);
     
     if (!response.ok) {
+      console.log(`[AI] ai-repair-error: HTTP ${response.status}`);
       throw Object.assign(new Error(`Repair request failed: ${response.status}`), { code: 'repair-api-error' });
     }
     
+    const parseStart = Date.now();
     const data = await response.json();
+    const parseLatency = Date.now() - parseStart;
     const repairContent = data.message?.content?.[0]?.text || '';
+    console.log(`[AI] ai-repair: parsed response in ${parseLatency}ms, contentLength=${repairContent.length}`);
     
     const repairJsonMatch = repairContent.match(/\{[\s\S]*\}/);
     if (!repairJsonMatch) {
+      console.log(`[AI] ai-repair-parse-error: no JSON found`);
       throw Object.assign(new Error('No JSON found in repair response'), { code: 'repair-parse-error' });
     }
     
     const repairResult = JSON.parse(repairJsonMatch[0]);
     if (repairResult.ok === false || !repairResult.explanation) {
+      console.log(`[AI] ai-repair-compliance-error: ok=${repairResult.ok}, hasExplanation=${!!repairResult.explanation}`);
       throw Object.assign(new Error('Repair response marked as non-compliant'), { code: 'repair-non-compliant' });
     }
     
-    console.log('[AI] ai-repair-end: received repair response');
+    const totalLatency = Date.now() - repairStart;
+    console.log(`[AI] ai-repair-end: success, totalLatency=${totalLatency}ms`);
     return {
       explanation: repairResult.explanation,
       technicalContext: repairResult.technicalContext || ctx.technicalContext
     };
     
   } catch (error) {
-    clearTimeout(timeoutId);
+    if (timeoutId) clearTimeout(timeoutId);
+    const totalLatency = Date.now() - repairStart;
+    
     if (error.name === 'AbortError' || error.code === 'ai-repair-timeout') {
-      console.log(`[AI] ai-repair-timeout: exceeded ${timeoutMs}ms`);
+      console.log(`[AI] ai-repair-timeout: exceeded ${timeoutMs}ms, totalLatency=${totalLatency}ms`);
       throw Object.assign(new Error('ai-repair-timeout'), { code: 'ai-repair-timeout' });
     }
+    
+    console.log(`[AI] ai-repair-error: ${error.code || error.message}, totalLatency=${totalLatency}ms`);
     throw error;
   }
 }
@@ -2856,19 +2994,21 @@ Return the same JSON schema. If you cannot comply, set ok=false and reason:"cann
 // Strict Cohere explanation with validation and repair (refactored with timeouts)
 async function explainPatternWithCohereStrict(coin, ctx, env) {
   const { P, R, S, L, U, PERIOD, TF, allowedNumbers } = ctx;
+  const explainStart = Date.now();
   
   try {
     // Step 1: Call model with timeout
-    console.log('[AI] ai-model-call-start');
     const modelResult = await callModelWithTimeout(coin, ctx, AI_MODEL_TIMEOUT_MS, env);
-    console.log('[AI] ai-model-call-end');
+    const modelLatency = Date.now() - explainStart;
     
     // Step 2: Validate response
-    console.log('[AI] ai-validate: checking for violations');
+    const validateStart = Date.now();
+    console.log(`[AI] ai-validate-start: checking for violations`);
     const violations = validateExplanation(modelResult.explanation, allowedNumbers, PERIOD, { P, R, S, L, U, PERIOD, TF });
+    const validateLatency = Date.now() - validateStart;
     
     if (!violations.hasViolations) {
-      console.log('[AI] ai-validate: passed validation');
+      console.log(`[AI] ai-validate-end: passed, latency=${validateLatency}ms, totalLatency=${Date.now() - explainStart}ms`);
       return {
         explanation: modelResult.explanation,
         repaired: false,
@@ -2876,16 +3016,20 @@ async function explainPatternWithCohereStrict(coin, ctx, env) {
       };
     }
     
+    console.log(`[AI] ai-validate-end: violations found (${violations.details.length}), latency=${validateLatency}ms: ${violations.details.slice(0, 2).join('; ')}`);
+    
     // Step 3: Repair attempt (single shot)
-    console.log(`[AI] ai-repair-start: violations detected: ${violations.details.join('; ')}`);
     const repairResult = await callRepairWithTimeout(coin, ctx, modelResult, violations, AI_REPAIR_TIMEOUT_MS, env);
-    console.log('[AI] ai-repair-end');
+    const repairLatency = Date.now() - (explainStart + modelLatency + validateLatency);
     
     // Step 4: Re-validate repaired response
+    const revalidateStart = Date.now();
+    console.log(`[AI] ai-validate-repair-start: re-validating repaired response`);
     const repairViolations = validateExplanation(repairResult.explanation, allowedNumbers, PERIOD, { P, R, S, L, U, PERIOD, TF });
+    const revalidateLatency = Date.now() - revalidateStart;
     
     if (!repairViolations.hasViolations) {
-      console.log('[AI] ai-validate: repair passed validation');
+      console.log(`[AI] ai-validate-repair-end: passed, latency=${revalidateLatency}ms, totalLatency=${Date.now() - explainStart}ms`);
       return {
         explanation: repairResult.explanation,
         repaired: true,
@@ -2894,11 +3038,12 @@ async function explainPatternWithCohereStrict(coin, ctx, env) {
     }
     
     // Repair failed validation - throw to trigger fallback
-    console.log(`[AI] ai-repair-failed: repair still has violations: ${repairViolations.details.join('; ')}`);
+    console.log(`[AI] ai-repair-failed: repair still has violations (${repairViolations.details.length}), totalLatency=${Date.now() - explainStart}ms: ${repairViolations.details.slice(0, 2).join('; ')}`);
     throw Object.assign(new Error('Repair attempt still contains violations'), { code: 'repair-failed' });
     
   } catch (error) {
-    console.log(`[AI] explainPatternWithCohereStrict error: ${error.code || error.message}`);
+    const totalLatency = Date.now() - explainStart;
+    console.log(`[AI] explainPatternWithCohereStrict-error: error=${error.code || error.message}, totalLatency=${totalLatency}ms`);
     throw error; // Re-throw to trigger fallback in handleAIExplain
   }
 }

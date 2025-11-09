@@ -1549,7 +1549,7 @@
 	}
 
 	let aiExplanationPending = false;
-	const AI_CLIENT_TIMEOUT_MS = 14000; // 14s client timeout (1s less than server 15s)
+	const AI_CLIENT_TIMEOUT_MS = 21000; // 21s client timeout (1s less than server 22s)
 	
 	async function getAIExplanation() {
 		if (!currentAnalysisData) {
@@ -1640,8 +1640,19 @@
 					
 					// Only render if ok === true or method === 'rule-based-fallback'
 					if (aiExplanation.ok === true || aiExplanation.method === 'rule-based-fallback') {
+						// If server returned fallback due to timeout, show appropriate message
+						let explanationText = aiExplanation.explanation;
+						if (aiStatus === 'fallback' && (aiReason === 'ai-total-timeout' || aiReason === 'ai-model-timeout' || aiReason === 'ai-repair-timeout')) {
+							// Prepend timeout message to fallback explanation
+							explanationText = `<div style="color: var(--warning-color); margin-bottom: 1rem; padding: 0.75rem; background: #fff3cd; border-radius: 8px; border-left: 4px solid #ff9800;">
+								<strong>⏱️ AI Timed Out on Server</strong><br>
+								The AI explanation request exceeded the server timeout (${aiReason === 'ai-model-timeout' ? 'model call' : aiReason === 'ai-repair-timeout' ? 'repair' : 'total'} timeout). 
+								A rule-based explanation is provided below. <em>You can try again if you'd like an AI-generated explanation.</em>
+							</div>` + explanationText;
+						}
+						
 						aiExplanationData = {
-							explanation: aiExplanation.explanation,
+							explanation: explanationText,
 							method: aiExplanation.method || 'cohere-chat-api',
 							technicalContext: aiExplanation.technicalContext,
 							timestamp: aiExplanation.timestamp,
@@ -2135,9 +2146,17 @@
 							{#if aiExplanationData.aiStatus === 'repaired'}
 								<span class="ai-status-badge" style="font-size: 0.75rem; color: #ff9800; margin-left: 0.5rem; padding: 0.2rem 0.5rem; background: #fff3cd; border-radius: 12px;" title={aiExplanationData.aiReason || 'Model violation repaired'}>⚠️ Repaired</span>
 							{:else if aiExplanationData.aiStatus === 'fallback'}
-								<span class="ai-status-badge" style="font-size: 0.75rem; color: #9e9e9e; margin-left: 0.5rem; padding: 0.2rem 0.5rem; background: #f5f5f5; border-radius: 12px;" title={aiExplanationData.aiReason || aiExplanationData.fallbackReason || 'Using rule-based fallback'}>📊 Fallback</span>
+								<span class="ai-status-badge" style="font-size: 0.75rem; color: #9e9e9e; margin-left: 0.5rem; padding: 0.2rem 0.5rem; background: #f5f5f5; border-radius: 12px;" title={aiExplanationData.aiReason || aiExplanationData.fallbackReason || 'Using rule-based fallback'}>
+									{#if aiExplanationData.aiReason && (aiExplanationData.aiReason.includes('timeout') || aiExplanationData.aiReason.includes('ai-model-timeout') || aiExplanationData.aiReason.includes('ai-total-timeout'))}
+										⏱️ Timeout Fallback
+									{:else}
+										📊 Fallback
+									{/if}
+								</span>
 							{:else if aiExplanationData.aiStatus === 'ok'}
 								<span class="ai-status-badge" style="font-size: 0.75rem; color: #4caf50; margin-left: 0.5rem; padding: 0.2rem 0.5rem; background: #e8f5e9; border-radius: 12px;">✅ Validated</span>
+							{:else if aiExplanationData.aiStatus === 'timeout'}
+								<span class="ai-status-badge" style="font-size: 0.75rem; color: #ff5722; margin-left: 0.5rem; padding: 0.2rem 0.5rem; background: #ffe0b2; border-radius: 12px;" title="Client-side timeout">⏱️ Client Timeout</span>
 							{/if}
 						</h3>
 						<div class="ai-explanation-content">
