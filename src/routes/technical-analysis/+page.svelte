@@ -2126,7 +2126,22 @@
 							</div>
 						{/if}
 						
-						<!-- Educational Notes moved to left column - removed from sidebar -->
+						<!-- Educational Notes moved to left column -->
+						{#if indicators.length > 0 || candlePatterns.length > 0}
+							<div class="edu-link">
+								<a 
+									href="#educational-notes" 
+									on:click|preventDefault={(e) => {
+										const el = document.querySelector('#educational-notes');
+										if (el) {
+											el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+										}
+									}}
+								>
+									📚 View Educational Notes
+								</a>
+							</div>
+						{/if}
 					</div>
 				</div>
 			</div>
@@ -2363,7 +2378,7 @@
 		display: grid;
 		grid-template-columns: 2fr 1fr;
 		grid-auto-rows: minmax(0, auto); /* Critical: allows rows to shrink to content */
-		gap: 2rem;
+		gap: 1.5rem; /* Reduced from 2rem for tighter spacing */
 		margin-bottom: 2rem;
 		align-items: start; /* Critical: align columns to top, not stretch */
 	}
@@ -2411,6 +2426,7 @@
 		position: relative;
 		display: block;
 		overflow: visible;
+		box-sizing: border-box;
 	}
 
 	.indicators-panel {
@@ -2534,6 +2550,34 @@
 	}
 
 	/* Educational Notes moved to left column component - styles removed from sidebar */
+	
+	/* Educational card spacing - ensure no gaps */
+	.educational-card {
+		min-height: 0;
+		box-sizing: border-box;
+		margin-bottom: 0;
+	}
+	
+	/* Link to educational notes in sidebar */
+	.edu-link {
+		margin-top: 1rem;
+		padding-top: 1rem;
+		border-top: 1px solid var(--border-color);
+		text-align: center;
+	}
+	
+	.edu-link a {
+		font-size: 0.9rem;
+		color: var(--accent-color);
+		text-decoration: underline;
+		cursor: pointer;
+		transition: color 0.2s ease;
+	}
+	
+	.edu-link a:hover {
+		color: var(--accent-hover, var(--accent-color));
+		text-decoration: none;
+	}
 
 	.ai-analysis-section {
 		margin-bottom: 2rem;
