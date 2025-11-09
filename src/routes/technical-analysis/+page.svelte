@@ -1288,7 +1288,7 @@
 			data: { datasets },
 			options: {
 				responsive: true,
-				maintainAspectRatio: false,
+				maintainAspectRatio: false, /* Critical: canvas height follows parent CSS */
 				resizeDelay: 0,
 				devicePixelRatio: window.devicePixelRatio || 1,
 				interaction: {
@@ -1409,7 +1409,7 @@
 					}
 				},
 				layout: {
-					padding: { top: 2, bottom: 2, left: 2, right: 2 }
+					padding: { top: 2, bottom: 2, left: 2, right: 2 } /* Minimal padding */
 				},
 				animation: {
 					duration: 200,
@@ -2382,21 +2382,29 @@
 	.ta-charts-grid {
 		display: grid;
 		grid-template-columns: 2fr 1fr;
+		grid-auto-rows: minmax(0, auto); /* Critical: allows rows to shrink to content */
 		gap: 2rem;
 		margin-bottom: 2rem;
+		align-items: start; /* Critical: align columns to top, not stretch */
 	}
 
 	.ta-chart-column {
 		display: flex;
 		flex-direction: column;
 		gap: 1.5rem;
+		min-height: 0; /* Allow children to shrink inside flexbox */
+		align-items: stretch; /* Ensure children fill width */
 	}
 
 	.ta-chart-container {
 		background: var(--bg-secondary);
 		padding: 1.5rem;
+		padding-bottom: 1rem; /* Reduce bottom padding to minimize gap */
 		border-radius: 8px;
 		border: 1px solid var(--border-color);
+		margin-bottom: 0; /* Remove any default margin */
+		min-height: 0; /* Allow container to shrink */
+		box-sizing: border-box;
 	}
 
 	.ta-chart-container h3 {
@@ -2408,24 +2416,32 @@
 	.chart-info-box {
 		background: var(--bg-tertiary);
 		padding: 1rem;
+		padding-bottom: 0.75rem; /* Reduce bottom padding */
 		border-radius: 6px;
 		margin-bottom: 1rem;
 		font-size: 0.9rem;
 		color: var(--text-secondary);
 		border-left: 4px solid var(--accent-color);
+		box-sizing: border-box;
 	}
 
 	.chart-wrapper {
+		min-height: 0; /* Allow container to shrink */
 		height: 400px;
 		position: relative;
+		display: block;
+		overflow: visible;
 	}
 
 	.indicators-panel {
 		background: var(--bg-secondary);
 		padding: 1.5rem;
+		padding-bottom: 1rem; /* Reduce bottom padding */
 		border-radius: 8px;
 		border: 1px solid var(--border-color);
 		height: fit-content;
+		min-height: 0; /* Allow panel to shrink */
+		box-sizing: border-box;
 	}
 
 	.indicators-panel h3 {
@@ -2620,10 +2636,14 @@
 	.ta-summary {
 		background: var(--bg-secondary);
 		padding: 1.5rem;
+		padding-bottom: 1rem; /* Reduce bottom padding */
 		border-radius: 8px;
 		border: 1px solid var(--border-color);
 		text-align: center;
-		margin-bottom: 2rem;
+		margin-bottom: 1.5rem; /* Reduce margin */
+		margin-top: 0; /* Ensure no top margin */
+		box-sizing: border-box;
+		min-height: 0; /* Allow summary to shrink */
 	}
 
 	.ta-summary h3 {
