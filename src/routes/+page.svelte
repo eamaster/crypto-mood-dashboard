@@ -88,7 +88,8 @@
 	$: priceData = $cryptoStore.priceData ? {
 		price: $cryptoStore.priceData.price,
 		change: $cryptoStore.priceData.change24h,
-		symbol: $cryptoStore.priceData.symbol
+		symbol: $cryptoStore.priceData.symbol,
+		source: $cryptoStore.priceData.source || null
 	} : null; // null instead of default values - let PriceCard handle loading/error state
 
 	$: moodData = $cryptoStore.newsData?.sentiment ? {
@@ -169,6 +170,7 @@
 		price={priceData?.price || 0} 
 		change={priceData?.change || 0} 
 		symbol={priceData?.symbol || 'BTC'}
+		priceSource={priceData?.source || null}
 		loading={$cryptoStore.loading}
 		error={$cryptoStore.error || (!$cryptoStore.loading && !priceData ? 'Price data unavailable' : null)}
 	/>

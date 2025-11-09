@@ -81,7 +81,7 @@ const fetchCoins = async () => {
 const fetchPrice = async (coinId) => {
     const url = `${WORKER_URL}/price?coin=${encodeURIComponent(coinId)}&_=${Date.now()}`;
     try {
-        console.log(`🔍 Fetching price for ${coinId}`);
+        console.log(`🔍 Fetching canonical price for ${coinId}`);
         const res = await fetchWithTimeout(url, { method: 'GET', credentials: 'omit' }, 15000); // 15s timeout for safety
         console.log(`📊 Price response: ${res.status}, headers:`, {
             cache: res.headers.get('cache-control'),
@@ -92,7 +92,7 @@ const fetchPrice = async (coinId) => {
         });
         
         const data = res.json ?? JSON.parse(res.text || '{}');
-        console.log(`✅ Price data received:`, data);
+        console.log(`✅ Fetched canonical price: $${data.price} (source: ${data.source || 'unknown'})`);
         
         // Basic validation
         if (!data || typeof data.price !== 'number') {
@@ -208,6 +208,30 @@ const fetchHistoryThrottled = async (coinId, days = 7, force = false) => {
     }
 };
 
+// Fetch OHLC data from worker (includes canonical lastClosePrice)
+const fetchOHLC = async (coinId, days = 7) => {
+    const url = `${WORKER_URL}/ohlc?coin=${encodeURIComponent(coinId)}&days=${days}&_=${Date.now()}`;
+    try {
+        console.log(`🔍 Fetching OHLC data for ${coinId} (${days} days)`);
+        const res = await fetchWithTimeout(url, { method: 'GET', credentials: 'omit' }, 15000);
+        const data = res.json ?? JSON.parse(res.text || '{}');
+        
+        if (!data || !Array.isArray(data.ohlc)) {
+            throw new Error('Invalid OHLC payload');
+        }
+        
+        console.log(`✅ OHLC data received: ${data.ohlc.length} candles, lastClosePrice=${data.lastClosePrice}, priceSource=${data.priceSource || 'unknown'}`);
+        return data;
+    } catch (err) {
+        if (err.name === 'AbortError') {
+            console.warn('fetchOHLC aborted:', err.message);
+            throw err;
+        }
+        console.error(`❌ Error fetching OHLC for ${coinId}:`, err);
+        throw err;
+    }
+};
+
 const fetchNews = async (coinId) => {
     const url = `${WORKER_URL}/news?coin=${encodeURIComponent(coinId)}&_=${Date.now()}`;
     try {
@@ -316,6 +340,27 @@ export const initStore = async () => {
             historyData = historyResult.value;
         } else {
             console.error('History fetch failed:', historyResult.reason?.message || historyResult.reason);
+        }
+
+        // CANONICAL PRICE RECONCILIATION: Ensure history last point uses canonical price
+        if (priceData && historyData && Array.isArray(historyData) && historyData.length > 0) {
+            const canonicalPrice = Number(priceData.price); // server canonical price as number
+            const lastPoint = historyData[historyData.length - 1];
+            const lastClose = Number(lastPoint.y);
+
+            // Format to 2 decimals for comparison
+            const fmt = (n) => Number(n).toFixed(2);
+
+            if (fmt(canonicalPrice) !== fmt(lastClose)) {
+                console.warn(`[store] Price/history mismatch: canonicalPrice=${fmt(canonicalPrice)} lastClose=${fmt(lastClose)} -> patching last point`);
+                // Replace last point close with canonical price (keep timestamp)
+                historyData[historyData.length - 1] = { x: lastPoint.x, y: canonicalPrice };
+                // Update cache with modified history so throttling returns consistent data
+                _lastHistoryFetch.set(`${selectedCoin}_7`, { ts: Date.now(), data: historyData });
+                console.log(`✅ [store] Patched history last point to canonical price: $${fmt(canonicalPrice)}`);
+            } else {
+                console.log(`✅ [store] Price consistency verified: canonicalPrice=${fmt(canonicalPrice)} matches history lastClose=${fmt(lastClose)}`);
+            }
         }
 
         // Fallback: If price failed but history succeeded, extract latest price from history
@@ -430,6 +475,27 @@ export const setCoin = async (coinId) => {
             historyData = historyResult.value;
         } else {
             console.error('History fetch failed:', historyResult.reason?.message || historyResult.reason);
+        }
+
+        // CANONICAL PRICE RECONCILIATION: Ensure history last point uses canonical price
+        if (priceData && historyData && Array.isArray(historyData) && historyData.length > 0) {
+            const canonicalPrice = Number(priceData.price); // server canonical price as number
+            const lastPoint = historyData[historyData.length - 1];
+            const lastClose = Number(lastPoint.y);
+
+            // Format to 2 decimals for comparison
+            const fmt = (n) => Number(n).toFixed(2);
+
+            if (fmt(canonicalPrice) !== fmt(lastClose)) {
+                console.warn(`[store] Price/history mismatch: canonicalPrice=${fmt(canonicalPrice)} lastClose=${fmt(lastClose)} -> patching last point`);
+                // Replace last point close with canonical price (keep timestamp)
+                historyData[historyData.length - 1] = { x: lastPoint.x, y: canonicalPrice };
+                // Update cache with modified history so throttling returns consistent data
+                _lastHistoryFetch.set(`${coinId}_7`, { ts: Date.now(), data: historyData });
+                console.log(`✅ [store] Patched history last point to canonical price: $${fmt(canonicalPrice)}`);
+            } else {
+                console.log(`✅ [store] Price consistency verified: canonicalPrice=${fmt(canonicalPrice)} matches history lastClose=${fmt(lastClose)}`);
+            }
         }
 
         // Fallback: If price failed but history succeeded, extract latest price from history

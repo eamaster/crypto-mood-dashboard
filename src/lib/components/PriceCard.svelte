@@ -6,6 +6,7 @@
 	export let symbol = 'BTC';
 	export let error = null;
 	export let loading = false;
+	export let priceSource = null; // Optional: canonical price source for debug overlay
 	
 	// Format price with fallback
 	function formatPrice(price) {
@@ -37,6 +38,9 @@
 				{change >= 0 ? '+' : ''}{formatChange(change)}%
 			</div>
 			<div class="price-symbol">{symbol.toUpperCase()}</div>
+			{#if priceSource}
+				<small class="debug-overlay">canonical: ${formatPrice(price)} ({priceSource})</small>
+			{/if}
 		</div>
 	{/if}
 </DataCard>
@@ -84,5 +88,14 @@
 	.loading-placeholder {
 		color: var(--text-secondary);
 		font-style: italic;
+	}
+	
+	.debug-overlay {
+		display: block;
+		font-size: 0.7rem;
+		color: var(--text-secondary);
+		margin-top: 0.5rem;
+		opacity: 0.7;
+		font-family: monospace;
 	}
 </style> 

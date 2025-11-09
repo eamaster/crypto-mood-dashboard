@@ -3729,6 +3729,9 @@ async function handleOHLC(request, env) {
     const lastCandle = ohlc.length > 0 ? ohlc[ohlc.length - 1] : null;
     const lastClosePrice = canonicalPriceFormatted; // Always use canonical price
     const lastPointTimestamp = lastCandle ? lastCandle.timestamp : new Date().toISOString();
+    const priceSource = canonicalPriceObj?.priceSource || canonicalPriceObj?.source || 'unknown';
+    
+    console.log(`[OHLC] Returning ohlc with lastClosePrice = ${lastClosePrice} (source=${priceSource})`);
     
     return jsonResponse({
       coin: coinId,
@@ -3738,7 +3741,7 @@ async function handleOHLC(request, env) {
       candles: ohlc.length,
       lastClosePrice: lastClosePrice,
       lastPointTimestamp: lastPointTimestamp,
-      priceSource: canonicalPriceObj?.priceSource || canonicalPriceObj?.source || 'unknown',
+      priceSource: priceSource,
       note: 'OHLC data is simulated with consistent daily patterns'
     }, 200, {
       'Cache-Control': 'public, s-maxage=60, max-age=60'
