@@ -114,7 +114,8 @@ async function getBackoff(kv, assetId) {
 const COINCAP_API_BASE = 'https://api.coincap.io/v2';
 const COINCAP_BATCH_ENDPOINT = `${COINCAP_API_BASE}/assets`; // supports ?ids=bitcoin,ethereum,...
 
-// Helper to attach CoinCap API key for authenticated requests (500 rpm with Pro key)
+// Helper to attach CoinCap API key for authenticated requests
+// Free tier: 200 req/min without key, 500 req/min with key
 function coinCapAuthHeaders(env) {
   const headers = { 
     'Accept': 'application/json',
@@ -122,8 +123,9 @@ function coinCapAuthHeaders(env) {
   };
   if (env && env.COINCAP_API_KEY) {
     headers['Authorization'] = `Bearer ${env.COINCAP_API_KEY}`;
+    console.log('[coinCapAuthHeaders] Using authenticated request with API key');
   } else {
-    console.warn('[coinCapAuthHeaders] COINCAP_API_KEY not set, using unauthenticated requests');
+    console.warn('[coinCapAuthHeaders] COINCAP_API_KEY not set, using unauthenticated requests (200 req/min limit)');
   }
   return headers;
 }
@@ -143,9 +145,10 @@ async function rateLimitedFetch(url, options = {}, env, assetId) {
 
   // Create the promise and store it
   const p = (async () => {
-    const maxAttempts = 5;
+    const maxAttempts = 2; // Reduced to 2 attempts for very fast failure (within frontend timeout)
     let attempt = 0;
     let lastError = null; // Track last error for diagnostics
+    const FETCH_TIMEOUT = 5000; // 5 second timeout per fetch attempt (reduced from 8s)
 
     // If K/V says we must backoff, do not call upstream: return an object indicating backoff
     const now = Date.now();
@@ -165,15 +168,32 @@ async function rateLimitedFetch(url, options = {}, env, assetId) {
       const attemptStart = Date.now();
       try {
         console.log(`[rateLimitedFetch] Attempt ${attempt}/${maxAttempts} for ${url}`);
+        
+        // Add timeout to fetch using AbortController
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+        
         // Add POP cache hints for Cloudflare edge to cache 2xx responses for 60s
         // Merge headers from options (includes auth headers)
         const fetchOptions = {
           ...options,
           method: options.method || 'GET',
           headers: { ...options.headers },
+          signal: controller.signal,
           cf: { cacheTtlByStatus: { "200-299": 60 }, cacheEverything: true }
         };
-        const resp = await fetch(url, fetchOptions);
+        
+        let resp;
+        try {
+          resp = await fetch(url, fetchOptions);
+          clearTimeout(timeoutId);
+        } catch (fetchErr) {
+          clearTimeout(timeoutId);
+          if (fetchErr.name === 'AbortError') {
+            throw new Error(`Fetch timeout after ${FETCH_TIMEOUT}ms`);
+          }
+          throw fetchErr;
+        }
 
         // If success, return parsed Response-like object
         if (resp.status >= 200 && resp.status < 300) {
@@ -184,12 +204,24 @@ async function rateLimitedFetch(url, options = {}, env, assetId) {
           return { ok: true, status: resp.status, text, json, latency: Date.now() - attemptStart };
         }
 
+        // Auth errors: 401/403 -> fail immediately, don't retry
+        if (resp.status === 401 || resp.status === 403) {
+          const text = await resp.text().catch(() => '');
+          lastError = { 
+            status: resp.status, 
+            message: `Authentication failed: ${text.substring(0, 100)}`,
+            type: 'Auth'
+          };
+          console.error(`[rateLimitedFetch] Auth error ${resp.status}, failing immediately - API key may be invalid`);
+          break; // Exit retry loop immediately - no point retrying auth errors
+        }
+        
         // Handle Retry/429/5xx
         if (resp.status === 429) {
           const ra = parseRetryAfterHeader(resp.headers.get('retry-after'));
-          // compute backoff until
-          const baseMs = 1000 * Math.pow(2, attempt); // exponential
-          const backoffMs = ra ?? jitter(Math.min(16000, baseMs));
+          // compute backoff until - reduced for faster failure
+          const baseMs = 500 * Math.pow(2, attempt - 1); // Reduced from 1000, start from attempt 1
+          const backoffMs = ra ? Math.min(ra * 1000, 5000) : jitter(Math.min(5000, baseMs)); // Reduced max from 16000 to 5000
           const until = Date.now() + backoffMs;
           if (assetId && env.RATE_LIMIT_KV) {
             await setBackoff(env.RATE_LIMIT_KV, assetId, until);
@@ -206,17 +238,28 @@ async function rateLimitedFetch(url, options = {}, env, assetId) {
 
         if (resp.status >= 500 && resp.status < 600) {
           // HTTP 530 is a Cloudflare-specific error (origin timeout/DNS issues)
-          // Use longer backoff for 530 since it often indicates transient connectivity issues
+          // Fail faster on 530 - don't retry as many times since it's likely a persistent issue
           const is530 = resp.status === 530;
-          const baseBackoff = is530 ? 2000 : 500; // Longer initial backoff for 530
-          const maxBackoff = is530 ? 16000 : 8000; // Longer max backoff for 530
-          const backoffMs = jitter(Math.min(maxBackoff, baseBackoff * Math.pow(2, attempt)));
-          
           lastError = { 
             status: resp.status, 
             message: is530 ? `Cloudflare error 530 (origin timeout/connection issue)` : `Server error ${resp.status}`,
             type: is530 ? 'Cloudflare/Origin' : 'HTTP'
           };
+          
+          // For 530 errors, fail immediately on first attempt (no retry)
+          if (is530) {
+            console.error(`[rateLimitedFetch] ⚠️ Cloudflare error 530, failing immediately - CoinCap API unreachable`);
+            break; // Exit retry loop immediately
+          }
+          
+          // For other 5xx errors, fail after 1 retry (very fast)
+          if (attempt >= 2) {
+            console.error(`[rateLimitedFetch] 5xx error after ${attempt} attempts, failing fast`);
+            break;
+          }
+          
+          // Minimal backoff for other 5xx errors
+          const backoffMs = jitter(Math.min(1000, 300 * attempt)); // Max 1 second backoff
           
           console.warn(`[rateLimitedFetch] ${is530 ? '⚠️ Cloudflare' : '5xx'} error (${resp.status}), backing off ${Math.ceil(backoffMs/1000)}s`);
           if (attempt < maxAttempts) {
@@ -247,7 +290,8 @@ async function rateLimitedFetch(url, options = {}, env, assetId) {
         };
         
         if (attempt < maxAttempts) {
-          const backoffMs = jitter(Math.min(8000, 500 * Math.pow(2, attempt)));
+          // Minimal backoff for network errors - fail very fast
+          const backoffMs = jitter(Math.min(1000, 300 * attempt)); // Max 1 second backoff
           console.log(`[rateLimitedFetch] Waiting ${Math.ceil(backoffMs/1000)}s before retry (${maxAttempts - attempt} attempts left)...`);
           await new Promise(r => setTimeout(r, backoffMs));
         }
