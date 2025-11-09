@@ -16,6 +16,7 @@ id = "dbbe66243f7a4ecaa97f1e14a3ea2a19"
 # - COINCAP_API_KEY: Your CoinCap Pro API key for price/market data (500 rpm)
 # - COHERE_API_KEY: Your Cohere API key for AI processing
 # - NEWSAPI_KEY: Your NewsAPI.org API key for news data
+# - ADMIN_PURGE_TOKEN: Secret token for admin endpoints (e.g., cache purge)
 # - BLOCKCHAIR_KEY: Your Blockchair API key for blockchain data (optional)
 # - NEWSDATA_KEY: Your NewsData.io API key (optional, backup news source)
 #
@@ -23,5 +24,6 @@ id = "dbbe66243f7a4ecaa97f1e14a3ea2a19"
 # wrangler secret put COINCAP_API_KEY
 # wrangler secret put COHERE_API_KEY
 # wrangler secret put NEWSAPI_KEY
+# wrangler secret put ADMIN_PURGE_TOKEN
 # wrangler secret put BLOCKCHAIR_KEY
 # wrangler secret put NEWSDATA_KEY 

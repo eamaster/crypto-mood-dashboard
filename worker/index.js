@@ -89,18 +89,18 @@ function jitter(ms) {
   return Math.floor(ms + Math.random() * (ms / 2));
 }
 
-// Write a per-coingecko backoff timestamp into KV
-async function setBackoff(kv, coingeckoId, untilMs) {
+// Write a per-asset backoff timestamp into KV (for CoinCap rate limiting)
+async function setBackoff(kv, assetId, untilMs) {
   try {
-    await kv.put(`backoff_${coingeckoId}`, String(untilMs));
+    await kv.put(`backoff_${assetId}`, String(untilMs));
   } catch (e) {
     console.warn('Failed to set backoff KV:', e.message);
   }
 }
 
-async function getBackoff(kv, coingeckoId) {
+async function getBackoff(kv, assetId) {
   try {
-    const raw = await kv.get(`backoff_${coingeckoId}`);
+    const raw = await kv.get(`backoff_${assetId}`);
     if (!raw) return 0;
     const n = Number(raw);
     return Number.isNaN(n) ? 0 : n;
@@ -123,8 +123,8 @@ function coinCapAuthHeaders(env) {
   return headers;
 }
 
-// rateLimitedFetch: coalescing + retries + per-coincap backoff
-async function rateLimitedFetch(url, options = {}, env, coincapId) {
+// rateLimitedFetch: coalescing + retries + per-asset backoff (improved diagnostics)
+async function rateLimitedFetch(url, options = {}, env, assetId) {
   // Coalesce: if there is already an inflight fetch for this url, await it
   if (INFLIGHT_UPSTREAM[url]) {
     try {
@@ -140,13 +140,14 @@ async function rateLimitedFetch(url, options = {}, env, coincapId) {
   const p = (async () => {
     const maxAttempts = 5;
     let attempt = 0;
+    let lastError = null; // Track last error for diagnostics
 
     // If K/V says we must backoff, do not call upstream: return an object indicating backoff
     const now = Date.now();
-    const backoffUntil = coincapId ? await getBackoff(env.RATE_LIMIT_KV, coincapId) : 0;
+    const backoffUntil = assetId ? await getBackoff(env.RATE_LIMIT_KV, assetId) : 0;
     if (backoffUntil && backoffUntil > now) {
       const waitMs = backoffUntil - now;
-      console.warn(`[rateLimitedFetch] Backoff in effect for ${coincapId}, ${Math.ceil(waitMs/1000)}s left`);
+      console.warn(`[rateLimitedFetch] Backoff in effect for ${assetId}, ${Math.ceil(waitMs/1000)}s left`);
       // Throw a special error so callers can serve stale-if-error
       const err = new Error('backoff-in-effect');
       err.code = 'backoff';
@@ -174,7 +175,7 @@ async function rateLimitedFetch(url, options = {}, env, coincapId) {
           const text = await resp.text();
           let json = null;
           try { json = JSON.parse(text); } catch (e) { /* not json */ }
-          console.log(`[rateLimitedFetch] Success on attempt ${attempt}, latency=${Date.now() - attemptStart}ms`);
+          console.log(`[rateLimitedFetch] ✅ Success on attempt ${attempt}, latency=${Date.now() - attemptStart}ms`);
           return { ok: true, status: resp.status, text, json, latency: Date.now() - attemptStart };
         }
 
@@ -185,10 +186,11 @@ async function rateLimitedFetch(url, options = {}, env, coincapId) {
           const baseMs = 1000 * Math.pow(2, attempt); // exponential
           const backoffMs = ra ?? jitter(Math.min(16000, baseMs));
           const until = Date.now() + backoffMs;
-          if (coincapId && env.RATE_LIMIT_KV) {
-            await setBackoff(env.RATE_LIMIT_KV, coincapId, until);
-            console.warn(`[rateLimitedFetch] 429 received. Setting KV backoff for ${coincapId} until ${new Date(until).toISOString()} (${Math.ceil(backoffMs/1000)}s)`);
+          if (assetId && env.RATE_LIMIT_KV) {
+            await setBackoff(env.RATE_LIMIT_KV, assetId, until);
+            console.warn(`[rateLimitedFetch] 429 received. Setting KV backoff for ${assetId} until ${new Date(until).toISOString()} (${Math.ceil(backoffMs/1000)}s)`);
           }
+          lastError = { status: 429, message: 'Rate limited' };
           // Wait before retrying
           if (attempt < maxAttempts) {
             console.log(`[rateLimitedFetch] Waiting ${Math.ceil(backoffMs/1000)}s before retry...`);
@@ -200,6 +202,7 @@ async function rateLimitedFetch(url, options = {}, env, coincapId) {
         if (resp.status >= 500 && resp.status < 600) {
           // Server error: backoff smaller
           const backoffMs = jitter(Math.min(8000, 500 * Math.pow(2, attempt)));
+          lastError = { status: resp.status, message: `Server error ${resp.status}` };
           console.warn(`[rateLimitedFetch] 5xx error (${resp.status}), backing off ${Math.ceil(backoffMs/1000)}s`);
           if (attempt < maxAttempts) {
             await new Promise(r => setTimeout(r, backoffMs));
@@ -214,20 +217,39 @@ async function rateLimitedFetch(url, options = {}, env, coincapId) {
         console.warn(`[rateLimitedFetch] Non-retryable error ${resp.status}`);
         return { ok: false, status: resp.status, text, json, latency: Date.now() - attemptStart };
       } catch (err) {
-        // network or abort — backoff and retry
-        console.warn(`[rateLimitedFetch] Network error on attempt ${attempt} for ${url}: ${err.message}`);
+        // Network/DNS error - log with explicit message
+        const isDNSError = err.name === 'TypeError' || err.message?.includes('fetch') || err.message?.includes('ENOTFOUND');
+        if (isDNSError) {
+          console.error(`[rateLimitedFetch] ⚠️ Network/DNS error on attempt ${attempt} for ${url}: ${err.name} - ${err.message}`);
+        } else {
+          console.warn(`[rateLimitedFetch] Network error on attempt ${attempt} for ${url}: ${err.message}`);
+        }
+        
+        lastError = { 
+          name: err.name, 
+          message: err.message,
+          type: isDNSError ? 'DNS/Network' : 'Fetch'
+        };
+        
         if (attempt < maxAttempts) {
-          const backoffMs = jitter(Math.min(4000, 500 * Math.pow(2, attempt)));
+          const backoffMs = jitter(Math.min(8000, 500 * Math.pow(2, attempt)));
+          console.log(`[rateLimitedFetch] Waiting ${Math.ceil(backoffMs/1000)}s before retry (${maxAttempts - attempt} attempts left)...`);
           await new Promise(r => setTimeout(r, backoffMs));
         }
         continue;
       }
     }
 
-    // exhausted retries
-    console.error(`[rateLimitedFetch] Exhausted ${maxAttempts} retries for ${url}`);
-    const err = new Error('exhausted-retries');
+    // exhausted retries - include last error details
+    const errorDetails = lastError 
+      ? `Last error: ${lastError.type || 'HTTP'} - ${lastError.message || lastError.status}`
+      : 'No upstream response';
+    console.error(`[rateLimitedFetch] ❌ Exhausted ${maxAttempts} retries for ${url}. ${errorDetails}`);
+    
+    const err = new Error(`exhausted-retries: ${errorDetails}`);
     err.code = 'retries_exhausted';
+    err.details = errorDetails;
+    err.lastError = lastError;
     throw err;
   })();
 
@@ -358,7 +380,7 @@ async function fetchAssetHistory(coinId, days, env) {
   }
 }
 
-// Smart caching with background refresh for CoinCap API
+// Smart caching with background refresh for CoinCap API (with legacy CoinGecko purge)
 async function getCachedPriceData(coinId, env) {
   const cacheKey = `price_${coinId}`;
   const now = Date.now();
@@ -370,8 +392,19 @@ async function getCachedPriceData(coinId, env) {
     const cached = await env.RATE_LIMIT_KV.get(cacheKey);
     
     if (cached) {
+      try {
         const { data, timestamp } = JSON.parse(cached);
         const age = now - timestamp;
+        
+        // 🔥 MIGRATION: Detect and purge legacy CoinGecko cache entries
+        // This checks if cached data was from OLD CoinGecko API and deletes it
+        // Then fetches FRESH data from NEW CoinCap API
+        const source = data?.source;
+        if (source === 'coingecko') {
+          console.log(`🧹 [Migration] Found legacy CoinGecko cache for ${cacheKey}, deleting and forcing CoinCap refresh`);
+          await env.RATE_LIMIT_KV.delete(cacheKey);
+          return await fetchFreshPriceData(coinId, env); // ← This fetches from CoinCap!
+        }
         
         // Relaxed validation: removed overly strict price bounds
         // Just check if price is positive
@@ -382,28 +415,34 @@ async function getCachedPriceData(coinId, env) {
         }
         
         // Fresh cache - return immediately
-      if (age <= CACHE_TTL) {
-        console.log(`✅ [Cache] Fresh data for ${coinId} (age: ${age}ms)`);
-        return { data, fromCache: true, fresh: true };
-      }
-      
-      // Stale cache - return immediately but trigger background refresh
-      if (age <= MAX_STALE) {
-        console.log(`🔄 [Cache] Stale data for ${coinId} (age: ${age}ms), triggering background refresh`);
+        if (age <= CACHE_TTL) {
+          console.log(`✅ [Cache] Fresh data for ${coinId} (age: ${age}ms, source: ${source})`);
+          return { data, fromCache: true, fresh: true };
+        }
         
-        // Trigger background refresh without waiting
-        refreshPriceInBackground(coinId, env).catch(error => {
-          console.log(`Background refresh failed for ${coinId}:`, error);
-        });
-        
-        return { data, fromCache: true, fresh: false };
-      } else {
-        // Even if very stale, serve it immediately and refresh in background
-        console.log(`⚡ [Cache] Serving very stale cached data for ${coinId} (${age}ms old), refreshing in background`);
-        refreshPriceInBackground(coinId, env).catch(error => {
-          console.log(`Background refresh failed for ${coinId}:`, error);
-        });
-        return { data, fromCache: true, fresh: false };
+        // Stale cache - return immediately but trigger background refresh
+        if (age <= MAX_STALE) {
+          console.log(`🔄 [Cache] Stale data for ${coinId} (age: ${age}ms), triggering background refresh`);
+          
+          // Trigger background refresh without waiting
+          refreshPriceInBackground(coinId, env).catch(error => {
+            console.log(`Background refresh failed for ${coinId}:`, error);
+          });
+          
+          return { data, fromCache: true, fresh: false };
+        } else {
+          // Even if very stale, serve it immediately and refresh in background
+          console.log(`⚡ [Cache] Serving very stale cached data for ${coinId} (${age}ms old), refreshing in background`);
+          refreshPriceInBackground(coinId, env).catch(error => {
+            console.log(`Background refresh failed for ${coinId}:`, error);
+          });
+          return { data, fromCache: true, fresh: false };
+        }
+      } catch (parseError) {
+        // Corrupt cache entry - delete and fetch fresh
+        console.warn(`[Cache] Failed to parse KV ${cacheKey}, deleting corrupt entry:`, parseError.message);
+        await env.RATE_LIMIT_KV.delete(cacheKey);
+        return await fetchFreshPriceData(coinId, env);
       }
     }
     
@@ -475,7 +514,7 @@ async function fetchFreshPriceData(coinId, env) {
   }
 }
 
-// History data caching functions
+// History data caching functions (with legacy CoinGecko purge)
 async function getCachedHistoryData(coinId, days, env) {
   const cacheKey = `history_${coinId}_${days}`;
   const now = Date.now();
@@ -487,8 +526,19 @@ async function getCachedHistoryData(coinId, days, env) {
     const cached = await env.RATE_LIMIT_KV.get(cacheKey);
     
     if (cached) {
+      try {
         const { data, timestamp } = JSON.parse(cached);
         const age = now - timestamp;
+        
+        // 🔥 MIGRATION: Detect and purge legacy CoinGecko cache entries
+        // This checks if cached data was from OLD CoinGecko API and deletes it
+        // Then fetches FRESH data from NEW CoinCap API
+        const source = data?.source;
+        if (source === 'coingecko') {
+          console.log(`🧹 [Migration] Found legacy CoinGecko history cache for ${cacheKey}, deleting and forcing CoinCap refresh`);
+          await env.RATE_LIMIT_KV.delete(cacheKey);
+          return await fetchFreshHistoryData(coinId, days, env); // ← This fetches from CoinCap!
+        }
         
         // Relaxed validation: just check if we have valid price data
         if (!data || !data.prices || !Array.isArray(data.prices) || data.prices.length === 0) {
@@ -498,7 +548,7 @@ async function getCachedHistoryData(coinId, days, env) {
         }
         
         if (age < CACHE_TTL) {
-          console.log(`✅ [History Cache] Serving fresh cached data for ${coinId} (${age}ms old)`);
+          console.log(`✅ [History Cache] Serving fresh cached data for ${coinId} (${age}ms old, source: ${source})`);
           return { data, fromCache: true, fresh: true };
         } else if (age < MAX_STALE) {
           console.log(`🔄 [History Cache] Serving stale cached data for ${coinId} (${age}ms old), refreshing in background`);
@@ -511,6 +561,12 @@ async function getCachedHistoryData(coinId, days, env) {
           refreshHistoryInBackground(coinId, days, env);
           return { data, fromCache: true, fresh: false };
         }
+      } catch (parseError) {
+        // Corrupt cache entry - delete and fetch fresh
+        console.warn(`[History Cache] Failed to parse KV ${cacheKey}, deleting corrupt entry:`, parseError.message);
+        await env.RATE_LIMIT_KV.delete(cacheKey);
+        return await fetchFreshHistoryData(coinId, days, env);
+      }
     }
     
     // No cache or too old, fetch fresh data
@@ -701,11 +757,37 @@ async function handlePrice(request, env) {
     return jsonResponse(result.data, 200, headers);
 
   } catch (error) {
-    // More informative error for client; include small hint in logs
+    // More informative error for client; include diagnostics
     console.error('❌ [Price] Error handling price request:', error);
-    // Return a helpful JSON error and 502 for upstream errors (not generic 400)
-    const status = (error.message && error.message.includes('CoinCap')) ? 502 : 500;
-    return jsonResponse({ error: 'Failed to fetch price data', details: error.message || 'unknown' }, status, { 'X-Client-Cache': 'no-store' });
+    
+    // Determine status code based on error type
+    let status = 500;
+    if (error.code === 'retries_exhausted') {
+      status = 502; // Bad Gateway - upstream unreachable
+    } else if (error.message && error.message.includes('CoinCap')) {
+      status = 502;
+    }
+    
+    // Include detailed error information
+    const errorDetails = {
+      error: 'Failed to fetch price data',
+      code: error.code || 'unknown',
+      details: error.details || error.message || 'unknown error',
+      timestamp: new Date().toISOString()
+    };
+    
+    // Add lastError details if available (for exhausted-retries)
+    if (error.lastError) {
+      errorDetails.diagnostic = {
+        type: error.lastError.type || 'unknown',
+        message: error.lastError.message
+      };
+    }
+    
+    return jsonResponse(errorDetails, status, { 
+      'X-Client-Cache': 'no-store',
+      'X-Error-Type': error.code || 'unknown'
+    });
   }
 }
 
@@ -800,8 +882,35 @@ async function handleHistory(request, env) {
     
   } catch (error) {
     console.error('❌ [History] Error handling history request:', error);
-    const status = (error.message && error.message.includes('CoinCap')) ? 502 : 500;
-    return jsonResponse({ error: 'Failed to fetch price history', details: error.message || 'unknown' }, status, { 'X-Client-Cache': 'no-store' });
+    
+    // Determine status code based on error type
+    let status = 500;
+    if (error.code === 'retries_exhausted') {
+      status = 502; // Bad Gateway - upstream unreachable
+    } else if (error.message && error.message.includes('CoinCap')) {
+      status = 502;
+    }
+    
+    // Include detailed error information
+    const errorDetails = {
+      error: 'Failed to fetch price history',
+      code: error.code || 'unknown',
+      details: error.details || error.message || 'unknown error',
+      timestamp: new Date().toISOString()
+    };
+    
+    // Add lastError details if available (for exhausted-retries)
+    if (error.lastError) {
+      errorDetails.diagnostic = {
+        type: error.lastError.type || 'unknown',
+        message: error.lastError.message
+      };
+    }
+    
+    return jsonResponse(errorDetails, status, { 
+      'X-Client-Cache': 'no-store',
+      'X-Error-Type': error.code || 'unknown'
+    });
   }
 }
 
@@ -2168,6 +2277,105 @@ export default {
     }
     
     try {
+      // Admin endpoint: Purge legacy CoinGecko cache (protected with ADMIN_PURGE_TOKEN)
+      if (path === '/admin/purge-legacy-cache' && request.method === 'POST') {
+        try {
+          const body = await request.json().catch(() => ({}));
+          
+          // Validate admin token
+          if (!env.ADMIN_PURGE_TOKEN || body.token !== env.ADMIN_PURGE_TOKEN) {
+            console.warn('[Admin] Unauthorized purge attempt');
+            return new Response(JSON.stringify({ error: 'Forbidden - invalid or missing token' }), {
+              status: 403,
+              headers: { 
+                'Content-Type': 'application/json',
+                ...DEFAULT_CORS
+              }
+            });
+          }
+          
+          console.log('[Admin] 🧹 Starting legacy cache purge...');
+          console.log('[Admin] This deletes OLD CoinGecko cache and forces fresh CoinCap data');
+          const deleted = [];
+          const errors = [];
+          
+          // Purge price cache for all supported coins
+          // NOTE: This scans for OLD cache entries with source="coingecko" and DELETES them
+          // After deletion, normal requests will fetch FRESH data from CoinCap API
+          for (const coin of Object.keys(SUPPORTED_COINS)) {
+            const priceKey = `price_${coin}`;
+            try {
+              const raw = await env.RATE_LIMIT_KV.get(priceKey);
+              if (raw) {
+                try {
+                  const parsed = JSON.parse(raw);
+                  const source = parsed?.data?.source || parsed?.source;
+                  // Check if this is OLD CoinGecko data → DELETE it
+                  if (source === 'coingecko') {
+                    await env.RATE_LIMIT_KV.delete(priceKey);
+                    deleted.push(priceKey);
+                    console.log(`[Admin] ❌ Deleted legacy CoinGecko price cache: ${priceKey}`);
+                  }
+                } catch (parseErr) {
+                  // Corrupt entry - delete it anyway
+                  await env.RATE_LIMIT_KV.delete(priceKey);
+                  deleted.push(`${priceKey} (corrupt)`);
+                  console.log(`[Admin] ❌ Deleted corrupt cache: ${priceKey}`);
+                }
+              }
+            } catch (err) {
+              errors.push({ key: priceKey, error: err.message });
+              console.error(`[Admin] Error processing ${priceKey}:`, err.message);
+            }
+            
+            // Purge history cache for common day values
+            // NOTE: Same logic - check for OLD CoinGecko data and DELETE it
+            for (const days of [1, 7, 30]) {
+              const historyKey = `history_${coin}_${days}`;
+              try {
+                const raw = await env.RATE_LIMIT_KV.get(historyKey);
+                if (raw) {
+                  try {
+                    const parsed = JSON.parse(raw);
+                    const source = parsed?.data?.source || parsed?.source;
+                    // Check if this is OLD CoinGecko data → DELETE it
+                    if (source === 'coingecko') {
+                      await env.RATE_LIMIT_KV.delete(historyKey);
+                      deleted.push(historyKey);
+                      console.log(`[Admin] ❌ Deleted legacy CoinGecko history cache: ${historyKey}`);
+                    }
+                  } catch (parseErr) {
+                    // Corrupt entry - delete it anyway
+                    await env.RATE_LIMIT_KV.delete(historyKey);
+                    deleted.push(`${historyKey} (corrupt)`);
+                    console.log(`[Admin] ❌ Deleted corrupt cache: ${historyKey}`);
+                  }
+                }
+              } catch (err) {
+                errors.push({ key: historyKey, error: err.message });
+                console.error(`[Admin] Error processing ${historyKey}:`, err.message);
+              }
+            }
+          }
+          
+          const result = {
+            status: 'completed',
+            deleted: deleted.length,
+            keys: deleted,
+            errors: errors.length > 0 ? errors : undefined,
+            timestamp: new Date().toISOString()
+          };
+          
+          console.log(`[Admin] ✅ Purge completed: ${deleted.length} keys deleted, ${errors.length} errors`);
+          
+          return jsonResponse(result);
+          
+        } catch (err) {
+          console.error('[Admin] Purge endpoint error:', err);
+          return errorResponse(`Admin operation failed: ${err.message}`, 500);
+        }
+      }
+      
       // Route requests
       switch (path) {
         case '/coins':

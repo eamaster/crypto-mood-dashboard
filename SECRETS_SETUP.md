@@ -25,12 +25,18 @@ This guide explains how to properly configure API keys and secrets for the Crypt
 - **Get it from**: [https://newsapi.org/](https://newsapi.org/)
 - **Environment Variable**: `NEWSAPI_KEY`
 
-### 4. Blockchair API Key (Optional)
+### 4. Admin Purge Token (Required for Admin Endpoints)
+- **Purpose**: Protects admin endpoints like `/admin/purge-legacy-cache`
+- **How to create**: Generate a secure random token (e.g., `openssl rand -hex 32`)
+- **Environment Variable**: `ADMIN_PURGE_TOKEN`
+- **Usage**: Use this token when calling admin endpoints to purge cache
+
+### 5. Blockchair API Key (Optional)
 - **Purpose**: Provides blockchain data and OHLC price information
 - **Get it from**: [https://blockchair.com/api](https://blockchair.com/api)
 - **Environment Variable**: `BLOCKCHAIR_KEY`
 
-### 5. NewsData.io API Key (Optional)
+### 6. NewsData.io API Key (Optional)
 - **Purpose**: Backup news source
 - **Get it from**: [https://newsdata.io/](https://newsdata.io/)
 - **Environment Variable**: `NEWSDATA_KEY`
@@ -63,6 +69,7 @@ Use Wrangler's secret management system to securely store your API keys:
 wrangler secret put COINCAP_API_KEY
 wrangler secret put COHERE_API_KEY
 wrangler secret put NEWSAPI_KEY
+wrangler secret put ADMIN_PURGE_TOKEN
 
 # Set optional secrets
 wrangler secret put BLOCKCHAIR_KEY
@@ -101,8 +108,43 @@ If you encounter issues:
 2. Verify your API keys are valid by testing them directly with the provider
 3. Ensure you're using the correct environment (dev/production)
 
+## 🛠️ Admin Endpoints
+
+### Purge Legacy Cache
+
+The worker includes an admin endpoint to purge legacy CoinGecko cache entries after migration:
+
+```bash
+# Generate a secure admin token first (if not done)
+# On Windows PowerShell:
+$token = -join ((48..57) + (65..90) + (97..122) | Get-Random -Count 32 | % {[char]$_})
+
+# On Linux/Mac:
+openssl rand -hex 32
+
+# Set the token as a secret
+wrangler secret put ADMIN_PURGE_TOKEN
+# (paste the generated token when prompted)
+
+# Use the admin endpoint to purge legacy cache
+curl -X POST "https://crypto-mood-dashboard-production.smah0085.workers.dev/admin/purge-legacy-cache" \
+  -H "Content-Type: application/json" \
+  -d '{"token":"YOUR_ADMIN_TOKEN_HERE"}'
+```
+
+**Response Example:**
+```json
+{
+  "status": "completed",
+  "deleted": 48,
+  "keys": ["price_bitcoin", "price_ethereum", "history_bitcoin_7", ...],
+  "timestamp": "2025-11-09T10:30:00.000Z"
+}
+```
+
 ## 📝 Notes
 
 - The application will gracefully degrade if optional API keys are missing
-- Required API keys (Cohere and NewsAPI) must be present for full functionality
+- Required API keys (CoinCap, Cohere, NewsAPI, and ADMIN_PURGE_TOKEN) must be present for full functionality
 - All secrets are loaded at runtime and never stored in the codebase
+- The worker automatically detects and purges legacy CoinGecko cache entries when they are accessed

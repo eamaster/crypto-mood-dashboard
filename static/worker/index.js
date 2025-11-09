@@ -3,15 +3,16 @@
 // Handles API calls to CoinCap, NewsAPI.org, and Cohere AI
 // =============================================================================
 
-// CORS headers for frontend requests
-const CORS_HEADERS = {
+// CORS headers for frontend requests - Enhanced for GitHub Pages compatibility
+const DEFAULT_CORS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Cache-Control, Pragma',
-  'Access-Control-Expose-Headers': 'X-Cache-Status, X-Cache-Source, X-DO-Age, X-Latency-ms, X-Client-Cache',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS, HEAD',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Referer, User-Agent, Cache-Control, Pragma',
+  'Access-Control-Expose-Headers': 'Content-Length, Content-Type, X-Cache-Status, X-DO-Age, X-Cache-Source, X-Latency-ms',
+  'Access-Control-Max-Age': '86400', // 24 hours
+  'Vary': 'Origin, Accept-Encoding'
 };
 
-// Response helper
 function jsonResponse(data, status = 200, extraHeaders = {}) {
   // Default cache headers (can be overridden by extraHeaders)
   const defaultCacheHeaders = {
@@ -24,34 +25,51 @@ function jsonResponse(data, status = 200, extraHeaders = {}) {
   if (!extraHeaders['Cache-Control'] || !extraHeaders['Cache-Control'].includes('s-maxage')) {
     defaultCacheHeaders['Surrogate-Control'] = 'no-store';
   }
-  
-  return new Response(JSON.stringify(data), {
+
+  return new Response(typeof data === 'string' ? data : JSON.stringify(data), {
     status,
     headers: {
-      'Content-Type': 'application/json',
-      ...CORS_HEADERS,
+      'Content-Type': 'application/json; charset=utf-8',
+      ...DEFAULT_CORS,
       ...defaultCacheHeaders,
       ...extraHeaders // extraHeaders override defaults
-    },
+    }
   });
 }
 
-// Error response helper
 function errorResponse(message, status = 400) {
   return jsonResponse({ error: message }, status);
 }
 
-// CoinCap API configuration
-const COINCAP_API_BASE = 'https://api.coincap.io/v2';
-const COINCAP_BATCH_ENDPOINT = `${COINCAP_API_BASE}/assets`; // supports ?ids=bitcoin,ethereum,...
-
-// Helper to attach CoinCap API key for authenticated requests (500 rpm with Pro key)
-function coinCapAuthHeaders(env) {
-  const headers = { 'Accept': 'application/json' };
-  if (env && env.COINCAP_API_KEY) {
-    headers['Authorization'] = `Bearer ${env.COINCAP_API_KEY}`;
+// Helper: treat `_` or force=true as cache-bust
+function isForceRefresh(requestUrl) {
+  try {
+    const u = new URL(requestUrl);
+    if (u.searchParams.has('_')) return true;
+    const f = u.searchParams.get('force');
+    return f === '1' || f === 'true';
+  } catch (e) {
+    return false;
   }
-  return headers;
+}
+
+// Delete a KV key if older than thresholdMs
+async function deleteIfVeryOld(kv, cacheKey, thresholdMs) {
+  try {
+    const raw = await kv.get(cacheKey);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw);
+    const ts = parsed.timestamp || parsed.data?.timestamp || 0;
+    if (!ts) return false;
+    if (Date.now() - ts > thresholdMs) {
+      console.log(`[Cache] Deleting very old cache ${cacheKey} (age: ${Math.floor((Date.now()-ts)/1000)}s)`);
+      await kv.delete(cacheKey);
+      return true;
+    }
+  } catch (e) {
+    console.warn(`[Cache] deleteIfVeryOld failed for ${cacheKey}:`, e.message);
+  }
+  return false;
 }
 
 // Coalesce inflight upstream calls per URL (avoid duplicate fetches)
@@ -71,18 +89,18 @@ function jitter(ms) {
   return Math.floor(ms + Math.random() * (ms / 2));
 }
 
-// Write a per-coingecko backoff timestamp into KV
-async function setBackoff(kv, coingeckoId, untilMs) {
+// Write a per-asset backoff timestamp into KV (for CoinCap rate limiting)
+async function setBackoff(kv, assetId, untilMs) {
   try {
-    await kv.put(`backoff_${coingeckoId}`, String(untilMs));
+    await kv.put(`backoff_${assetId}`, String(untilMs));
   } catch (e) {
     console.warn('Failed to set backoff KV:', e.message);
   }
 }
 
-async function getBackoff(kv, coingeckoId) {
+async function getBackoff(kv, assetId) {
   try {
-    const raw = await kv.get(`backoff_${coingeckoId}`);
+    const raw = await kv.get(`backoff_${assetId}`);
     if (!raw) return 0;
     const n = Number(raw);
     return Number.isNaN(n) ? 0 : n;
@@ -92,28 +110,21 @@ async function getBackoff(kv, coingeckoId) {
   }
 }
 
-// Supported cryptocurrencies mapping (CoinCap IDs)
-const SUPPORTED_COINS = {
-  'bitcoin': { id: 'bitcoin', name: 'Bitcoin', symbol: 'BTC', coincap_id: 'bitcoin' },
-  'ethereum': { id: 'ethereum', name: 'Ethereum', symbol: 'ETH', coincap_id: 'ethereum' },
-  'litecoin': { id: 'litecoin', name: 'Litecoin', symbol: 'LTC', coincap_id: 'litecoin' },
-  'bitcoin-cash': { id: 'bitcoin-cash', name: 'Bitcoin Cash', symbol: 'BCH', coincap_id: 'bitcoin-cash' },
-  'cardano': { id: 'cardano', name: 'Cardano', symbol: 'ADA', coincap_id: 'cardano' },
-  'ripple': { id: 'ripple', name: 'Ripple', symbol: 'XRP', coincap_id: 'xrp' },
-  'dogecoin': { id: 'dogecoin', name: 'Dogecoin', symbol: 'DOGE', coincap_id: 'dogecoin' },
-  'polkadot': { id: 'polkadot', name: 'Polkadot', symbol: 'DOT', coincap_id: 'polkadot' },
-  'chainlink': { id: 'chainlink', name: 'Chainlink', symbol: 'LINK', coincap_id: 'chainlink' },
-  'stellar': { id: 'stellar', name: 'Stellar', symbol: 'XLM', coincap_id: 'stellar' },
-  'monero': { id: 'monero', name: 'Monero', symbol: 'XMR', coincap_id: 'monero' },
-  'tezos': { id: 'tezos', name: 'Tezos', symbol: 'XTZ', coincap_id: 'tezos' },
-  'eos': { id: 'eos', name: 'EOS', symbol: 'EOS', coincap_id: 'eos' },
-  'zcash': { id: 'zcash', name: 'Zcash', symbol: 'ZEC', coincap_id: 'zcash' },
-  'dash': { id: 'dash', name: 'Dash', symbol: 'DASH', coincap_id: 'dash' },
-  'solana': { id: 'solana', name: 'Solana', symbol: 'SOL', coincap_id: 'solana' },
-};
+  // CoinCap API configuration
+const COINCAP_API_BASE = 'https://api.coincap.io/v2';
+const COINCAP_BATCH_ENDPOINT = `${COINCAP_API_BASE}/assets`; // supports ?ids=bitcoin,ethereum,...
 
-// rateLimitedFetch: coalescing + retries + per-coincap backoff
-async function rateLimitedFetch(url, options = {}, env, coincapId) {
+// Helper to attach CoinCap API key for authenticated requests (500 rpm with Pro key)
+function coinCapAuthHeaders(env) {
+  const headers = { 'Accept': 'application/json' };
+  if (env && env.COINCAP_API_KEY) {
+    headers['Authorization'] = `Bearer ${env.COINCAP_API_KEY}`;
+  }
+  return headers;
+}
+
+// rateLimitedFetch: coalescing + retries + per-asset backoff (improved diagnostics)
+async function rateLimitedFetch(url, options = {}, env, assetId) {
   // Coalesce: if there is already an inflight fetch for this url, await it
   if (INFLIGHT_UPSTREAM[url]) {
     try {
@@ -129,13 +140,15 @@ async function rateLimitedFetch(url, options = {}, env, coincapId) {
   const p = (async () => {
     const maxAttempts = 5;
     let attempt = 0;
+    let lastError = null; // Track last error for diagnostics
 
-    // If K/V says we must backoff, do not call upstream
+    // If K/V says we must backoff, do not call upstream: return an object indicating backoff
     const now = Date.now();
-    const backoffUntil = coincapId ? await getBackoff(env.RATE_LIMIT_KV, coincapId) : 0;
+    const backoffUntil = assetId ? await getBackoff(env.RATE_LIMIT_KV, assetId) : 0;
     if (backoffUntil && backoffUntil > now) {
       const waitMs = backoffUntil - now;
-      console.warn(`[rateLimitedFetch] Backoff in effect for ${coincapId}, ${Math.ceil(waitMs/1000)}s left`);
+      console.warn(`[rateLimitedFetch] Backoff in effect for ${assetId}, ${Math.ceil(waitMs/1000)}s left`);
+      // Throw a special error so callers can serve stale-if-error
       const err = new Error('backoff-in-effect');
       err.code = 'backoff';
       err.until = backoffUntil;
@@ -162,20 +175,23 @@ async function rateLimitedFetch(url, options = {}, env, coincapId) {
           const text = await resp.text();
           let json = null;
           try { json = JSON.parse(text); } catch (e) { /* not json */ }
-          console.log(`[rateLimitedFetch] Success on attempt ${attempt}, latency=${Date.now() - attemptStart}ms`);
+          console.log(`[rateLimitedFetch] ✅ Success on attempt ${attempt}, latency=${Date.now() - attemptStart}ms`);
           return { ok: true, status: resp.status, text, json, latency: Date.now() - attemptStart };
         }
 
         // Handle Retry/429/5xx
         if (resp.status === 429) {
           const ra = parseRetryAfterHeader(resp.headers.get('retry-after'));
-          const baseMs = 1000 * Math.pow(2, attempt);
+          // compute backoff until
+          const baseMs = 1000 * Math.pow(2, attempt); // exponential
           const backoffMs = ra ?? jitter(Math.min(16000, baseMs));
           const until = Date.now() + backoffMs;
-          if (coincapId && env.RATE_LIMIT_KV) {
-            await setBackoff(env.RATE_LIMIT_KV, coincapId, until);
-            console.warn(`[rateLimitedFetch] 429 received. Setting KV backoff for ${coincapId} until ${new Date(until).toISOString()} (${Math.ceil(backoffMs/1000)}s)`);
+          if (assetId && env.RATE_LIMIT_KV) {
+            await setBackoff(env.RATE_LIMIT_KV, assetId, until);
+            console.warn(`[rateLimitedFetch] 429 received. Setting KV backoff for ${assetId} until ${new Date(until).toISOString()} (${Math.ceil(backoffMs/1000)}s)`);
           }
+          lastError = { status: 429, message: 'Rate limited' };
+          // Wait before retrying
           if (attempt < maxAttempts) {
             console.log(`[rateLimitedFetch] Waiting ${Math.ceil(backoffMs/1000)}s before retry...`);
             await new Promise(r => setTimeout(r, backoffMs));
@@ -184,7 +200,9 @@ async function rateLimitedFetch(url, options = {}, env, coincapId) {
         }
 
         if (resp.status >= 500 && resp.status < 600) {
+          // Server error: backoff smaller
           const backoffMs = jitter(Math.min(8000, 500 * Math.pow(2, attempt)));
+          lastError = { status: resp.status, message: `Server error ${resp.status}` };
           console.warn(`[rateLimitedFetch] 5xx error (${resp.status}), backing off ${Math.ceil(backoffMs/1000)}s`);
           if (attempt < maxAttempts) {
             await new Promise(r => setTimeout(r, backoffMs));
@@ -199,20 +217,39 @@ async function rateLimitedFetch(url, options = {}, env, coincapId) {
         console.warn(`[rateLimitedFetch] Non-retryable error ${resp.status}`);
         return { ok: false, status: resp.status, text, json, latency: Date.now() - attemptStart };
       } catch (err) {
-        // network or abort — backoff and retry
-        console.warn(`[rateLimitedFetch] Network error on attempt ${attempt}: ${err.message}`);
+        // Network/DNS error - log with explicit message
+        const isDNSError = err.name === 'TypeError' || err.message?.includes('fetch') || err.message?.includes('ENOTFOUND');
+        if (isDNSError) {
+          console.error(`[rateLimitedFetch] ⚠️ Network/DNS error on attempt ${attempt} for ${url}: ${err.name} - ${err.message}`);
+        } else {
+          console.warn(`[rateLimitedFetch] Network error on attempt ${attempt} for ${url}: ${err.message}`);
+        }
+        
+        lastError = { 
+          name: err.name, 
+          message: err.message,
+          type: isDNSError ? 'DNS/Network' : 'Fetch'
+        };
+        
         if (attempt < maxAttempts) {
-          const backoffMs = jitter(Math.min(4000, 500 * Math.pow(2, attempt)));
+          const backoffMs = jitter(Math.min(8000, 500 * Math.pow(2, attempt)));
+          console.log(`[rateLimitedFetch] Waiting ${Math.ceil(backoffMs/1000)}s before retry (${maxAttempts - attempt} attempts left)...`);
           await new Promise(r => setTimeout(r, backoffMs));
         }
         continue;
       }
     }
 
-    // exhausted retries
-    console.error(`[rateLimitedFetch] Exhausted ${maxAttempts} retries for ${url}`);
-    const err = new Error('exhausted-retries');
+    // exhausted retries - include last error details
+    const errorDetails = lastError 
+      ? `Last error: ${lastError.type || 'HTTP'} - ${lastError.message || lastError.status}`
+      : 'No upstream response';
+    console.error(`[rateLimitedFetch] ❌ Exhausted ${maxAttempts} retries for ${url}. ${errorDetails}`);
+    
+    const err = new Error(`exhausted-retries: ${errorDetails}`);
     err.code = 'retries_exhausted';
+    err.details = errorDetails;
+    err.lastError = lastError;
     throw err;
   })();
 
@@ -225,6 +262,26 @@ async function rateLimitedFetch(url, options = {}, env, coincapId) {
   }
 }
 
+// Supported cryptocurrencies mapping (CoinCap IDs)
+const SUPPORTED_COINS = {
+  'bitcoin': { id: 'bitcoin', name: 'Bitcoin', symbol: 'BTC', coincap_id: 'bitcoin' },
+  'ethereum': { id: 'ethereum', name: 'Ethereum', symbol: 'ETH', coincap_id: 'ethereum' },
+  'litecoin': { id: 'litecoin', name: 'Litecoin', symbol: 'LTC', coincap_id: 'litecoin' },
+  'bitcoin-cash': { id: 'bitcoin-cash', name: 'Bitcoin Cash', symbol: 'BCH', coincap_id: 'bitcoin-cash' },
+  'cardano': { id: 'cardano', name: 'Cardano', symbol: 'ADA', coincap_id: 'cardano' },
+  'ripple': { id: 'ripple', name: 'Ripple', symbol: 'XRP', coincap_id: 'xrp' },
+  'dogecoin': { id: 'dogecoin', name: 'Dogecoin', symbol: 'DOGE', coincap_id: 'dogecoin' },
+  'polkadot': { id: 'polkadot', name: 'Polkadot', symbol: 'DOT', coincap_id: 'polkadot' },
+  'chainlink': { id: 'chainlink', name: 'Chainlink', symbol: 'LINK', coincap_id: 'chainlink' },
+  'stellar': { id: 'stellar', name: 'Stellar', symbol: 'XLM', coincap_id: 'stellar' },
+  'monero': { id: 'monero', name: 'Monero', symbol: 'XMR', coincap_id: 'monero' },
+  'tezos': { id: 'tezos', name: 'Tezos', symbol: 'XTZ', coincap_id: 'tezos' },
+  'eos': { id: 'eos', name: 'EOS', symbol: 'EOS', coincap_id: 'eos' },
+  'zcash': { id: 'zcash', name: 'Zcash', symbol: 'ZEC', coincap_id: 'zcash' },
+  'dash': { id: 'dash', name: 'Dash', symbol: 'DASH', coincap_id: 'dash' },
+  'solana': { id: 'solana', name: 'Solana', symbol: 'SOL', coincap_id: 'solana' },
+};
+
 // Fetch asset data from CoinCap (batched API call for one or more coins)
 async function fetchAssetsBatch(idsCsv, env) {
   const url = `${COINCAP_BATCH_ENDPOINT}?ids=${encodeURIComponent(idsCsv)}`;
@@ -235,7 +292,7 @@ async function fetchAssetsBatch(idsCsv, env) {
   };
   
   try {
-    const raw = await rateLimitedFetch(url, fetchOpts, env, idsCsv.split(',')[0]);
+    const raw = await rateLimitedFetch(url, fetchOpts, env, idsCsv.split(',')[0]); // use first coin for backoff tracking
     
     if (!raw || !raw.ok) {
       const body = raw?.text || JSON.stringify(raw?.json || {});
@@ -276,6 +333,7 @@ async function fetchAssetsBatch(idsCsv, env) {
 
 // Fetch historical data from CoinCap for a single coin
 async function fetchAssetHistory(coinId, days, env) {
+  // Choose interval: day if days >= 7, otherwise hourly
   const interval = days >= 7 ? 'd1' : 'h1';
   const end = Date.now();
   const start = end - (days * 24 * 60 * 60 * 1000);
@@ -319,6 +377,241 @@ async function fetchAssetHistory(coinId, days, env) {
   } catch (err) {
     console.error(`❌ [fetchAssetHistory] Failed:`, err.message);
     throw err;
+  }
+}
+
+// Smart caching with background refresh for CoinCap API (with legacy CoinGecko purge)
+async function getCachedPriceData(coinId, env) {
+  const cacheKey = `price_${coinId}`;
+  const now = Date.now();
+  const CACHE_TTL = 10000; // 10 seconds fresh cache (faster updates)
+  const MAX_STALE = 60000; // 1 minute max stale (shorter stale period)
+  
+  try {
+    // Get cached data
+    const cached = await env.RATE_LIMIT_KV.get(cacheKey);
+    
+    if (cached) {
+      try {
+        const { data, timestamp } = JSON.parse(cached);
+        const age = now - timestamp;
+        
+        // 🔥 MIGRATION: Detect and purge legacy CoinGecko cache entries
+        // This checks if cached data was from OLD CoinGecko API and deletes it
+        // Then fetches FRESH data from NEW CoinCap API
+        const source = data?.source;
+        if (source === 'coingecko') {
+          console.log(`🧹 [Migration] Found legacy CoinGecko cache for ${cacheKey}, deleting and forcing CoinCap refresh`);
+          await env.RATE_LIMIT_KV.delete(cacheKey);
+          return await fetchFreshPriceData(coinId, env); // ← This fetches from CoinCap!
+        }
+        
+        // Relaxed validation: removed overly strict price bounds
+        // Just check if price is positive
+        if (!data || !data.price || data.price <= 0) {
+          console.log(`⚠️ [Cache] Invalid cached price for ${coinId}: $${data?.price}, fetching fresh data`);
+          await env.RATE_LIMIT_KV.delete(cacheKey);
+          return await fetchFreshPriceData(coinId, env);
+        }
+        
+        // Fresh cache - return immediately
+        if (age <= CACHE_TTL) {
+          console.log(`✅ [Cache] Fresh data for ${coinId} (age: ${age}ms, source: ${source})`);
+          return { data, fromCache: true, fresh: true };
+        }
+        
+        // Stale cache - return immediately but trigger background refresh
+        if (age <= MAX_STALE) {
+          console.log(`🔄 [Cache] Stale data for ${coinId} (age: ${age}ms), triggering background refresh`);
+          
+          // Trigger background refresh without waiting
+          refreshPriceInBackground(coinId, env).catch(error => {
+            console.log(`Background refresh failed for ${coinId}:`, error);
+          });
+          
+          return { data, fromCache: true, fresh: false };
+        } else {
+          // Even if very stale, serve it immediately and refresh in background
+          console.log(`⚡ [Cache] Serving very stale cached data for ${coinId} (${age}ms old), refreshing in background`);
+          refreshPriceInBackground(coinId, env).catch(error => {
+            console.log(`Background refresh failed for ${coinId}:`, error);
+          });
+          return { data, fromCache: true, fresh: false };
+        }
+      } catch (parseError) {
+        // Corrupt cache entry - delete and fetch fresh
+        console.warn(`[Cache] Failed to parse KV ${cacheKey}, deleting corrupt entry:`, parseError.message);
+        await env.RATE_LIMIT_KV.delete(cacheKey);
+        return await fetchFreshPriceData(coinId, env);
+      }
+    }
+    
+    // No cache or too stale - fetch fresh data
+    console.log(`🆕 [Cache] No cache for ${coinId}, fetching fresh data`);
+    return await fetchFreshPriceData(coinId, env);
+    
+  } catch (error) {
+    console.log(`❌ [Cache] Error getting cached data for ${coinId}:`, error);
+    return await fetchFreshPriceData(coinId, env);
+  }
+}
+
+async function refreshPriceInBackground(coinId, env) {
+  const coincapId = SUPPORTED_COINS[coinId]?.coincap_id || coinId;
+  
+  try {
+    console.log(`🔄 [Background] Refreshing price for ${coinId}`);
+    const resultMap = await fetchAssetsBatch(coincapId, env);
+    const priceData = resultMap[coincapId];
+    
+    if (!priceData) {
+      console.error(`[Background] CoinCap missing coin data for ${coincapId}`);
+      return;
+    }
+    
+    const now = Date.now();
+    // Update cache with current timestamp
+    await env.RATE_LIMIT_KV.put(`price_${coinId}`, JSON.stringify({
+      data: priceData,
+      timestamp: now
+    }));
+    
+    console.log(`✅ [Background] Updated cache for ${coinId}: $${priceData.price}`);
+  } catch (error) {
+    // Gracefully handle backoff errors
+    if (error.code === 'backoff' || error.code === 'retries_exhausted') {
+      console.warn(`[Background] Suppressed upstream error for ${coinId}: ${error.message}`);
+      return;
+    }
+    console.log(`❌ [Background] Failed to refresh ${coinId}:`, error.message);
+  }
+}
+
+async function fetchFreshPriceData(coinId, env) {
+  const coincapId = SUPPORTED_COINS[coinId]?.coincap_id || coinId;
+  
+  try {
+    console.log(`🚀 [Fresh] Fetching price for ${coinId} from CoinCap`);
+    const resultMap = await fetchAssetsBatch(coincapId, env);
+    const priceData = resultMap[coincapId];
+    
+    if (!priceData) {
+      throw new Error(`No price data for ${coincapId} in CoinCap response`);
+    }
+    
+    // Cache the fresh data
+    await env.RATE_LIMIT_KV.put(`price_${coinId}`, JSON.stringify({
+      data: priceData,
+      timestamp: Date.now()
+    }));
+    
+    console.log(`✅ [Fresh] Cached fresh price for ${coinId}: $${priceData.price}`);
+    return { data: priceData, fromCache: false, fresh: true };
+    
+  } catch (error) {
+    console.log(`❌ [Fresh] Failed to fetch ${coinId}:`, error.message);
+    throw error;
+  }
+}
+
+// History data caching functions (with legacy CoinGecko purge)
+async function getCachedHistoryData(coinId, days, env) {
+  const cacheKey = `history_${coinId}_${days}`;
+  const now = Date.now();
+  const CACHE_TTL = 10000; // 10 seconds fresh cache (faster updates)
+  const MAX_STALE = 60000; // 1 minute max stale (shorter stale period)
+  
+  try {
+    // Get cached data
+    const cached = await env.RATE_LIMIT_KV.get(cacheKey);
+    
+    if (cached) {
+      try {
+        const { data, timestamp } = JSON.parse(cached);
+        const age = now - timestamp;
+        
+        // 🔥 MIGRATION: Detect and purge legacy CoinGecko cache entries
+        // This checks if cached data was from OLD CoinGecko API and deletes it
+        // Then fetches FRESH data from NEW CoinCap API
+        const source = data?.source;
+        if (source === 'coingecko') {
+          console.log(`🧹 [Migration] Found legacy CoinGecko history cache for ${cacheKey}, deleting and forcing CoinCap refresh`);
+          await env.RATE_LIMIT_KV.delete(cacheKey);
+          return await fetchFreshHistoryData(coinId, days, env); // ← This fetches from CoinCap!
+        }
+        
+        // Relaxed validation: just check if we have valid price data
+        if (!data || !data.prices || !Array.isArray(data.prices) || data.prices.length === 0) {
+          console.log(`⚠️ [History Cache] Invalid cached history for ${coinId}, fetching fresh data`);
+          await env.RATE_LIMIT_KV.delete(cacheKey);
+          return await fetchFreshHistoryData(coinId, days, env);
+        }
+        
+        if (age < CACHE_TTL) {
+          console.log(`✅ [History Cache] Serving fresh cached data for ${coinId} (${age}ms old, source: ${source})`);
+          return { data, fromCache: true, fresh: true };
+        } else if (age < MAX_STALE) {
+          console.log(`🔄 [History Cache] Serving stale cached data for ${coinId} (${age}ms old), refreshing in background`);
+          // Trigger background refresh
+          refreshHistoryInBackground(coinId, days, env);
+          return { data, fromCache: true, fresh: false };
+        } else {
+          // Even if very stale, serve it immediately and refresh in background
+          console.log(`⚡ [History Cache] Serving very stale cached data for ${coinId} (${age}ms old), refreshing in background`);
+          refreshHistoryInBackground(coinId, days, env);
+          return { data, fromCache: true, fresh: false };
+        }
+      } catch (parseError) {
+        // Corrupt cache entry - delete and fetch fresh
+        console.warn(`[History Cache] Failed to parse KV ${cacheKey}, deleting corrupt entry:`, parseError.message);
+        await env.RATE_LIMIT_KV.delete(cacheKey);
+        return await fetchFreshHistoryData(coinId, days, env);
+      }
+    }
+    
+    // No cache or too old, fetch fresh data
+    console.log(`🔄 [History Cache] No valid cache for ${coinId}, fetching fresh data`);
+    return await fetchFreshHistoryData(coinId, days, env);
+    
+  } catch (error) {
+    console.log(`❌ [History Cache] Error getting cached data for ${coinId}: ${error.message}`);
+    return await fetchFreshHistoryData(coinId, days, env);
+  }
+}
+
+async function fetchFreshHistoryData(coinId, days, env) {
+  const coincapId = SUPPORTED_COINS[coinId]?.coincap_id || coinId;
+  
+  try {
+    console.log(`🚀 [Fresh History] Fetching history for ${coinId} (${days} days) from CoinCap`);
+    const historyData = await fetchAssetHistory(coincapId, days, env);
+    
+    // Cache the fresh data
+    await env.RATE_LIMIT_KV.put(`history_${coinId}_${days}`, JSON.stringify({
+      data: historyData,
+      timestamp: Date.now()
+    }));
+    
+    console.log(`✅ [Fresh History] Cached fresh history for ${coinId}: ${historyData.prices.length} points`);
+    return { data: historyData, fromCache: false, fresh: true };
+    
+  } catch (error) {
+    console.log(`❌ [Fresh History] Failed to fetch history for ${coinId}:`, error.message);
+    throw error;
+  }
+}
+
+async function refreshHistoryInBackground(coinId, days, env) {
+  try {
+    await fetchFreshHistoryData(coinId, days, env);
+    console.log(`✅ [Background History] Refreshed history for ${coinId}`);
+  } catch (error) {
+    // Gracefully handle backoff errors
+    if (error.code === 'backoff' || error.code === 'retries_exhausted') {
+      console.warn(`[Background History] Suppressed upstream error for ${coinId}: ${error.message}`);
+      return;
+    }
+    console.warn(`⚠️ [Background History] Failed to refresh ${coinId}: ${error.message}`);
   }
 }
 
@@ -373,52 +666,128 @@ async function handlePrice(request, env) {
   const start = Date.now();
   try {
     const url = new URL(request.url);
-    const coinId = (url.searchParams.get('coin') || 'bitcoin').toLowerCase();
-    
-    if (!SUPPORTED_COINS[coinId]) {
-      return errorResponse(`Unsupported coin: ${coinId}`);
-    }
-    
-    const coincapId = SUPPORTED_COINS[coinId].coincap_id;
-    console.log(`[Price] Fetching ${coinId} from CoinCap...`);
-    
+    const coinId = url.searchParams.get('coin') || 'bitcoin';
+    const origin = request.headers.get('Origin');
+
+    console.log(`Fetching price for ${coinId} from origin: ${origin || 'direct'}`);
+
+    // allow mutation
+    let force = isForceRefresh(request.url);
+
+    // Safety: delete KV if ultra-old (48h). Non-blocking best-effort.
+    const VERY_OLD_MS = 48 * 60 * 60 * 1000;
     try {
-      // Fetch current price from CoinCap
-      const resultMap = await fetchAssetsBatch(coincapId, env);
-      const priceData = resultMap[coincapId];
-      
-      if (!priceData) {
-        throw new Error(`No price data for ${coincapId} in CoinCap response`);
+      await deleteIfVeryOld(env.RATE_LIMIT_KV, `price_${coinId}`, VERY_OLD_MS);
+    } catch (e) {
+      console.warn('[Price] deleteIfVeryOld error:', e.message);
+    }
+
+    // SHORT TTL: force refresh if cached entry older than SHORT_TTL_MS
+    const SHORT_TTL_MS = 60 * 1000; // 60s (matches POP cache TTL)
+    if (!force) {
+      try {
+        const raw = await env.RATE_LIMIT_KV.get(`price_${coinId}`);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          const cachedTs = parsed.timestamp || parsed.data?.timestamp || 0;
+          if (cachedTs && (Date.now() - cachedTs > SHORT_TTL_MS)) {
+            console.log(`[Price] Cached price too old (${Math.floor((Date.now()-cachedTs)/1000)}s), will force refresh`);
+            force = true;
+          }
+        }
+      } catch (e) {
+        console.warn('[Price] error reading KV for age check:', e.message);
+        // don't fail - proceed without forcing
       }
-      
-      // Validate price data
-      if (!validatePriceData(priceData)) {
-        console.error(`[Price] Invalid price data for ${coincapId}:`, JSON.stringify(priceData));
-        throw new Error(`Invalid price data: ${JSON.stringify(priceData)}`);
+    }
+
+    // Fetch path
+    let result;
+    let stageStart = Date.now();
+    if (force) {
+      console.log(`[Price] Force refresh for ${coinId}`);
+      // fetch fresh (this throws only if upstream fails)
+      try {
+        result = await fetchFreshPriceData(coinId, env);
+      } catch (upErr) {
+        // Upstream failed — try to serve stale if available, otherwise bubble error
+        console.warn(`[Price] fetchFreshPriceData failed: ${upErr.message}`);
+        try {
+          // try to serve whatever cached data we have, but mark stale-if-error
+          const raw = await env.RATE_LIMIT_KV.get(`price_${coinId}`);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            result = { data: parsed.data, fromCache: true, fresh: false, staleIfError: true };
+            console.warn('[Price] Serving stale cached price after upstream failure');
+          } else {
+            throw upErr; // no cached data
+          }
+        } catch (serveErr) {
+          console.error('[Price] No cached data to fall back to:', serveErr.message);
+          throw upErr; // bubble original upstream error to outer catch
+        }
       }
-      
-      const headers = {
-        'Cache-Control': 's-maxage=60, max-age=0, must-revalidate',
-        'X-Cache-Status': 'miss',
-        'X-Cache-Source': 'api',
-        'X-Latency-ms': String(Date.now() - start)
-      };
-      
-      console.log(`✅ [Price] Got ${coinId} price: $${priceData.price}, latency=${Date.now()-start}ms`);
-      
-      return jsonResponse(priceData, 200, headers);
-    } catch (fetchError) {
-      // If upstream fails, this is where we would serve stale-if-error
-      throw fetchError;
+    } else {
+      // Use smart cache (may trigger background refresh)
+      const beforeKV = Date.now();
+      result = await getCachedPriceData(coinId, env);
+      const afterKV = Date.now();
+      console.log(`[Price] KV read latency: ${afterKV - beforeKV}ms`);
+      // If getCachedPriceData somehow returned nothing, fetch fresh
+      if (!result || !result.data) {
+        console.log('[Price] getCachedPriceData returned no data, fetching fresh');
+        result = await fetchFreshPriceData(coinId, env);
+      }
+    }
+    const stageEnd = Date.now();
+
+    // Prepare observability headers with POP caching
+    const dataTs = result?.data?.timestamp ? new Date(result.data.timestamp).getTime() : null;
+    const xdoage = dataTs ? String(Math.floor((Date.now() - dataTs) / 1000)) : '';
+    const xcacheStatus = result.fromCache ? (result.fresh ? 'fresh' : (result.staleIfError ? 'stale-if-error' : 'stale')) : 'miss';
+    const headers = {
+      'Cache-Control': 's-maxage=60, max-age=0, must-revalidate',
+      'X-Cache-Status': xcacheStatus,
+      'X-Cache-Source': result.fromCache ? 'cache' : 'api',
+      'X-DO-Age': xdoage,
+      'X-Latency-ms': String(Date.now() - start)
+    };
+
+    console.log(`✅ [Price] Got price for ${coinId}: $${result.data.price} (fromCache=${!!result.fromCache}, age=${xdoage}s), totalLatency=${Date.now()-start}ms`);
+    return jsonResponse(result.data, 200, headers);
+
+  } catch (error) {
+    // More informative error for client; include diagnostics
+    console.error('❌ [Price] Error handling price request:', error);
+    
+    // Determine status code based on error type
+    let status = 500;
+    if (error.code === 'retries_exhausted') {
+      status = 502; // Bad Gateway - upstream unreachable
+    } else if (error.message && error.message.includes('CoinCap')) {
+      status = 502;
     }
     
-  } catch (error) {
-    console.error('❌ [Price] Error:', error);
-    const status = (error.message && error.message.includes('CoinCap')) ? 502 : 500;
-    return jsonResponse({ 
-      error: 'Failed to fetch price data', 
-      details: error.message || 'unknown' 
-    }, status, { 'X-Client-Cache': 'no-store', 'X-Latency-ms': String(Date.now() - start) });
+    // Include detailed error information
+    const errorDetails = {
+      error: 'Failed to fetch price data',
+      code: error.code || 'unknown',
+      details: error.details || error.message || 'unknown error',
+      timestamp: new Date().toISOString()
+    };
+    
+    // Add lastError details if available (for exhausted-retries)
+    if (error.lastError) {
+      errorDetails.diagnostic = {
+        type: error.lastError.type || 'unknown',
+        message: error.lastError.message
+      };
+    }
+    
+    return jsonResponse(errorDetails, status, { 
+      'X-Client-Cache': 'no-store',
+      'X-Error-Type': error.code || 'unknown'
+    });
   }
 }
 
@@ -426,54 +795,230 @@ async function handleHistory(request, env) {
   const start = Date.now();
   try {
     const url = new URL(request.url);
-    const coinId = (url.searchParams.get('coin') || 'bitcoin').toLowerCase();
-    const days = Math.min(parseInt(url.searchParams.get('days')) || 7, 30); // Max 30 days
+    const coinId = url.searchParams.get('coin') || 'bitcoin';
+    const days = Math.min(parseInt(url.searchParams.get('days')) || 7, 30);
     
     if (!SUPPORTED_COINS[coinId]) {
       return errorResponse(`Unsupported coin: ${coinId}`);
     }
     
-    const coincapId = SUPPORTED_COINS[coinId].coincap_id;
-    console.log(`[History] Fetching ${coinId} history (${days} days) from CoinCap...`);
-    
+    // allow mutation
+    let force = isForceRefresh(request.url);
+
+    // Safety: delete KV if ultra-old
+    const VERY_OLD_MS = 48 * 60 * 60 * 1000;
     try {
-      // Fetch historical price data from CoinCap
-      const historyData = await fetchAssetHistory(coincapId, days, env);
-      
-      // Validate historical data
-      if (!validateHistoryData(historyData)) {
-        console.error(`[History] Invalid history data for ${coincapId}:`, JSON.stringify(historyData).substring(0, 500));
-        throw new Error(`Invalid history data: ${JSON.stringify(historyData).substring(0, 200)}`);
+      await deleteIfVeryOld(env.RATE_LIMIT_KV, `history_${coinId}_${days}`, VERY_OLD_MS);
+    } catch (e) {
+      console.warn('[History] deleteIfVeryOld error:', e.message);
+    }
+
+    // SHORT TTL: force refresh if cached entry older than SHORT_TTL_MS
+    const SHORT_TTL_MS = 60 * 1000; // 60s (matches POP cache TTL)
+    if (!force) {
+      try {
+        const raw = await env.RATE_LIMIT_KV.get(`history_${coinId}_${days}`);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          const cachedTs = parsed.timestamp || 0;
+          if (cachedTs && (Date.now() - cachedTs > SHORT_TTL_MS)) {
+            console.log(`[History] Cached history too old (${Math.floor((Date.now()-cachedTs)/1000)}s), will force refresh`);
+            force = true;
+          }
+        }
+      } catch (e) {
+        console.warn('[History] error reading KV for age check:', e.message);
       }
-      
-      const lastPrice = historyData.prices.length > 0 ? historyData.prices[historyData.prices.length - 1] : null;
-      const dataTs = lastPrice?.timestamp ? new Date(lastPrice.timestamp).getTime() : null;
-      const xdoage = dataTs ? String(Math.floor((Date.now() - dataTs) / 1000)) : '';
-      
-      const headers = {
-        'Cache-Control': 's-maxage=60, max-age=0, must-revalidate',
-        'X-Cache-Status': 'miss',
-        'X-Cache-Source': 'api',
-        'X-DO-Age': xdoage,
-        'X-Latency-ms': String(Date.now() - start)
-      };
-      
-      console.log(`✅ [History] Got ${coinId} history (${historyData.prices.length} points), latency=${Date.now()-start}ms`);
-      
-      return jsonResponse(historyData, 200, headers);
-    } catch (fetchError) {
-      // If upstream fails, this is where we would serve stale-if-error
-      throw fetchError;
     }
     
+    // Fetch path
+    let result;
+    if (force) {
+      console.log(`[History] Force refresh for ${coinId} (${days} days)`);
+      try {
+        result = await fetchFreshHistoryData(coinId, days, env);
+      } catch (upErr) {
+        console.warn(`[History] fetchFreshHistoryData failed: ${upErr.message}`);
+        try {
+          const raw = await env.RATE_LIMIT_KV.get(`history_${coinId}_${days}`);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            result = { data: parsed.data, fromCache: true, fresh: false, staleIfError: true };
+            console.warn('[History] Serving stale cached history after upstream failure');
+          } else {
+            throw upErr;
+          }
+        } catch (serveErr) {
+          console.error('[History] No cached data to fall back to:', serveErr.message);
+          throw upErr;
+        }
+      }
+    } else {
+      const beforeKV = Date.now();
+      result = await getCachedHistoryData(coinId, days, env);
+      const afterKV = Date.now();
+      console.log(`[History] KV read latency: ${afterKV - beforeKV}ms`);
+      if (!result || !result.data) {
+        console.log('[History] getCachedHistoryData returned no data, fetching fresh');
+        result = await fetchFreshHistoryData(coinId, days, env);
+      }
+    }
+    
+    // Build observability headers with POP caching (use last price timestamp for age)
+    const lastPrice = result.data.prices && result.data.prices.length > 0 ? result.data.prices[result.data.prices.length-1] : null;
+    const dataTs = lastPrice?.timestamp ? new Date(lastPrice.timestamp).getTime() : null;
+    const xdoage = dataTs ? String(Math.floor((Date.now() - dataTs) / 1000)) : '';
+    const xcacheStatus = result.fromCache ? (result.fresh ? 'fresh' : (result.staleIfError ? 'stale-if-error' : 'stale')) : 'miss';
+    const headers = {
+      'Cache-Control': 's-maxage=60, max-age=0, must-revalidate',
+      'X-Cache-Status': xcacheStatus,
+      'X-Cache-Source': result.fromCache ? 'cache' : 'api',
+      'X-DO-Age': xdoage,
+      'X-Latency-ms': String(Date.now() - start)
+    };
+    
+    console.log(`✅ [History] Got history for ${coinId} (${result.data.prices.length} points, fromCache=${!!result.fromCache}, age=${xdoage}s), totalLatency=${Date.now()-start}ms`);
+    return jsonResponse(result.data, 200, headers);
+    
   } catch (error) {
-    console.error('❌ [History] Error:', error);
-    const status = (error.message && error.message.includes('CoinCap')) ? 502 : 500;
-    return jsonResponse({ 
-      error: 'Failed to fetch price history', 
-      details: error.message || 'unknown' 
-    }, status, { 'X-Client-Cache': 'no-store', 'X-Latency-ms': String(Date.now() - start) });
+    console.error('❌ [History] Error handling history request:', error);
+    
+    // Determine status code based on error type
+    let status = 500;
+    if (error.code === 'retries_exhausted') {
+      status = 502; // Bad Gateway - upstream unreachable
+    } else if (error.message && error.message.includes('CoinCap')) {
+      status = 502;
+    }
+    
+    // Include detailed error information
+    const errorDetails = {
+      error: 'Failed to fetch price history',
+      code: error.code || 'unknown',
+      details: error.details || error.message || 'unknown error',
+      timestamp: new Date().toISOString()
+    };
+    
+    // Add lastError details if available (for exhausted-retries)
+    if (error.lastError) {
+      errorDetails.diagnostic = {
+        type: error.lastError.type || 'unknown',
+        message: error.lastError.message
+      };
+    }
+    
+    return jsonResponse(errorDetails, status, { 
+      'X-Client-Cache': 'no-store',
+      'X-Error-Type': error.code || 'unknown'
+    });
   }
+}
+
+// Generate realistic fallback historical data when CoinCap is unavailable
+function generateFallbackHistoryData(coinId, days) {
+  const prices = [];
+  const now = new Date();
+  const basePrice = getFallbackBasePrice(coinId);
+  
+  // Generate realistic price movements
+  let currentPrice = basePrice;
+  for (let i = days - 1; i >= 0; i--) {
+    const date = new Date(now);
+    date.setDate(date.getDate() - i);
+    
+    // Add realistic daily volatility (±2% to ±8% depending on coin)
+    const volatility = getVolatilityForCoin(coinId);
+    const changePercent = (Math.random() - 0.5) * 2 * volatility;
+    currentPrice = currentPrice * (1 + changePercent / 100);
+    
+    prices.push({
+      timestamp: date.toISOString(),
+      price: Math.round(currentPrice * 100) / 100
+    });
+  }
+  
+  return jsonResponse({
+    coin: coinId,
+    prices: prices,
+    days: days,
+    symbol: SUPPORTED_COINS[coinId].symbol,
+    source: 'fallback',
+    note: 'Simulated market data (CoinCap temporarily unavailable)'
+  });
+}
+
+// Generate realistic fallback price data when CoinCap is unavailable
+function generateFallbackPriceData(coinId) {
+  const basePrice = getFallbackBasePrice(coinId);
+  const volatility = getVolatilityForCoin(coinId);
+  
+  // Generate realistic daily change (±volatility%)
+  const changePercent = (Math.random() - 0.5) * 2 * volatility;
+  const currentPrice = basePrice * (1 + changePercent / 100);
+  
+  // Generate realistic market data
+  const marketCap = currentPrice * 19000000; // Approximate circulating supply multiplier
+  const volume24h = marketCap * 0.05; // 5% of market cap as daily volume
+  
+  return jsonResponse({
+    coin: coinId,
+    price: Math.round(currentPrice * 100) / 100,
+    change24h: changePercent,
+    market_cap: Math.round(marketCap),
+    volume_24h: Math.round(volume24h),
+    symbol: SUPPORTED_COINS[coinId].symbol,
+    source: 'fallback',
+    timestamp: new Date().toISOString(),
+    note: 'Simulated market data (CoinCap temporarily unavailable)'
+  });
+}
+
+// Get realistic base prices for different coins
+function getFallbackBasePrice(coinId) {
+  const basePrices = {
+    'bitcoin': 111000, // Updated to current Bitcoin price range
+    'ethereum': 3500,  // Updated to current Ethereum price
+    'litecoin': 120,   // Updated to current Litecoin price
+    'bitcoin-cash': 300, // Updated to current BCH price
+    'cardano': 0.55,   // Updated to current ADA price
+    'ripple': 0.65,   // Updated to current XRP price
+    'dogecoin': 0.12,  // Updated to current DOGE price
+    'polkadot': 8.5,   // Updated to current DOT price
+    'chainlink': 18,   // Updated to current LINK price
+    'stellar': 0.15,   // Updated to current XLM price
+    'monero': 180,     // Updated to current XMR price
+    'tezos': 1.5,      // Updated to current XTZ price
+    'eos': 1.3,        // Updated to current EOS price
+    'zcash': 55,       // Updated to current ZEC price
+    'dash': 45,
+    'solana': 25
+  };
+  
+  return basePrices[coinId] || 100; // Default fallback price
+}
+
+// Get volatility percentage for different coins
+function getVolatilityForCoin(coinId) {
+  const volatilities = {
+    'bitcoin': 4,      // ±4% daily volatility
+    'ethereum': 5,     // ±5% daily volatility
+    'litecoin': 6,     // ±6% daily volatility
+    'bitcoin-cash': 6,
+    'cardano': 7,
+    'ripple': 7,
+    'dogecoin': 8,     // ±8% daily volatility (more volatile)
+    'polkadot': 7,
+    'chainlink': 7,
+    'stellar': 7,
+    'monero': 6,
+    'tezos': 7,
+    'eos': 7,
+    'zcash': 6,
+    'dash': 6,
+    'solana': 8
+  };
+  
+  return volatilities[coinId] || 6; // Default 6% volatility
 }
 
 async function handleNews(request, env) {
@@ -651,7 +1196,7 @@ Use these criteria:
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'command-r',
+        model: 'command-a-03-2025',
       messages: [
         {
           role: 'user',
@@ -938,42 +1483,6 @@ async function handleAIExplain(request, env) {
  * Classify market mood using Cohere's v2/classify endpoint
  */
 async function classifyMarketMoodWithCohere(rsi, smaSignal, bbSignal, priceData, coin, env) {
-  // Prepare training examples for classification
-  const examples = [
-    {
-      text: "RSI: 85, SMA: SELL, BB: SELL, Price trend: declining sharply",
-      label: "bearish"
-    },
-    {
-      text: "RSI: 25, SMA: BUY, BB: BUY, Price trend: rising from oversold",
-      label: "bullish"
-    },
-    {
-      text: "RSI: 45, SMA: NEUTRAL, BB: NEUTRAL, Price trend: sideways movement",
-      label: "neutral"
-    },
-    {
-      text: "RSI: 75, SMA: BUY, BB: NEUTRAL, Price trend: strong upward momentum",
-      label: "bullish"
-    },
-    {
-      text: "RSI: 30, SMA: SELL, BB: SELL, Price trend: continued downtrend",
-      label: "bearish"
-    },
-    {
-      text: "RSI: 55, SMA: BUY, BB: BUY, Price trend: breaking resistance",
-      label: "bullish"
-    },
-    {
-      text: "RSI: 68, SMA: NEUTRAL, BB: SELL, Price trend: mixed signals",
-      label: "neutral"
-    },
-    {
-      text: "RSI: 20, SMA: BUY, BB: BUY, Price trend: potential reversal",
-      label: "bullish"
-    }
-  ];
-  
   // Calculate price trend from recent data
   const recentPrices = priceData.slice(-5);
   const oldPrice = recentPrices[0]?.y || 0;
@@ -991,50 +1500,98 @@ async function classifyMarketMoodWithCohere(rsi, smaSignal, bbSignal, priceData,
   
   console.log('Classifying market mood for:', inputText);
   
-  // Make request to Cohere Classify API v2
-  const response = await fetch('https://api.cohere.com/v2/classify', {
+  // Calculate dynamic confidence based on signal strength
+  let baseConfidence = 60;
+  
+  // RSI confidence factors
+  if (rsi >= 70 || rsi <= 30) baseConfidence += 20; // Strong RSI signals
+  else if (rsi >= 60 || rsi <= 40) baseConfidence += 10; // Moderate RSI signals
+  
+  // SMA signal confidence
+  if (smaSignal === 'BUY') baseConfidence += 10;
+  else if (smaSignal === 'SELL') baseConfidence += 10;
+  
+  // Price trend confidence
+  if (priceChange > 2 || priceChange < -2) baseConfidence += 10; // Strong trends
+  else if (Math.abs(priceChange) > 0.5) baseConfidence += 5; // Moderate trends
+  
+  // Cap confidence at 90%
+  baseConfidence = Math.min(90, baseConfidence);
+  
+  // Create a comprehensive prompt for Chat API classification
+  const prompt = `You are a cryptocurrency market sentiment classifier. Based on the technical analysis indicators provided, classify the market sentiment as exactly one of: "bullish", "bearish", or "neutral".
+
+Technical Analysis Data:
+${inputText}
+
+Guidelines:
+- "bullish": Strong positive signals, RSI oversold (under 30) with buy signals, or strong upward momentum
+- "bearish": Strong negative signals, RSI overbought (over 70) with sell signals, or strong downward momentum  
+- "neutral": Mixed signals, RSI in normal range (30-70), or conflicting indicators
+
+Examples:
+- RSI: 25, SMA: BUY, BB: BUY, Price trend: rising strongly → bullish
+- RSI: 80, SMA: SELL, BB: SELL, Price trend: declining sharply → bearish
+- RSI: 50, SMA: NEUTRAL, BB: NEUTRAL, Price trend: sideways movement → neutral
+
+Respond with ONLY a JSON object in this exact format:
+{"sentiment": "bullish", "confidence": ${baseConfidence}, "reasoning": "Brief explanation"}
+
+The confidence should be a number between 50-95 based on how clear the signals are.`;
+  
+  // Make request to Cohere Chat API v2
+  const response = await fetch('https://api.cohere.com/v2/chat', {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${env.COHERE_API_KEY}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'embed-english-v3.0',
-      inputs: [inputText],
-      examples: examples,
-      task_description: 'Classify cryptocurrency market sentiment based on technical analysis indicators. Use "bullish" for positive outlook, "bearish" for negative outlook, and "neutral" for mixed or unclear signals.'
+        model: 'command-a-03-2025',
+      messages: [
+        {
+          role: 'user',
+          content: prompt
+        }
+      ],
+      temperature: 0.3,
+      max_tokens: 200
     }),
   });
   
   if (!response.ok) {
     const errorBody = await response.text();
-    console.log('Cohere Classify API error:', errorBody);
-    throw new Error(`Cohere Classify API error: ${response.status}`);
+    console.log('Cohere Chat API error:', errorBody);
+    throw new Error(`Cohere Chat API error: ${response.status}`);
   }
   
   const data = await response.json();
-  console.log('Cohere Classify API success:', data);
+  console.log('Cohere Chat API success for classification');
   
-  // Extract classification result
-  const classification = data.classifications?.[0];
-  if (!classification) {
-    throw new Error('No classification result returned');
+  // Extract the classification result
+  const messageContent = data.message?.content?.[0]?.text || '';
+  
+  try {
+    // Extract JSON from response
+    const jsonMatch = messageContent.match(/\{.*\}/s);
+    if (jsonMatch) {
+      const result = JSON.parse(jsonMatch[0]);
+      
+      return jsonResponse({
+        mood: result.sentiment,
+        confidence: baseConfidence, // Use our calculated confidence instead of AI's
+        reasoning: result.reasoning || `Based on RSI ${rsi.toFixed(1)}, SMA: ${smaSignal}, BB: ${bbSignal}, price trend: ${priceTrend}`,
+        method: 'cohere-chat-api',
+        coin: coin,
+        timestamp: new Date().toISOString()
+      });
+    } else {
+      throw new Error('No JSON found in response');
+    }
+  } catch (parseError) {
+    console.log('Failed to parse AI classification response:', parseError.message);
+    throw new Error('Invalid response format from Cohere Chat API');
   }
-  
-  const prediction = classification.prediction;
-  const confidence = classification.confidence || 0;
-  
-  // Map confidence to a more meaningful scale
-  const confidencePercentage = Math.round(confidence * 100);
-  
-  return jsonResponse({
-    mood: prediction,
-    confidence: confidencePercentage,
-    reasoning: `Based on RSI ${rsi.toFixed(1)}, SMA signal: ${smaSignal}, BB signal: ${bbSignal}, and price trend: ${priceTrend}`,
-    method: 'cohere-classify-api',
-    coin: coin,
-    timestamp: new Date().toISOString()
-  });
 }
 
 /**
@@ -1155,30 +1712,104 @@ async function explainPatternWithCohere(rsi, sma, bb, signals, coin, timeframe, 
   const rsiValue = rsi.length > 0 ? rsi[rsi.length - 1].y : currentRSI;
   const smaValue = sma.length > 0 ? sma[sma.length - 1].y : currentSMA;
   
-  // Create detailed prompt for AI explanation
-  const prompt = `You are a professional cryptocurrency technical analyst. Provide a comprehensive explanation of the current market pattern for ${coin.toUpperCase()}.
+  // Round exactly once so the model can only echo these strings
+  function toFixedStr(n, dp = 2) { return Number(n).toFixed(dp); }
+  
+  const P = toFixedStr(currentPrice, 2);
+  const R = toFixedStr(rsiValue, 2);
+  const S = toFixedStr(smaValue, 2);
+  const L = toFixedStr(currentBBLower, 2);
+  const U = toFixedStr(currentBBUpper, 2);
+  const PERIOD = 4; // SMA period used in charts
+  const TF = Number(timeframe);
 
-**Current Technical Analysis Data:**
-- Current Price: $${currentPrice.toLocaleString()}
-- RSI (14): ${rsiValue.toFixed(2)}
-- SMA (20): $${smaValue.toLocaleString()}
-- Bollinger Band Upper: $${currentBBUpper.toLocaleString()}
-- Bollinger Band Lower: $${currentBBLower.toLocaleString()}
-- Timeframe: ${timeframe} days
-- Analysis Signals: ${signals.map(s => `${s.type}: ${s.signal} (${s.strength})`).join(', ')}
+  // Derived metrics for richer text (percentages shown with % in copy)
+  const priceVsSmaPct   = ((Number(P) - Number(S)) / Number(S)) * 100;
+  const distToLowerPct  = ((Number(P) - Number(L)) / Number(L)) * 100;
+  const distToUpperPct  = ((Number(U) - Number(P)) / Number(P)) * 100;
+  const bandWidthPct    = ((Number(U) - Number(L)) / Number(S)) * 100;
 
-**Instructions:**
-1. Explain what these technical indicators are telling us about ${coin.toUpperCase()}'s current market condition
-2. Analyze the relationship between price and moving averages
-3. Interpret the RSI level and what it suggests about momentum
-4. Explain the Bollinger Bands positioning and market volatility
-5. Provide trading insights based on the combined signals
-6. Include risk management considerations
-7. Keep the explanation educational and professional
+  const PV = toFixedStr(priceVsSmaPct, 2);
+  const DL = toFixedStr(distToLowerPct, 2);
+  const DU = toFixedStr(distToUpperPct, 2);
+  const BW = toFixedStr(bandWidthPct, 2);
 
-**Important:** This is educational content only, not financial advice. Focus on explaining the technical patterns and what they typically indicate in market analysis.
+  // Allow common RSI thresholds explicitly
+  const allowedNumbers = [
+    P, R, S, L, U, String(PERIOD), String(TF),
+    PV, DL, DU, BW,
+    "30", "40", "60", "70"
+  ];
+  
+  // Dynamic logic for scenario planning
+  const isAboveSMA = Number(P) >= Number(S);
+  const bullVerb = isAboveSMA ? "holds above" : "reclaims";
+  const bullishLine = `- If price ${bullVerb} SMA(${PERIOD}) ${S} with RSI > 60, look for follow-through toward ${U}.`;
+  const bearishLine = isAboveSMA
+    ? `- If price closes back below SMA(${PERIOD}) ${S} with RSI < 40, risk shifts toward ${L}.`
+    : `- If price loses ${L}, risk expands; distance to lower band was ${DL}% and may extend.`;
+  const lean = Number(R) >= 60 ? "bearish" : Number(R) <= 40 ? "bullish" : "neutral";
+  
+  // Dynamic confidence calculation based on signal strength
+  let conf = 60; // Base confidence
+  const rsiNum = Number(R);
+  
+  // RSI confidence boost
+  if (rsiNum >= 70 || rsiNum <= 30) conf += 15; // Strong RSI signals
+  else if (rsiNum >= 60 || rsiNum <= 40) conf += 10; // Moderate RSI signals
+  
+  // Price vs SMA confidence boost
+  const priceDeviation = Number(PV);
+  if (Math.abs(priceDeviation) > 5) conf += 10; // Strong price deviation
+  else if (Math.abs(priceDeviation) > 2) conf += 5; // Moderate price deviation
+  
+  // Band width confidence boost
+  const bandWidth = Number(BW);
+  if (bandWidth > 10) conf += 5; // High volatility = more uncertainty
+  else if (bandWidth < 5) conf += 5; // Low volatility = more predictable
+  
+  // Cap confidence at 90%
+  conf = Math.min(90, conf);
 
-Provide a detailed, well-structured explanation in plain English that helps users understand the current market pattern.`;
+  // Create system and user prompts with strict rules
+  const system = [
+    "You are a crypto technical analysis assistant that produces three layers: a beginner-friendly summary, a decision helper, and a detailed section.",
+    "STRICT RULES:",
+    "- Use ONLY the numbers in 'AllowedNumbers'. Do not write any other numeric value.",
+    "- Refer to the moving average exactly as 'SMA(" + PERIOD + ")'. Never say '50/100/200-day' unless provided.",
+    "- Use given percentages verbatim (they may include a %).",
+    "",
+    "OUTPUT FORMAT (Markdown):",
+    "## Simple Summary",
+    "- In plain English (no jargon). Three short bullets: price vs SMA(" + PERIOD + "), what RSI means, and the key support/resistance.",
+    "",
+    "## Decision Helper",
+    "- Three short bullets with clear if/then cues and verbs like 'consider' or 'avoid'.",
+    "- Use ONLY the scenario lines supplied in the user message (do not alter numbers).",
+    "",
+    "## Detailed Guidance",
+    "Write ~120–160 words with sections:",
+    "**Guidance:** 3–5 sentences referencing Context/Derived.",
+    "**Levels to Watch:** bullets with provided levels.",
+    "**Scenario Plan:** two bullets using the exact scenario lines supplied.",
+    "**Invalidation:** one sentence that fits the current baseline.",
+    "**Confidence:** 0–100%.",
+    "",
+    "End with: 'Educational guidance, not financial advice.'"
+  ].join("\n");
+
+  const user = [
+    `Coin: ${coin.toUpperCase()} — Timeframe: ${TF} days`,
+    `Context: price=${P}, RSI=${R}, SMA(${PERIOD})=${S}, BB=[${L}-${U}]`,
+    `Derived: price_vs_sma_pct=${PV}, dist_to_lower_pct=${DL}, dist_to_upper_pct=${DU}, band_width_pct=${BW}`,
+    `AllowedNumbers: ${allowedNumbers.join(", ")}`,
+    "",
+    "Use these scenario lines EXACTLY (do not change numbers):",
+    bullishLine,
+    bearishLine,
+    "",
+    "Remember: Do not use any number not listed in AllowedNumbers."
+  ].join("\n");
 
   console.log('🤖 Sending comprehensive explanation request to Cohere...');
   
@@ -1190,11 +1821,15 @@ Provide a detailed, well-structured explanation in plain English that helps user
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'command-r',
+        model: 'command-a-03-2025',
       messages: [
         {
+          role: 'system',
+          content: system
+        },
+        {
           role: 'user',
-          content: prompt
+          content: user
         }
       ],
       temperature: 0.4,
@@ -1212,7 +1847,26 @@ Provide a detailed, well-structured explanation in plain English that helps user
   console.log('🤖 Cohere explanation API success');
 
   // Extract the explanation
-  const explanation = data.message?.content?.[0]?.text || 'No explanation generated';
+  let explanation = data.message?.content?.[0]?.text || 'No explanation generated';
+  
+  // Guardrails: validate that AI only uses allowed numbers
+  const okNums = new Set(allowedNumbers);
+  function hasDisallowedNumber(text) {
+    // capture numbers like 41,280.41 or 42502.07 or 60
+    const matches = text.match(/\b\d{1,3}(?:,\d{3})*(?:\.\d+)?\b/g) || [];
+    return matches.some(n => !okNums.has(n));
+  }
+  function wrongLabel(text) {
+    return /(?:\b|^)(?:50|100|200)[-\s]day\s+SMA|\bMA(?:50|100|200)\b/i.test(text);
+  }
+  
+  // If AI violates rules, use strict rule-based explanation
+  if (hasDisallowedNumber(explanation) || wrongLabel(explanation)) {
+    console.log('🤖 AI violated number/label rules, using strict fallback');
+    explanation = buildRuleBasedExplanationStrict({
+      coin, P, R, S, L, U, PERIOD, TF, PV, DL, DU, BW
+    });
+  }
   
   return jsonResponse({
     explanation: explanation,
@@ -1220,12 +1874,79 @@ Provide a detailed, well-structured explanation in plain English that helps user
     coin: coin,
     timestamp: new Date().toISOString(),
     technicalContext: {
-      currentPrice,
-      currentRSI: rsiValue,
-      currentSMA: smaValue,
-      timeframe
+      currentPrice: Number(P),
+      currentRSI: Number(R),
+      currentSMA: Number(S),
+      timeframe: TF,
+      smaPeriod: PERIOD
     }
   });
+}
+
+/**
+ * Strict rule-based explanation that uses only provided numbers
+ */
+function buildRuleBasedExplanationStrict({ coin, P, R, S, L, U, PERIOD, TF, PV, DL, DU, BW }) {
+  const rsiNum = Number(R);
+  const mood = rsiNum >= 70 ? "overbought" : rsiNum <= 30 ? "oversold" : "neutral";
+  const lean = rsiNum >= 60 ? "bearish" : rsiNum <= 40 ? "bullish" : "neutral";
+  
+  // Dynamic confidence calculation (same as AI version)
+  let conf = 60; // Base confidence
+  
+  // RSI confidence boost
+  if (rsiNum >= 70 || rsiNum <= 30) conf += 15; // Strong RSI signals
+  else if (rsiNum >= 60 || rsiNum <= 40) conf += 10; // Moderate RSI signals
+  
+  // Price vs SMA confidence boost
+  const priceDeviation = Number(PV);
+  if (Math.abs(priceDeviation) > 5) conf += 10; // Strong price deviation
+  else if (Math.abs(priceDeviation) > 2) conf += 5; // Moderate price deviation
+  
+  // Band width confidence boost
+  const bandWidth = Number(BW);
+  if (bandWidth > 10) conf += 5; // High volatility = more uncertainty
+  else if (bandWidth < 5) conf += 5; // Low volatility = more predictable
+  
+  // Cap confidence at 90%
+  conf = Math.min(90, conf);
+  
+  const isAboveSMA = Number(P) >= Number(S);
+  const bullVerb = isAboveSMA ? "holds above" : "reclaims";
+  const bullishLine = `- If price ${bullVerb} SMA(${PERIOD}) ${S} with RSI > 60, look for follow-through toward ${U}.`;
+  const bearishLine = isAboveSMA
+    ? `- If price closes back below SMA(${PERIOD}) ${S} with RSI < 40, risk shifts toward ${L}.`
+    : `- If price loses ${L}, risk expands; distance to lower band was ${DL}% and may extend.`;
+
+  return [
+    "## Simple Summary",
+    `- Price is ${isAboveSMA ? "above" : "below"} SMA(${PERIOD}) ${S}; current price $${P}.`,
+    `- RSI ${R} indicates ${mood} conditions.`,
+    `- Watch ${L} (support) and ${U} (resistance).`,
+    "",
+    "## Decision Helper",
+    `- Consider ${isAboveSMA ? "holding" : "waiting for"} positions if price ${isAboveSMA ? "stays above" : "breaks above"} SMA(${PERIOD}) ${S}.`,
+    `- Avoid ${mood === "overbought" ? "chasing" : mood === "oversold" ? "panic selling" : "large"} positions near current levels.`,
+    `- Monitor ${L} as key support and ${U} as resistance for breakout signals.`,
+    "",
+    "## Detailed Guidance",
+    "**Guidance:**",
+    `${coin.toUpperCase()} trades near $${P}. RSI at ${R} is ${mood}. Price is between bands [${L}–${U}] and ${PV}% ${isAboveSMA ? "above" : "below"} SMA(${PERIOD}) ${S}. Band width is ${BW}% (volatility context). Baseline leaning: ${lean}.`,
+    "**Levels to Watch:**",
+    `- Support: ${L} (lower band)`,
+    `- Resistance: ${S} (SMA(${PERIOD})), ${U} (upper band)`,
+    "**Scenario Plan:**",
+    bullishLine,
+    bearishLine,
+    `**Invalidation:** ${lean === "bearish"
+        ? `A close above ${S} with RSI > 60 invalidates the bearish tilt.`
+        : lean === "bullish"
+          ? `A close below ${S} with RSI < 40 invalidates the bullish tilt.`
+          : `A decisive move outside [${L}–${U}] with RSI > 60 or < 40 resolves the neutral state.`}`,
+    `**Confidence:** ${conf}%`,
+    "",
+    "Educational guidance, not financial advice."
+  ].join("\n");
 }
 
 /**
@@ -1237,67 +1958,95 @@ function explainPatternFallback(rsi, sma, bb, signals, coin, timeframe, liveValu
   const rsiValue = rsi.length > 0 ? rsi[rsi.length - 1].y : currentRSI;
   const smaValue = sma.length > 0 ? sma[sma.length - 1].y : currentSMA;
   
-  let explanation = `**Technical Analysis Explanation for ${coin.toUpperCase()}**\n\n`;
+  // Use the same strict formatting as the AI version
+  function toFixedStr(n, dp = 2) { return Number(n).toFixed(dp); }
   
-  explanation += `**Current Market Snapshot:**\n`;
-  explanation += `• Price: $${currentPrice.toLocaleString()}\n`;
-  explanation += `• Timeframe: ${timeframe} days\n\n`;
+  const P = toFixedStr(currentPrice, 2);
+  const R = toFixedStr(rsiValue, 2);
+  const S = toFixedStr(smaValue, 2);
+  const L = toFixedStr(currentBBLower, 2);
+  const U = toFixedStr(currentBBUpper, 2);
+  const PERIOD = 4;
+  const TF = Number(timeframe);
+
+  // Calculate derived metrics for richer fallback
+  const priceVsSmaPct   = ((Number(P) - Number(S)) / Number(S)) * 100;
+  const distToLowerPct  = ((Number(P) - Number(L)) / Number(L)) * 100;
+  const distToUpperPct  = ((Number(U) - Number(P)) / Number(P)) * 100;
+  const bandWidthPct    = ((Number(U) - Number(L)) / Number(S)) * 100;
+
+  const PV = toFixedStr(priceVsSmaPct, 2);
+  const DL = toFixedStr(distToLowerPct, 2);
+  const DU = toFixedStr(distToUpperPct, 2);
+  const BW = toFixedStr(bandWidthPct, 2);
   
-  explanation += `**RSI Analysis (${rsiValue.toFixed(2)}):**\n`;
-  if (rsiValue < 30) {
-    explanation += `• The RSI is in oversold territory, suggesting the asset may be undervalued and due for a potential price recovery.\n`;
-  } else if (rsiValue > 70) {
-    explanation += `• The RSI is in overbought territory, indicating the asset may be overvalued and could face selling pressure.\n`;
-  } else {
-    explanation += `• The RSI is in a neutral range, suggesting balanced buying and selling pressure.\n`;
-  }
-  
-  explanation += `\n**Moving Average Analysis:**\n`;
-  const priceVsSMA = ((currentPrice - smaValue) / smaValue) * 100;
-  explanation += `• Current price is ${priceVsSMA >= 0 ? 'above' : 'below'} the 20-day moving average by ${Math.abs(priceVsSMA).toFixed(2)}%\n`;
-  if (currentPrice > smaValue * 1.02) {
-    explanation += `• This suggests an upward trend with bullish momentum.\n`;
-  } else if (currentPrice < smaValue * 0.98) {
-    explanation += `• This indicates a downward trend with bearish pressure.\n`;
-  } else {
-    explanation += `• Price is consolidating around the moving average.\n`;
-  }
-  
-  explanation += `\n**Bollinger Bands Analysis:**\n`;
-  explanation += `• Upper Band: $${currentBBUpper.toLocaleString()}\n`;
-  explanation += `• Lower Band: $${currentBBLower.toLocaleString()}\n`;
-  if (currentPrice > currentBBUpper) {
-    explanation += `• Price is above the upper band, suggesting potential overbought conditions.\n`;
-  } else if (currentPrice < currentBBLower) {
-    explanation += `• Price is below the lower band, suggesting potential oversold conditions.\n`;
-  } else {
-    explanation += `• Price is within the bands, indicating normal volatility levels.\n`;
-  }
-  
-  explanation += `\n**Signal Summary:**\n`;
-  const buySignals = signals.filter(s => s.signal === 'BUY').length;
-  const sellSignals = signals.filter(s => s.signal === 'SELL').length;
-  explanation += `• ${buySignals} bullish signals detected\n`;
-  explanation += `• ${sellSignals} bearish signals detected\n`;
-  
-  explanation += `\n**Risk Management Notes:**\n`;
-  explanation += `• Always use proper position sizing and stop-loss orders\n`;
-  explanation += `• Technical analysis should be combined with fundamental analysis\n`;
-  explanation += `• Past performance does not guarantee future results\n\n`;
-  
-  explanation += `**Disclaimer:** This analysis is for educational purposes only and should not be considered financial advice.`;
+  const explanation = buildRuleBasedExplanationStrict({
+    coin, P, R, S, L, U, PERIOD, TF, PV, DL, DU, BW
+  });
   
   return jsonResponse({
     explanation: explanation,
-    method: 'rule-based',
+    method: 'rule-based-fallback',
     coin: coin,
     timestamp: new Date().toISOString(),
     technicalContext: {
-      currentPrice,
-      currentRSI: rsiValue,
-      currentSMA: smaValue,
-      timeframe
+      currentPrice: Number(P),
+      currentRSI: Number(R),
+      currentSMA: Number(S),
+      timeframe: TF,
+      smaPeriod: PERIOD
     }
+  });
+}
+
+/**
+ * Fallback analysis without pattern analysis
+ */
+function classifyMarketMoodFallback(rsi, smaSignal, bbSignal, priceData, coin) {
+  let bullishScore = 0;
+  let bearishScore = 0;
+  
+  // RSI scoring
+  if (rsi < 30) bullishScore += 2;
+  else if (rsi > 70) bearishScore += 2;
+  else if (rsi >= 45 && rsi <= 55) bullishScore += 0.5;
+  
+  // SMA scoring
+  if (smaSignal === 'BUY') bullishScore += 1.5;
+  else if (smaSignal === 'SELL') bearishScore += 1.5;
+  
+  // BB scoring
+  if (bbSignal === 'BUY') bullishScore += 1;
+  else if (bbSignal === 'SELL') bearishScore += 1;
+  
+  // Price trend analysis
+  if (priceData.length >= 3) {
+    const recentPrices = priceData.slice(-3);
+    const trend = (recentPrices[2].y - recentPrices[0].y) / recentPrices[0].y;
+    if (trend > 0.01) bullishScore += 1;
+    else if (trend < -0.01) bearishScore += 1;
+  }
+  
+  // Determine mood
+  let mood, confidence;
+  if (bullishScore > bearishScore + 1) {
+    mood = 'bullish';
+    confidence = Math.min(90, 60 + (bullishScore - bearishScore) * 8);
+  } else if (bearishScore > bullishScore + 1) {
+    mood = 'bearish';
+    confidence = Math.min(90, 60 + (bearishScore - bullishScore) * 8);
+  } else {
+    mood = 'neutral';
+    confidence = 50 + Math.abs(bullishScore - bearishScore) * 5;
+  }
+  
+  return jsonResponse({
+    mood: mood,
+    confidence: Math.round(confidence),
+    reasoning: `Fallback analysis: bullish signals ${bullishScore.toFixed(1)}, bearish signals ${bearishScore.toFixed(1)}`,
+    method: 'rule-based-fallback',
+    coin: coin,
+    timestamp: new Date().toISOString()
   });
 }
 
@@ -1390,24 +2139,22 @@ async function handleOHLC(request, env) {
       return errorResponse(`Unsupported coin: ${coinId}`);
     }
     
-    // Get current price from Blockchair
-    const statsResponse = await fetch(`https://api.blockchair.com/${coinId}/stats`, {
-      headers: {
-        'X-API-Key': env.BLOCKCHAIR_API_KEY,
-      },
-    });
-    
-    if (!statsResponse.ok) {
-      throw new Error(`Blockchair API error: ${statsResponse.status}`);
-    }
-    
-    const statsData = await statsResponse.json();
-    
-    if (!statsData.data || !statsData.data.market_price_usd) {
-      throw new Error('Invalid price data from Blockchair');
-    }
-    
-    const currentPrice = statsData.data.market_price_usd;
+     // Get current price using the same validation as price endpoint
+     let currentPrice = 45000; // Default fallback price for Bitcoin
+     
+     try {
+       const priceResult = await getCachedPriceData(coinId, env);
+       currentPrice = priceResult.data.price;
+       
+       // Validate the price is reasonable for Bitcoin
+       if (coinId === 'bitcoin' && (currentPrice < 30000 || currentPrice > 150000)) {
+         console.log(`⚠️ [OHLC] Invalid Bitcoin price: $${currentPrice}, using fallback`);
+         currentPrice = 45000; // Use reasonable fallback price
+       }
+     } catch (error) {
+       console.log(`⚠️ [OHLC] Failed to get price data: ${error.message}, using fallback`);
+       currentPrice = 45000; // Use reasonable fallback price
+     }
     
     // Generate OHLC data (Open, High, Low, Close)
     const ohlc = [];
@@ -1494,14 +2241,23 @@ async function handleOHLC(request, env) {
 // MAIN HANDLER
 // =============================================================================
 
+
 export default {
   async fetch(request, env, ctx) {
-    // Handle CORS preflight requests
+    // Debug: Check if secrets are accessible
+    console.log('🔑 Environment check:');
+    console.log(`- COHERE_API_KEY: ${env.COHERE_API_KEY ? 'SET' : 'NOT SET'}`);
+    console.log(`- NEWSAPI_KEY: ${env.NEWSAPI_KEY ? 'SET' : 'NOT SET'}`);
+    console.log(`- ENVIRONMENT: ${env.ENVIRONMENT || 'NOT SET'}`);
+    
+    // Enhanced CORS preflight handling with logging
     if (request.method === 'OPTIONS') {
+      const origin = request.headers.get('Origin');
+      console.log(`CORS preflight from origin: ${origin}`);
       return new Response(null, {
         status: 200,
         headers: {
-          ...CORS_HEADERS,
+          ...DEFAULT_CORS,
           'Cache-Control': 'no-store, max-age=0, must-revalidate',
           'Surrogate-Control': 'no-store',
           'Pragma': 'no-cache',
@@ -1512,8 +2268,114 @@ export default {
     
     const url = new URL(request.url);
     const path = url.pathname;
+    const origin = request.headers.get('Origin');
+    const referer = request.headers.get('Referer');
+    
+    // Log GitHub Pages requests for debugging
+    if (origin && (origin.includes('github.io') || origin.includes('hesam.me'))) {
+      console.log(`Request from GitHub Pages: ${request.method} ${path} (Origin: ${origin})`);
+    }
     
     try {
+      // Admin endpoint: Purge legacy CoinGecko cache (protected with ADMIN_PURGE_TOKEN)
+      if (path === '/admin/purge-legacy-cache' && request.method === 'POST') {
+        try {
+          const body = await request.json().catch(() => ({}));
+          
+          // Validate admin token
+          if (!env.ADMIN_PURGE_TOKEN || body.token !== env.ADMIN_PURGE_TOKEN) {
+            console.warn('[Admin] Unauthorized purge attempt');
+            return new Response(JSON.stringify({ error: 'Forbidden - invalid or missing token' }), {
+              status: 403,
+              headers: { 
+                'Content-Type': 'application/json',
+                ...DEFAULT_CORS
+              }
+            });
+          }
+          
+          console.log('[Admin] 🧹 Starting legacy cache purge...');
+          console.log('[Admin] This deletes OLD CoinGecko cache and forces fresh CoinCap data');
+          const deleted = [];
+          const errors = [];
+          
+          // Purge price cache for all supported coins
+          // NOTE: This scans for OLD cache entries with source="coingecko" and DELETES them
+          // After deletion, normal requests will fetch FRESH data from CoinCap API
+          for (const coin of Object.keys(SUPPORTED_COINS)) {
+            const priceKey = `price_${coin}`;
+            try {
+              const raw = await env.RATE_LIMIT_KV.get(priceKey);
+              if (raw) {
+                try {
+                  const parsed = JSON.parse(raw);
+                  const source = parsed?.data?.source || parsed?.source;
+                  // Check if this is OLD CoinGecko data → DELETE it
+                  if (source === 'coingecko') {
+                    await env.RATE_LIMIT_KV.delete(priceKey);
+                    deleted.push(priceKey);
+                    console.log(`[Admin] ❌ Deleted legacy CoinGecko price cache: ${priceKey}`);
+                  }
+                } catch (parseErr) {
+                  // Corrupt entry - delete it anyway
+                  await env.RATE_LIMIT_KV.delete(priceKey);
+                  deleted.push(`${priceKey} (corrupt)`);
+                  console.log(`[Admin] ❌ Deleted corrupt cache: ${priceKey}`);
+                }
+              }
+            } catch (err) {
+              errors.push({ key: priceKey, error: err.message });
+              console.error(`[Admin] Error processing ${priceKey}:`, err.message);
+            }
+            
+            // Purge history cache for common day values
+            // NOTE: Same logic - check for OLD CoinGecko data and DELETE it
+            for (const days of [1, 7, 30]) {
+              const historyKey = `history_${coin}_${days}`;
+              try {
+                const raw = await env.RATE_LIMIT_KV.get(historyKey);
+                if (raw) {
+                  try {
+                    const parsed = JSON.parse(raw);
+                    const source = parsed?.data?.source || parsed?.source;
+                    // Check if this is OLD CoinGecko data → DELETE it
+                    if (source === 'coingecko') {
+                      await env.RATE_LIMIT_KV.delete(historyKey);
+                      deleted.push(historyKey);
+                      console.log(`[Admin] ❌ Deleted legacy CoinGecko history cache: ${historyKey}`);
+                    }
+                  } catch (parseErr) {
+                    // Corrupt entry - delete it anyway
+                    await env.RATE_LIMIT_KV.delete(historyKey);
+                    deleted.push(`${historyKey} (corrupt)`);
+                    console.log(`[Admin] ❌ Deleted corrupt cache: ${historyKey}`);
+                  }
+                }
+              } catch (err) {
+                errors.push({ key: historyKey, error: err.message });
+                console.error(`[Admin] Error processing ${historyKey}:`, err.message);
+              }
+            }
+          }
+          
+          const result = {
+            status: 'completed',
+            deleted: deleted.length,
+            keys: deleted,
+            errors: errors.length > 0 ? errors : undefined,
+            timestamp: new Date().toISOString()
+          };
+          
+          console.log(`[Admin] ✅ Purge completed: ${deleted.length} keys deleted, ${errors.length} errors`);
+          
+          return jsonResponse(result);
+          
+        } catch (err) {
+          console.error('[Admin] Purge endpoint error:', err);
+          return errorResponse(`Admin operation failed: ${err.message}`, 500);
+        }
+      }
+      
       // Route requests
       switch (path) {
         case '/coins':
@@ -1544,11 +2406,12 @@ export default {
           return await handleOHLC(request, env);
           
         default:
+          console.log(`404 for path: ${path} from origin: ${origin || 'unknown'}`);
           return errorResponse('Not found', 404);
       }
       
     } catch (error) {
-      console.error('Worker error:', error);
+      console.error(`Worker error for ${path} from ${origin || 'unknown'}:`, error);
       return errorResponse('Internal server error', 500);
     }
   },
