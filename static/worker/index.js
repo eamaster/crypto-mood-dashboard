@@ -717,8 +717,14 @@ async function handlePrice(request, env) {
           const raw = await env.RATE_LIMIT_KV.get(`price_${coinId}`);
           if (raw) {
             const parsed = JSON.parse(raw);
+            // 🔥 MIGRATION: Never serve CoinGecko cache, even in stale-if-error
+            const source = parsed?.data?.source || parsed?.source;
+            if (source === 'coingecko') {
+              console.warn('[Price] Refusing to serve stale CoinGecko cache, throwing error instead');
+              throw upErr; // Don't serve old CoinGecko data
+            }
             result = { data: parsed.data, fromCache: true, fresh: false, staleIfError: true };
-            console.warn('[Price] Serving stale cached price after upstream failure');
+            console.warn('[Price] Serving stale cached price after upstream failure (source: coincap)');
           } else {
             throw upErr; // no cached data
           }
@@ -843,8 +849,14 @@ async function handleHistory(request, env) {
           const raw = await env.RATE_LIMIT_KV.get(`history_${coinId}_${days}`);
           if (raw) {
             const parsed = JSON.parse(raw);
+            // 🔥 MIGRATION: Never serve CoinGecko cache, even in stale-if-error
+            const source = parsed?.data?.source || parsed?.source;
+            if (source === 'coingecko') {
+              console.warn('[History] Refusing to serve stale CoinGecko cache, throwing error instead');
+              throw upErr; // Don't serve old CoinGecko data
+            }
             result = { data: parsed.data, fromCache: true, fresh: false, staleIfError: true };
-            console.warn('[History] Serving stale cached history after upstream failure');
+            console.warn('[History] Serving stale cached history after upstream failure (source: coincap)');
           } else {
             throw upErr;
           }

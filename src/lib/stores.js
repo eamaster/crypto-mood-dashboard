@@ -82,7 +82,7 @@ const fetchPrice = async (coinId) => {
     const url = `${WORKER_URL}/price?coin=${encodeURIComponent(coinId)}&_=${Date.now()}`;
     try {
         console.log(`🔍 Fetching price for ${coinId}`);
-        const res = await fetchWithTimeout(url, { method: 'GET', credentials: 'omit' }, 8000);
+        const res = await fetchWithTimeout(url, { method: 'GET', credentials: 'omit' }, 20000); // Increased to 20s
         console.log(`📊 Price response: ${res.status}, headers:`, {
             cache: res.headers.get('cache-control'),
             xcache: res.headers.get('X-Cache-Status'),
@@ -144,7 +144,7 @@ const fetchHistory = async (coinId, days = 7) => {
     const url = `${WORKER_URL}/history?coin=${encodeURIComponent(coinId)}&days=${days}&_=${Date.now()}`;
     try {
         console.log(`🔍 Fetching history for ${coinId}`);
-        const res = await fetchWithTimeout(url, { method: 'GET', credentials: 'omit' }, 10000);
+        const res = await fetchWithTimeout(url, { method: 'GET', credentials: 'omit' }, 30000); // Increased to 30s
         console.log(`📊 History response: ${res.status}, headers:`, {
             cache: res.headers.get('cache-control'),
             xcache: res.headers.get('X-Cache-Status'),
