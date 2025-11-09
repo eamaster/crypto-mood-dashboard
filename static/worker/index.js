@@ -3,12 +3,22 @@
 // Handles API calls to CoinCap, NewsAPI.org, and Cohere AI
 // =============================================================================
 
+// AI Explain timeout constants
+const AI_TOTAL_TIMEOUT_MS = 22000; // 22s total server budget
+const AI_MODEL_TIMEOUT_MS = 12000; // 12s per model call
+const AI_REPAIR_TIMEOUT_MS = 6000; // 6s repair
+const AI_PRICE_FETCH_TIMEOUT_MS = 3000; // 3s for live price fetch
+
+// Canonical price and news freshness constants
+const PRICE_KV_FRESH_MS = 60 * 1000; // 60s - KV price cache is fresh if age <= this
+const NEWS_TTL_MS = 10 * 60 * 1000; // 10m - News headlines are fresh if age <= this
+
 // CORS headers for frontend requests - Enhanced for GitHub Pages compatibility
 const DEFAULT_CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS, HEAD',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Referer, User-Agent, Cache-Control, Pragma',
-  'Access-Control-Expose-Headers': 'Content-Length, Content-Type, X-Cache-Status, X-DO-Age, X-Cache-Source, X-Latency-ms',
+  'Access-Control-Expose-Headers': 'Content-Length, Content-Type, X-Cache-Status, X-DO-Age, X-Cache-Source, X-Latency-ms, X-AI-Status, X-AI-Reason',
   'Access-Control-Max-Age': '86400', // 24 hours
   'Vary': 'Origin, Accept-Encoding'
 };
@@ -774,98 +784,40 @@ async function handlePrice(request, env) {
     const coinId = url.searchParams.get('coin') || 'bitcoin';
     const origin = request.headers.get('Origin');
 
-    console.log(`Fetching price for ${coinId} from origin: ${origin || 'direct'}`);
+    console.log(`[Price] Fetching canonical price for ${coinId} from origin: ${origin || 'direct'}`);
 
-    // allow mutation
-    let force = isForceRefresh(request.url);
-
-    // Safety: delete KV if ultra-old (48h). Non-blocking best-effort.
-    const VERY_OLD_MS = 48 * 60 * 60 * 1000;
+    // Use canonical price source (single source of truth)
+    let canonicalPriceObj;
     try {
-      await deleteIfVeryOld(env.RATE_LIMIT_KV, `price_${coinId}`, VERY_OLD_MS);
-    } catch (e) {
-      console.warn('[Price] deleteIfVeryOld error:', e.message);
+      canonicalPriceObj = await getCanonicalPrice(coinId, env);
+    } catch (error) {
+      console.error(`[Price] Failed to get canonical price for ${coinId}:`, error.message);
+      return errorResponse(`Failed to fetch price: ${error.message}`, 500);
     }
 
-    // SHORT TTL: force refresh if cached entry older than SHORT_TTL_MS
-    const SHORT_TTL_MS = 60 * 1000; // 60s (matches POP cache TTL)
-    if (!force) {
-      try {
-        const raw = await env.RATE_LIMIT_KV.get(`price_${coinId}`);
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          const cachedTs = parsed.timestamp || parsed.data?.timestamp || 0;
-          if (cachedTs && (Date.now() - cachedTs > SHORT_TTL_MS)) {
-            console.log(`[Price] Cached price too old (${Math.floor((Date.now()-cachedTs)/1000)}s), will force refresh`);
-            force = true;
-          }
-        }
-      } catch (e) {
-        console.warn('[Price] error reading KV for age check:', e.message);
-        // don't fail - proceed without forcing
-      }
-    }
-
-    // Fetch path
-    let result;
-    let stageStart = Date.now();
-    if (force) {
-      console.log(`[Price] Force refresh for ${coinId}`);
-      // fetch fresh (this throws only if upstream fails)
-      try {
-        result = await fetchFreshPriceData(coinId, env);
-      } catch (upErr) {
-        // Upstream failed — try to serve stale if available, otherwise bubble error
-        console.warn(`[Price] fetchFreshPriceData failed: ${upErr.message}`);
-        try {
-          // try to serve whatever cached data we have, but mark stale-if-error
-          const raw = await env.RATE_LIMIT_KV.get(`price_${coinId}`);
-          if (raw) {
-            const parsed = JSON.parse(raw);
-            // 🔥 MIGRATION: Never serve CoinGecko cache, even in stale-if-error
-            const source = parsed?.data?.source || parsed?.source;
-            if (source === 'coingecko') {
-              console.warn('[Price] Refusing to serve stale CoinGecko cache, throwing error instead');
-              throw upErr; // Don't serve old CoinGecko data
-            }
-            result = { data: parsed.data, fromCache: true, fresh: false, staleIfError: true };
-            console.warn('[Price] Serving stale cached price after upstream failure (source: coincap)');
-          } else {
-            throw upErr; // no cached data
-          }
-        } catch (serveErr) {
-          console.error('[Price] No cached data to fall back to:', serveErr.message);
-          throw upErr; // bubble original upstream error to outer catch
-        }
-      }
-    } else {
-      // Use smart cache (may trigger background refresh)
-      const beforeKV = Date.now();
-      result = await getCachedPriceData(coinId, env);
-      const afterKV = Date.now();
-      console.log(`[Price] KV read latency: ${afterKV - beforeKV}ms`);
-      // If getCachedPriceData somehow returned nothing, fetch fresh
-      if (!result || !result.data) {
-        console.log('[Price] getCachedPriceData returned no data, fetching fresh');
-        result = await fetchFreshPriceData(coinId, env);
-      }
-    }
-    const stageEnd = Date.now();
-
-    // Prepare observability headers with POP caching
-    const dataTs = result?.data?.timestamp ? new Date(result.data.timestamp).getTime() : null;
-    const xdoage = dataTs ? String(Math.floor((Date.now() - dataTs) / 1000)) : '';
-    const xcacheStatus = result.fromCache ? (result.fresh ? 'fresh' : (result.staleIfError ? 'stale-if-error' : 'stale')) : 'miss';
-    const headers = {
-      'Cache-Control': 's-maxage=60, max-age=0, must-revalidate',
-      'X-Cache-Status': xcacheStatus,
-      'X-Cache-Source': result.fromCache ? 'cache' : 'api',
-      'X-DO-Age': xdoage,
-      'X-Latency-ms': String(Date.now() - start)
+    // Build response data matching the expected format
+    const priceData = {
+      coin: coinId,
+      price: canonicalPriceObj.price,
+      timestamp: canonicalPriceObj.timestamp,
+      source: canonicalPriceObj.priceSource || canonicalPriceObj.source || 'unknown',
+      symbol: SUPPORTED_COINS[coinId]?.symbol || coinId.toUpperCase()
     };
 
-    console.log(`✅ [Price] Got price for ${coinId}: $${result.data.price} (fromCache=${!!result.fromCache}, age=${xdoage}s), totalLatency=${Date.now()-start}ms`);
-    return jsonResponse(result.data, 200, headers);
+    // Prepare observability headers with POP caching
+    const dataTs = canonicalPriceObj.timestamp ? new Date(canonicalPriceObj.timestamp).getTime() : null;
+    const xdoage = dataTs ? String(Math.floor((Date.now() - dataTs) / 1000)) : '';
+    const headers = {
+      'Cache-Control': 'public, s-maxage=60, max-age=60',
+      'X-Cache-Status': canonicalPriceObj.source === 'kv-fresh' ? 'fresh' : 'miss',
+      'X-Cache-Source': canonicalPriceObj.source === 'kv-fresh' ? 'cache' : 'api',
+      'X-DO-Age': xdoage,
+      'X-Latency-ms': String(Date.now() - start),
+      'X-Price-Source': canonicalPriceObj.priceSource || canonicalPriceObj.source || 'unknown'
+    };
+
+    console.log(`✅ [Price] Got canonical price for ${coinId}: $${canonicalPriceObj.price} (source=${canonicalPriceObj.priceSource || canonicalPriceObj.source}, age=${xdoage}s), totalLatency=${Date.now()-start}ms`);
+    return jsonResponse(priceData, 200, headers);
 
   } catch (error) {
     // More informative error for client; include diagnostics
@@ -1487,12 +1439,10 @@ Rules:
 }
 
 // Canonical sentiment summary builder with KV caching
-const SENT_TTL_MS = 60 * 1000; // 60 seconds fresh TTL
-const STALE_MAX_MS = 10 * 60 * 1000; // 10 minutes max stale
-
 async function buildSentimentSummary(coin, env, options = { force: false }) {
   const startTime = Date.now();
   const cacheKey = `sentiment_${coin}`;
+  const headlinesCacheKey = `sentiment_headlines_${coin}`;
   
   // Step 1: Check KV cache (if not forcing)
   if (!options.force) {
@@ -1502,8 +1452,9 @@ async function buildSentimentSummary(coin, env, options = { force: false }) {
         const cached = JSON.parse(cachedRaw);
         const age = Date.now() - cached.ts;
         
-        if (age < SENT_TTL_MS && cached.data && cached.data.source === 'sentiment_v2') {
-          console.log(`[buildSentimentSummary] Returning cached sentiment for ${coin} (age: ${Math.floor(age/1000)}s)`);
+        // Use NEWS_TTL_MS for sentiment freshness (10 minutes)
+        if (age < NEWS_TTL_MS && cached.data && cached.data.source === 'sentiment_v2') {
+          console.log(`[buildSentimentSummary] Returning cached sentiment for ${coin} (age: ${Math.floor(age/1000)}s, headlinesCount=${cached.data.count || 0})`);
           return {
             result: cached.data,
             fromCache: true,
@@ -1516,42 +1467,50 @@ async function buildSentimentSummary(coin, env, options = { force: false }) {
     }
   }
   
-  // Step 2: Fetch latest headlines
+  // Step 2: Fetch latest headlines (check freshness)
   let headlines = [];
-  try {
-    headlines = await fetchNewsForCoin(coin, env);
-    console.log(`[buildSentimentSummary] Fetched ${headlines.length} headlines for ${coin}`);
-  } catch (newsErr) {
-    console.warn(`[buildSentimentSummary] News fetch failed for ${coin}:`, newsErr.message);
-    
-    // Try to return stale cache if available and within stale window
-    if (!options.force) {
-      try {
-        const staleRaw = await env.RATE_LIMIT_KV.get(cacheKey);
-        if (staleRaw) {
-          const stale = JSON.parse(staleRaw);
-          const staleAge = Date.now() - stale.ts;
-          
-          if (staleAge < STALE_MAX_MS && stale.data && stale.data.source === 'sentiment_v2') {
-            console.log(`[buildSentimentSummary] Returning stale cache for ${coin} (age: ${Math.floor(staleAge/1000)}s) due to news fetch failure`);
-            return {
-              result: stale.data,
-              fromCache: true,
-              staleIfError: true,
-              age: Math.floor(staleAge / 1000)
-            };
-          }
+  let headlinesFromCache = false;
+  
+  // Check headlines cache freshness
+  if (!options.force) {
+    try {
+      const headlinesCacheRaw = await env.RATE_LIMIT_KV.get(headlinesCacheKey);
+      if (headlinesCacheRaw) {
+        const headlinesCache = JSON.parse(headlinesCacheRaw);
+        const headlinesAge = Date.now() - headlinesCache.ts;
+        
+        if (headlinesAge < NEWS_TTL_MS && headlinesCache.headlines && Array.isArray(headlinesCache.headlines)) {
+          headlines = headlinesCache.headlines;
+          headlinesFromCache = true;
+          console.log(`[buildSentimentSummary] Using cached headlines for ${coin} (age: ${Math.floor(headlinesAge/1000)}s, count=${headlines.length})`);
         }
-      } catch (e) {
-        // Ignore stale cache read errors
       }
-    }
-    
-    // If no stale cache and no headlines, use empty headlines (will result in neutral)
-    if (headlines.length === 0) {
-      console.warn(`[buildSentimentSummary] No headlines available for ${coin}, using neutral sentiment`);
+    } catch (e) {
+      console.warn(`[buildSentimentSummary] Headlines cache read failed for ${coin}:`, e.message);
     }
   }
+  
+  // Fetch fresh headlines if cache is stale or missing
+  if (!headlinesFromCache) {
+    try {
+      headlines = await fetchNewsForCoin(coin, env);
+      
+      // Cache headlines (non-blocking)
+      if (headlines.length > 0) {
+        env.RATE_LIMIT_KV.put(headlinesCacheKey, JSON.stringify({
+          ts: Date.now(),
+          headlines: headlines
+        })).catch(err => console.warn(`[buildSentimentSummary] Failed to cache headlines:`, err.message));
+      }
+    } catch (error) {
+      console.warn(`[buildSentimentSummary] Failed to fetch headlines for ${coin}:`, error.message);
+      // Continue with empty headlines (will return neutral)
+    }
+  }
+  
+  // Log headlines count for observability
+  const headlinesCount = headlines.length;
+  console.log(`[buildSentimentSummary] headlinesCount=${headlinesCount} for ${coin}`);
   
   // Step 3: Analyze sentiment (Cohere or rule-based)
   let sentimentResult;
@@ -1619,11 +1578,29 @@ async function buildSentimentSummary(coin, env, options = { force: false }) {
   }
   
   // Step 4: Build result object
+  // Round score to 2 decimal places for consistency
+  const roundedScore = Math.round(sentimentResult.score * 100) / 100;
+  
+  // Map score to label deterministically
+  let mappedLabel;
+  if (roundedScore >= 0.66) {
+    mappedLabel = 'Bullish';
+  } else if (roundedScore <= 0.33) {
+    mappedLabel = 'Bearish';
+  } else {
+    mappedLabel = 'Neutral';
+  }
+  
+  // Override with Cohere label if available and valid
+  const finalLabel = (sentimentResult.label && ['Bullish', 'Bearish', 'Neutral'].includes(sentimentResult.label)) 
+    ? sentimentResult.label 
+    : mappedLabel;
+  
   const result = {
     coin: coin,
-    score: sentimentResult.score,
-    label: sentimentResult.label,
-    count: headlines.length,
+    score: roundedScore,
+    label: finalLabel,
+    count: headlinesCount,
     headlines: headlines.slice(0, 10).map(h => ({
       title: h.title,
       url: h.url,
@@ -2088,12 +2065,13 @@ async function getCanonicalPrice(coinId, env) {
       const parsed = JSON.parse(kvRaw);
       if (parsed?.data?.price && parsed?.data?.timestamp) {
         const ageMs = Date.now() - new Date(parsed.data.timestamp).getTime();
-        if (ageMs <= 60 * 1000) {
+        if (ageMs <= PRICE_KV_FRESH_MS) {
           console.log(`[AI] ai-get-canonical-price-end: source=kv-fresh, price=${parsed.data.price}, age=${Math.floor(ageMs/1000)}s, kvLatency=${kvLatency}ms, totalLatency=${Date.now() - startTime}ms`);
           return {
             price: Number(parsed.data.price),
             timestamp: parsed.data.timestamp,
-            source: 'kv-fresh'
+            source: 'kv-fresh',
+            priceSource: 'kv-fresh'
           };
         } else {
           console.log(`[AI] ai-get-canonical-price: KV cache stale (age=${Math.floor(ageMs/1000)}s), fetching live`);
@@ -2107,12 +2085,16 @@ async function getCanonicalPrice(coinId, env) {
   // 2. Fetch live from CoinCap with fast timeout (3s max)
   try {
     const coincapStart = Date.now();
-    console.log(`[AI] ai-get-canonical-price: fetching live from CoinCap with ${AI_PRICE_FETCH_TIMEOUT_MS}ms timeout`);
+    console.log(`[AI] ai-get-canonical-price: fetching live from CoinCap with ${AI_PRICE_FETCH_TIMEOUT_MS}ms timeout, ts=${coincapStart}`);
     
     // Use Promise.race to enforce fast timeout
+    // Note: fetchAssetsBatch may continue in background if it exceeds timeout, but we won't wait
     const coincapFetch = fetchAssetsBatch(coinId, env);
     const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(Object.assign(new Error('price-fetch-timeout'), { code: 'price-fetch-timeout' })), AI_PRICE_FETCH_TIMEOUT_MS)
+      setTimeout(() => {
+        console.log(`[AI] ai-get-canonical-price: CoinCap fetch timeout after ${AI_PRICE_FETCH_TIMEOUT_MS}ms, falling back to history`);
+        reject(Object.assign(new Error('price-fetch-timeout'), { code: 'price-fetch-timeout' }));
+      }, AI_PRICE_FETCH_TIMEOUT_MS)
     );
     
     const map = await Promise.race([coincapFetch, timeoutPromise]);
@@ -2131,12 +2113,14 @@ async function getCanonicalPrice(coinId, env) {
       return {
         price: Number(map[coinId].price),
         timestamp: new Date().toISOString(),
-        source: 'coincap-live'
+        source: 'coincap-live',
+        priceSource: 'coincap-live'
       };
     }
   } catch (e) {
-    const coincapLatency = Date.now() - Date.now(); // Approximate
+    // Error already handled by timeout promise or fetchAssetsBatch
     console.warn(`[AI] ai-get-canonical-price: CoinCap fetch failed/timeout for ${coinId}: ${e.code || e.message}, falling back to history`);
+    // Continue to history fallback
   }
   
   // 3. Fallback to last history point (fast path - use cached history if available)
@@ -2157,7 +2141,8 @@ async function getCanonicalPrice(coinId, env) {
           return {
             price: Number(last.price),
             timestamp: last.timestamp,
-            source: 'history-fallback'
+            source: 'history-fallback',
+            priceSource: 'history_last'
           };
         }
       }
@@ -2180,7 +2165,8 @@ async function getCanonicalPrice(coinId, env) {
       return {
         price: Number(last.price),
         timestamp: last.timestamp,
-        source: 'history-fallback'
+        source: 'history-fallback',
+        priceSource: 'history_last'
       };
     }
   } catch (e) {
@@ -2264,7 +2250,7 @@ async function handleAIExplain(request, env) {
     try {
       canonicalPriceObj = await getCanonicalPrice(coin, env);
       const priceFetchLatency = Date.now() - priceFetchStart;
-      console.log(`[AI] ai-get-canonical-price-complete: price=${canonicalPriceObj.price}, source=${canonicalPriceObj.source}, latency=${priceFetchLatency}ms`);
+      console.log(`[AI] ai-get-canonical-price-complete: price=${canonicalPriceObj.price}, source=${canonicalPriceObj.source}, priceSource=${canonicalPriceObj.priceSource || canonicalPriceObj.source}, latency=${priceFetchLatency}ms`);
     } catch (priceErr) {
       const priceFetchLatency = Date.now() - priceFetchStart;
       console.warn(`[AI] ai-get-canonical-price-failed: error=${priceErr.code || priceErr.message}, latency=${priceFetchLatency}ms`);
@@ -2331,7 +2317,7 @@ async function handleAIExplain(request, env) {
       : 4;
     
     const contextBuildStart = Date.now();
-    console.log(`[AI] ai-build-technical-context: P=${priceValue} (canonical), RSI=${rsiValue}, SMA=${smaValue}, SMA(${smaPeriod}), BB=[${bbLower}-${bbUpper}], timeframe=${timeframe}`);
+    console.log(`[AI] ai-build-technical-context-start: P=${priceValue} (canonical, source=${canonicalPriceObj.priceSource || canonicalPriceObj.source}), RSI=${rsiValue}, SMA=${smaValue}, SMA(${smaPeriod}), BB=[${bbLower}-${bbUpper}], timeframe=${timeframe}, ts=${contextBuildStart}`);
     
     if (currentPrice && Math.abs(currentPrice - priceValue) > 0.01) {
       console.log(`[AI] Price mismatch detected: client=${currentPrice}, canonical=${priceValue} (using canonical)`);
@@ -2345,14 +2331,20 @@ async function handleAIExplain(request, env) {
       smaPeriod: smaPeriod,
       bb: { lower: bbLower, upper: bbUpper }
     }, timeframe);
+    
+    // Include priceSource in technicalContext
+    if (canonicalPriceObj.priceSource) {
+      ctx.technicalContext.priceSource = canonicalPriceObj.priceSource;
+    }
+    
     const contextBuildLatency = Date.now() - contextBuildStart;
-    console.log(`[AI] ai-build-technical-context-complete: AllowedNumbers=[${ctx.allowedNumbers.slice(0, 5).join(', ')}...], latency=${contextBuildLatency}ms`);
+    console.log(`[AI] ai-build-technical-context-complete: AllowedNumbers=[${ctx.allowedNumbers.slice(0, 5).join(', ')}...], priceSource=${ctx.technicalContext.priceSource || 'unknown'}, latency=${contextBuildLatency}ms`);
     
     // Execute explain flow with overall timeout
     const doExplain = async () => {
       const explainStart = Date.now();
       try {
-        console.log(`[AI] ai-do-explain-start: entering Cohere flow, timeout=${AI_TOTAL_TIMEOUT_MS}ms`);
+        console.log(`[AI] ai-do-explain-start: entering Cohere flow, timeout=${AI_TOTAL_TIMEOUT_MS}ms, ts=${explainStart}`);
         const cohereResult = await explainPatternWithCohereStrict(coin, ctx, env);
         const explainLatency = Date.now() - explainStart;
         
@@ -2360,7 +2352,7 @@ async function handleAIExplain(request, env) {
         if (cohereResult.explanation && cohereResult.technicalContext) {
           const responsePrice = String(cohereResult.technicalContext.currentPrice?.toFixed(2) || ctx.P);
           if (responsePrice !== ctx.P) {
-            console.log(`[AI] Price mismatch in response: response=${responsePrice}, canonical=${ctx.P}`);
+            console.log(`[AI] ai-validate-price-mismatch: response=${responsePrice}, canonical=${ctx.P}`);
             throw Object.assign(new Error('price-mismatch'), { code: 'price-mismatch' });
           }
         }
@@ -2421,6 +2413,7 @@ async function handleAIExplain(request, env) {
       console.log(`[AI] ai-fallback-returned: error=${error.code || error.message}, raceLatency=${raceLatency}ms, building fallback`);
       
       const fallbackStart = Date.now();
+      console.log(`[AI] ai-fallback-building: building rule-based fallback explanation`);
       const fallbackResult = buildRuleBasedExplanationStrict({
         coin,
         P: ctx.P,
@@ -2437,6 +2430,12 @@ async function handleAIExplain(request, env) {
       });
       const fallbackLatency = Date.now() - fallbackStart;
       
+      // Ensure technicalContext includes priceSource from ctx
+      const fallbackTechnicalContext = {
+        ...fallbackResult.technicalContext,
+        ...ctx.technicalContext
+      };
+      
       const reason = error.code || error.message || 'unknown';
       const headers = {
         'X-AI-Status': 'fallback',
@@ -2450,7 +2449,7 @@ async function handleAIExplain(request, env) {
         method: 'rule-based-fallback',
         model: null,
         explanation: fallbackResult.explanation,
-        technicalContext: fallbackResult.technicalContext,
+        technicalContext: fallbackTechnicalContext,
         timestamp: new Date().toISOString(),
         fallbackReason: String(reason)
       }, 200, headers);
@@ -3003,7 +3002,7 @@ async function explainPatternWithCohereStrict(coin, ctx, env) {
     
     // Step 2: Validate response
     const validateStart = Date.now();
-    console.log(`[AI] ai-validate-start: checking for violations`);
+    console.log(`[AI] ai-validate-start: checking for violations, ts=${validateStart}`);
     const violations = validateExplanation(modelResult.explanation, allowedNumbers, PERIOD, { P, R, S, L, U, PERIOD, TF });
     const validateLatency = Date.now() - validateStart;
     
@@ -3012,19 +3011,23 @@ async function explainPatternWithCohereStrict(coin, ctx, env) {
       return {
         explanation: modelResult.explanation,
         repaired: false,
-        violationReason: null
+        violationReason: null,
+        technicalContext: modelResult.technicalContext || ctx.technicalContext
       };
     }
     
-    console.log(`[AI] ai-validate-end: violations found (${violations.details.length}), latency=${validateLatency}ms: ${violations.details.slice(0, 2).join('; ')}`);
+    console.log(`[AI] ai-validate-end: violations found (${violations.details.length}), latency=${validateLatency}ms, reason=${violations.reason || 'unknown'}: ${violations.details.slice(0, 2).join('; ')}`);
     
     // Step 3: Repair attempt (single shot)
+    const repairStart = Date.now();
+    console.log(`[AI] ai-repair-start: attempting repair, timeout=${AI_REPAIR_TIMEOUT_MS}ms, ts=${repairStart}`);
     const repairResult = await callRepairWithTimeout(coin, ctx, modelResult, violations, AI_REPAIR_TIMEOUT_MS, env);
-    const repairLatency = Date.now() - (explainStart + modelLatency + validateLatency);
+    const repairLatency = Date.now() - repairStart;
+    console.log(`[AI] ai-repair-end: repair completed, latency=${repairLatency}ms`);
     
     // Step 4: Re-validate repaired response
     const revalidateStart = Date.now();
-    console.log(`[AI] ai-validate-repair-start: re-validating repaired response`);
+    console.log(`[AI] ai-validate-repair-start: re-validating repaired response, ts=${revalidateStart}`);
     const repairViolations = validateExplanation(repairResult.explanation, allowedNumbers, PERIOD, { P, R, S, L, U, PERIOD, TF });
     const revalidateLatency = Date.now() - revalidateStart;
     
@@ -3033,7 +3036,8 @@ async function explainPatternWithCohereStrict(coin, ctx, env) {
       return {
         explanation: repairResult.explanation,
         repaired: true,
-        violationReason: violations.reason || 'model-violation-repaired'
+        violationReason: violations.reason || 'model-violation-repaired',
+        technicalContext: repairResult.technicalContext || ctx.technicalContext
       };
     }
     
@@ -3043,7 +3047,18 @@ async function explainPatternWithCohereStrict(coin, ctx, env) {
     
   } catch (error) {
     const totalLatency = Date.now() - explainStart;
-    console.log(`[AI] explainPatternWithCohereStrict-error: error=${error.code || error.message}, totalLatency=${totalLatency}ms`);
+    const errorCode = error.code || error.message;
+    console.log(`[AI] explainPatternWithCohereStrict-error: error=${errorCode}, totalLatency=${totalLatency}ms`);
+    
+    // Log specific error types for diagnostics
+    if (errorCode === 'ai-model-timeout') {
+      console.log(`[AI] ai-model-timeout: model call exceeded ${AI_MODEL_TIMEOUT_MS}ms`);
+    } else if (errorCode === 'ai-repair-timeout') {
+      console.log(`[AI] ai-repair-timeout: repair call exceeded ${AI_REPAIR_TIMEOUT_MS}ms`);
+    } else if (errorCode === 'cohere-api-error' || errorCode === 'cohere-parse-error') {
+      console.log(`[AI] ai-cohere-error: ${errorCode}, will trigger fallback`);
+    }
+    
     throw error; // Re-throw to trigger fallback in handleAIExplain
   }
 }
@@ -3401,22 +3416,25 @@ async function handleOHLC(request, env) {
       return errorResponse(`Unsupported coin: ${coinId}`);
     }
     
-     // Get current price using the same validation as price endpoint
-     let currentPrice = 45000; // Default fallback price for Bitcoin
-     
-     try {
-       const priceResult = await getCachedPriceData(coinId, env);
-       currentPrice = priceResult.data.price;
-       
-       // Validate the price is reasonable for Bitcoin
-       if (coinId === 'bitcoin' && (currentPrice < 30000 || currentPrice > 150000)) {
-         console.log(`⚠️ [OHLC] Invalid Bitcoin price: $${currentPrice}, using fallback`);
-         currentPrice = 45000; // Use reasonable fallback price
-       }
-     } catch (error) {
-       console.log(`⚠️ [OHLC] Failed to get price data: ${error.message}, using fallback`);
-       currentPrice = 45000; // Use reasonable fallback price
-     }
+    // Get canonical price (single source of truth)
+    let canonicalPriceObj;
+    let currentPrice = 45000; // Default fallback price for Bitcoin
+    
+    try {
+      canonicalPriceObj = await getCanonicalPrice(coinId, env);
+      currentPrice = canonicalPriceObj.price;
+      console.log(`[OHLC] Using canonical price: $${currentPrice}, source=${canonicalPriceObj.priceSource || canonicalPriceObj.source}`);
+    } catch (error) {
+      console.warn(`[OHLC] Failed to get canonical price: ${error.message}, using fallback`);
+      // Use reasonable fallback price based on coin
+      if (coinId === 'bitcoin') {
+        currentPrice = 45000;
+      } else if (coinId === 'ethereum') {
+        currentPrice = 2500;
+      } else {
+        currentPrice = 100;
+      }
+    }
     
     // Generate OHLC data (Open, High, Low, Close)
     const ohlc = [];
@@ -3484,13 +3502,23 @@ async function handleOHLC(request, env) {
       });
     }
     
+    // Get last candle's close price (canonical)
+    const lastCandle = ohlc.length > 0 ? ohlc[ohlc.length - 1] : null;
+    const lastClosePrice = lastCandle ? canonicalFormatNumber(lastCandle.close, 2) : canonicalFormatNumber(currentPrice, 2);
+    const lastPointTimestamp = lastCandle ? lastCandle.timestamp : new Date().toISOString();
+    
     return jsonResponse({
       coin: coinId,
       ohlc: ohlc,
       days: days,
       symbol: SUPPORTED_COINS[coinId].symbol,
       candles: ohlc.length,
+      lastClosePrice: lastClosePrice,
+      lastPointTimestamp: lastPointTimestamp,
+      priceSource: canonicalPriceObj?.priceSource || canonicalPriceObj?.source || 'unknown',
       note: 'OHLC data is simulated with consistent daily patterns'
+    }, 200, {
+      'Cache-Control': 'public, s-maxage=60, max-age=60'
     });
     
   } catch (error) {

@@ -128,14 +128,78 @@
 		try {
 			console.log(`Starting comprehensive analysis for ${selectedCoin} over ${timeframe} days`);
 			
+			// Fetch canonical price first (single source of truth)
+			console.log(`📊 Fetching canonical price for ${selectedCoin}...`);
+			let canonicalPrice = null;
+			try {
+				const priceResponse = await fetch(`${WORKER_URL}/price?coin=${selectedCoin}&_=${Date.now()}`);
+				if (priceResponse.ok) {
+					const priceData = await priceResponse.json();
+					canonicalPrice = Number(priceData.price);
+					console.log(`✅ Canonical price: $${canonicalPrice.toFixed(2)} (source: ${priceData.source || 'unknown'})`);
+				}
+			} catch (err) {
+				console.warn(`⚠️ Failed to fetch canonical price:`, err.message);
+			}
+			
 			// Fetch price data first, then OHLC data with fallback
 			console.log(`📊 Fetching price data for ${selectedCoin} (${timeframe} days)...`);
 			const fetchedPriceData = await fetchPriceData(selectedCoin, timeframe);
 			priceData = fetchedPriceData;
 			
 			console.log(`📊 Fetching OHLC data for ${selectedCoin}...`);
-			const fetchedOhlcData = await fetchOHLCData(selectedCoin, timeframe, fetchedPriceData);
+			let fetchedOhlcData;
+			let ohlcLastClosePrice = null;
+			try {
+				const ohlcResponse = await fetch(`${WORKER_URL}/ohlc?coin=${selectedCoin}&days=${timeframe}&_=${Date.now()}`);
+				if (ohlcResponse.ok) {
+					const ohlcData = await ohlcResponse.json();
+					ohlcLastClosePrice = ohlcData.lastClosePrice ? Number(ohlcData.lastClosePrice) : null;
+					fetchedOhlcData = ohlcData.ohlc.map(item => ({
+						x: new Date(item.timestamp),
+						o: parseFloat(item.open),
+						h: parseFloat(item.high),
+						l: parseFloat(item.low),
+						c: parseFloat(item.close)
+					}));
+					console.log(`✅ Fetched ${fetchedOhlcData.length} OHLC data points, lastClosePrice=${ohlcData.lastClosePrice}`);
+				} else {
+					throw new Error(`OHLC endpoint returned ${ohlcResponse.status}`);
+				}
+			} catch (err) {
+				console.warn(`⚠️ OHLC endpoint failed, using fallback:`, err.message);
+				fetchedOhlcData = await fetchOHLCData(selectedCoin, timeframe, fetchedPriceData);
+			}
 			ohlcData = fetchedOhlcData;
+			
+			// Check price consistency: canonical price vs chart last point vs OHLC lastClosePrice
+			if (canonicalPrice && priceData.length > 0) {
+				const chartLastPrice = priceData[priceData.length - 1].y;
+				const canonicalPriceFormatted = Number(canonicalPrice.toFixed(2));
+				const chartLastPriceFormatted = Number(chartLastPrice.toFixed(2));
+				const priceDiff = Math.abs(canonicalPriceFormatted - chartLastPriceFormatted);
+				
+				if (priceDiff > 0.01) {
+					console.warn(`⚠️ Price mismatch detected: canonical=$${canonicalPriceFormatted}, chart=$${chartLastPriceFormatted}, diff=$${priceDiff.toFixed(2)}`);
+					// Update chart last point to canonical price
+					priceData[priceData.length - 1].y = canonicalPrice;
+					console.log(`✅ Updated chart last point to canonical price: $${canonicalPrice.toFixed(2)}`);
+				}
+				
+				// Check OHLC lastClosePrice consistency
+				if (ohlcLastClosePrice !== null) {
+					const ohlcPriceFormatted = Number(ohlcLastClosePrice.toFixed(2));
+					const ohlcDiff = Math.abs(canonicalPriceFormatted - ohlcPriceFormatted);
+					if (ohlcDiff > 0.01) {
+						console.warn(`⚠️ OHLC price mismatch: canonical=$${canonicalPriceFormatted}, ohlc=$${ohlcPriceFormatted}, diff=$${ohlcDiff.toFixed(2)}`);
+						// Update OHLC last candle close to canonical price
+						if (ohlcData.length > 0) {
+							ohlcData[ohlcData.length - 1].c = canonicalPrice;
+							console.log(`✅ Updated OHLC last candle close to canonical price: $${canonicalPrice.toFixed(2)}`);
+						}
+					}
+				}
+			}
 			
 			// Calculate technical indicators with improved adaptive periods
 			const dataLength = priceData.length;
