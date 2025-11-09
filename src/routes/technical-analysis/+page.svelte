@@ -2514,6 +2514,7 @@
 		flex-direction: column;
 		gap: 1rem; /* Reduce gap between indicators */
 		min-height: 0; /* Allow list to shrink */
+		flex: 1 1 auto; /* Allow list to grow and shrink */
 	}
 
 	.indicator {
