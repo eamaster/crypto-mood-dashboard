@@ -352,23 +352,51 @@ const SUPPORTED_COINS = {
 // Fetch asset data from CoinCap (batched API call for one or more coins)
 async function fetchAssetsBatch(idsCsv, env) {
   const url = `${COINCAP_BATCH_ENDPOINT}?ids=${encodeURIComponent(idsCsv)}`;
+  const headers = coinCapAuthHeaders(env);
+  // Remove cacheEverything to ensure fresh requests reach CoinCap API
   const fetchOpts = {
     method: 'GET',
-    headers: coinCapAuthHeaders(env),
-    cf: { cacheTtlByStatus: { "200-299": 60 }, cacheEverything: true }
+    headers: headers
+    // Removed cf cache options to ensure requests actually reach CoinCap
   };
+  
+  // Log the actual request being made for debugging
+  console.log(`[fetchAssetsBatch] 🔍 Calling CoinCap API: ${url}`);
+  console.log(`[fetchAssetsBatch] Headers:`, JSON.stringify({
+    'Authorization': headers['Authorization'] ? `${headers['Authorization'].substring(0, 20)}...` : 'NOT SET',
+    'Accept': headers['Accept'],
+    'User-Agent': headers['User-Agent']
+  }));
   
   try {
     const raw = await rateLimitedFetch(url, fetchOpts, env, idsCsv.split(',')[0]); // use first coin for backoff tracking
     
     if (!raw || !raw.ok) {
       const body = raw?.text || JSON.stringify(raw?.json || {});
-      console.error(`[fetchAssetsBatch] CoinCap API error ${raw?.status}:`, body);
-      throw new Error(`CoinCap API error: ${raw?.status || 'no-response'} - ${body}`);
+      console.error(`[fetchAssetsBatch] ❌ CoinCap API error ${raw?.status}`);
+      console.error(`[fetchAssetsBatch] Error body (first 500 chars):`, body.substring(0, 500));
+      console.error(`[fetchAssetsBatch] Full error response:`, JSON.stringify({
+        status: raw?.status,
+        ok: raw?.ok,
+        text: raw?.text?.substring(0, 200),
+        json: raw?.json
+      }, null, 2));
+      throw new Error(`CoinCap API error: ${raw?.status || 'no-response'} - ${body.substring(0, 200)}`);
     }
     
     const data = raw.json || (raw.text ? JSON.parse(raw.text) : null);
     const items = (data && data.data) || [];
+    
+    if (items.length === 0) {
+      console.error(`[fetchAssetsBatch] ❌ No data returned from CoinCap API`);
+      console.error(`[fetchAssetsBatch] Response structure:`, JSON.stringify({
+        hasData: !!data,
+        hasDataArray: !!(data && data.data),
+        dataKeys: data ? Object.keys(data) : [],
+        fullResponse: JSON.stringify(data).substring(0, 500)
+      }, null, 2));
+      throw new Error(`CoinCap API returned empty data array for: ${idsCsv}`);
+    }
     
     // Build normalized map
     const resultMap = {};
@@ -390,7 +418,8 @@ async function fetchAssetsBatch(idsCsv, env) {
       };
     }
     
-    console.log(`✅ [fetchAssetsBatch] Got ${items.length} assets from CoinCap`);
+    console.log(`✅ [fetchAssetsBatch] Successfully got ${Object.keys(resultMap).length} assets from CoinCap`);
+    console.log(`✅ [fetchAssetsBatch] Sample asset data:`, JSON.stringify(Object.values(resultMap)[0], null, 2));
     return resultMap;
   } catch (err) {
     console.error(`❌ [fetchAssetsBatch] Failed:`, err.message);
