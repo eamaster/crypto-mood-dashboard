@@ -2616,7 +2616,7 @@
 		flex: 1 1 auto; /* Fill available vertical area inside patterns-panel */
 		min-height: 0; /* Critical for overflow to work inside flex */
 		overflow-y: auto; /* Keep internal scroll */
-		max-height: none !important; /* Allow JS to set computed max-height if needed */
+		max-height: 840px; /* Base value - ResizeObserver will compute more accurate value if larger */
 		padding-right: 0.5rem; /* Give room for scrollbar */
 		box-sizing: border-box;
 		display: flex;
