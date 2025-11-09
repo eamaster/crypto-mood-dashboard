@@ -2031,36 +2031,172 @@ async function handleAIAnalysisEnhanced(request, env) {
  * AI Pattern Explanation 
  * Uses Cohere v2/chat to provide natural language explanations of technical patterns
  */
+// Canonical number formatting helper (matches chart display)
+function canonicalFormatNumber(n, dp = 2) {
+  return Number(n).toFixed(dp);
+}
+
+// Build canonical technical context for AI (server-authoritative)
+function buildTechnicalContextForAI({ price, rsi, sma, smaPeriod, bb }, timeframe) {
+  // Round/format identically to chart
+  const P = canonicalFormatNumber(price, 2);
+  const R = canonicalFormatNumber(rsi, 2);
+  const S = canonicalFormatNumber(sma, 2);
+  const L = canonicalFormatNumber(bb.lower, 2);
+  const U = canonicalFormatNumber(bb.upper, 2);
+  const PERIOD = String(smaPeriod);
+  const TF = String(timeframe);
+  
+  // Derived metrics (also canonical)
+  const priceVsSmaPct = ((Number(P) - Number(S)) / Number(S)) * 100;
+  const distToLowerPct = ((Number(P) - Number(L)) / Number(L)) * 100;
+  const distToUpperPct = ((Number(U) - Number(P)) / Number(P)) * 100;
+  const bandWidthPct = ((Number(U) - Number(L)) / Number(S)) * 100;
+  
+  const PV = canonicalFormatNumber(priceVsSmaPct, 2);
+  const DL = canonicalFormatNumber(distToLowerPct, 2);
+  const DU = canonicalFormatNumber(distToUpperPct, 2);
+  const BW = canonicalFormatNumber(bandWidthPct, 2);
+  
+  // Build allowed numbers set (exact strings)
+  const allowedNumbers = [
+    P, R, S, L, U, PERIOD, TF,
+    PV, DL, DU, BW,
+    "30", "40", "60", "70" // Common RSI thresholds
+  ];
+  
+  return {
+    P, R, S, L, U, PERIOD, TF,
+    PV, DL, DU, BW,
+    allowedNumbers,
+    technicalContext: {
+      currentPrice: Number(P),
+      currentRSI: Number(R),
+      currentSMA: Number(S),
+      smaPeriod: Number(PERIOD),
+      bb: { lower: Number(L), upper: Number(U) },
+      timeframe: Number(TF)
+    }
+  };
+}
+
 async function handleAIExplain(request, env) {
+  const startTime = Date.now();
+  let aiStatus = 'ok'; // ok | repaired | fallback
+  
   try {
     if (request.method !== 'POST') {
       return errorResponse('Method not allowed', 405);
     }
     
     const body = await request.json();
-    const { rsi, sma, bb, signals, coin, timeframe, currentPrice, currentRSI, currentSMA, currentBBUpper, currentBBLower } = body;
+    const { rsi, sma, bb, signals, coin, timeframe, currentPrice, currentRSI, currentSMA, currentBBUpper, currentBBLower, priceData } = body;
     
-    if (!rsi || !sma || !bb || !signals || !coin) {
-      return errorResponse('Missing required data for AI explanation');
+    if (!coin || !timeframe) {
+      return errorResponse('Missing required data: coin and timeframe');
     }
     
-    console.log(`🔍 Received AI explanation request with actual prices: Current=${currentPrice}, SMA=${currentSMA}, BB=[${currentBBLower}-${currentBBUpper}]`);
+    // Server-authoritative: Extract canonical values from client data
+    // Use latest values from arrays or fallback to provided current values
+    const rsiValue = (rsi && Array.isArray(rsi) && rsi.length > 0) 
+      ? rsi[rsi.length - 1].y 
+      : (currentRSI || 50);
+    const smaValue = (sma && Array.isArray(sma) && sma.length > 0)
+      ? sma[sma.length - 1].y
+      : (currentSMA || currentPrice);
+    const priceValue = (priceData && Array.isArray(priceData) && priceData.length > 0)
+      ? priceData[priceData.length - 1].y
+      : (currentPrice || 0);
+    const bbUpper = (bb && bb.upper && Array.isArray(bb.upper) && bb.upper.length > 0)
+      ? bb.upper[bb.upper.length - 1].y
+      : (currentBBUpper || priceValue * 1.05);
+    const bbLower = (bb && bb.lower && Array.isArray(bb.lower) && bb.lower.length > 0)
+      ? bb.lower[bb.lower.length - 1].y
+      : (currentBBLower || priceValue * 0.95);
     
-    // Try Cohere AI explanation first, with fallback
+    // Determine SMA period from signals or default to 4
+    const smaPeriod = (signals && Array.isArray(signals)) 
+      ? (signals.find(s => s.type === 'SMA')?.period || 4)
+      : 4;
+    
+    console.log(`[AI] Received technicalContext for ${coin}: P=${priceValue}, RSI=${rsiValue}, SMA=${smaValue}, SMA(${smaPeriod}), BB=[${bbLower}-${bbUpper}], timeframe=${timeframe}`);
+    
+    // Build canonical technical context
+    const ctx = buildTechnicalContextForAI({
+      price: priceValue,
+      rsi: rsiValue,
+      sma: smaValue,
+      smaPeriod: smaPeriod,
+      bb: { lower: bbLower, upper: bbUpper }
+    }, timeframe);
+    
+    console.log(`[AI] AllowedNumbers: [${ctx.allowedNumbers.join(', ')}]`);
+    
+    // Try Cohere AI explanation with strict validation
     try {
-      return await explainPatternWithCohere(rsi, sma, bb, signals, coin, timeframe, env, {
-        currentPrice, currentRSI, currentSMA, currentBBUpper, currentBBLower
+      const cohereResult = await explainPatternWithCohereStrict(coin, ctx, env);
+      
+      // Check if repair was needed
+      if (cohereResult.repaired) {
+        aiStatus = 'repaired';
+        console.log(`[AI] Model output repaired, returning validated explanation`);
+      }
+      
+      return jsonResponse({
+        ok: true,
+        method: 'cohere-chat-api',
+        model: 'command-a-03-2025',
+        explanation: cohereResult.explanation,
+        technicalContext: ctx.technicalContext,
+        timestamp: new Date().toISOString()
+      }, 200, {
+        'X-AI-Status': aiStatus,
+        'X-Latency-ms': String(Date.now() - startTime)
       });
-    } catch (error) {
-      console.log('Cohere AI explanation failed, using fallback:', error.message);
-      return explainPatternFallback(rsi, sma, bb, signals, coin, timeframe, {
-        currentPrice, currentRSI, currentSMA, currentBBUpper, currentBBLower
+      
+    } catch (cohereError) {
+      console.log(`[AI] Cohere failed: ${cohereError.message}, using rule-based fallback`);
+      aiStatus = 'fallback';
+      
+      // Use deterministic rule-based fallback
+      const fallbackResult = buildRuleBasedExplanationStrict({
+        coin,
+        P: ctx.P,
+        R: ctx.R,
+        S: ctx.S,
+        L: ctx.L,
+        U: ctx.U,
+        PERIOD: ctx.PERIOD,
+        TF: ctx.TF,
+        PV: ctx.PV,
+        DL: ctx.DL,
+        DU: ctx.DU,
+        BW: ctx.BW
+      });
+      
+      return jsonResponse({
+        ok: true,
+        method: 'rule-based-fallback',
+        model: null,
+        explanation: fallbackResult.explanation,
+        technicalContext: ctx.technicalContext,
+        timestamp: new Date().toISOString()
+      }, 200, {
+        'X-AI-Status': aiStatus,
+        'X-Latency-ms': String(Date.now() - startTime)
       });
     }
     
   } catch (error) {
-    console.error('AI Explanation error:', error);
-    return errorResponse(`Failed to generate AI explanation: ${error.message}`);
+    console.error('[AI] Explanation error:', error);
+    return jsonResponse({
+      ok: false,
+      error: 'Failed to generate AI explanation',
+      details: error.message
+    }, 500, {
+      'X-AI-Status': 'error',
+      'X-Latency-ms': String(Date.now() - startTime)
+    });
   }
 }
 
@@ -2290,41 +2426,9 @@ async function classifyMarketMoodWithCohereEnhanced(rsi, smaSignal, bbSignal, pr
 /**
  * Explain trading patterns using Cohere Chat API v2
  */
-async function explainPatternWithCohere(rsi, sma, bb, signals, coin, timeframe, env, liveValues) {
-  const { currentPrice, currentRSI, currentSMA, currentBBUpper, currentBBLower } = liveValues;
-  
-  // Prepare comprehensive technical analysis context
-  const rsiValue = rsi.length > 0 ? rsi[rsi.length - 1].y : currentRSI;
-  const smaValue = sma.length > 0 ? sma[sma.length - 1].y : currentSMA;
-  
-  // Round exactly once so the model can only echo these strings
-  function toFixedStr(n, dp = 2) { return Number(n).toFixed(dp); }
-  
-  const P = toFixedStr(currentPrice, 2);
-  const R = toFixedStr(rsiValue, 2);
-  const S = toFixedStr(smaValue, 2);
-  const L = toFixedStr(currentBBLower, 2);
-  const U = toFixedStr(currentBBUpper, 2);
-  const PERIOD = 4; // SMA period used in charts
-  const TF = Number(timeframe);
-
-  // Derived metrics for richer text (percentages shown with % in copy)
-  const priceVsSmaPct   = ((Number(P) - Number(S)) / Number(S)) * 100;
-  const distToLowerPct  = ((Number(P) - Number(L)) / Number(L)) * 100;
-  const distToUpperPct  = ((Number(U) - Number(P)) / Number(P)) * 100;
-  const bandWidthPct    = ((Number(U) - Number(L)) / Number(S)) * 100;
-
-  const PV = toFixedStr(priceVsSmaPct, 2);
-  const DL = toFixedStr(distToLowerPct, 2);
-  const DU = toFixedStr(distToUpperPct, 2);
-  const BW = toFixedStr(bandWidthPct, 2);
-
-  // Allow common RSI thresholds explicitly
-  const allowedNumbers = [
-    P, R, S, L, U, String(PERIOD), String(TF),
-    PV, DL, DU, BW,
-    "30", "40", "60", "70"
-  ];
+// Strict Cohere explanation with validation and repair
+async function explainPatternWithCohereStrict(coin, ctx, env) {
+  const { P, R, S, L, U, PERIOD, TF, PV, DL, DU, BW, allowedNumbers } = ctx;
   
   // Dynamic logic for scenario planning
   const isAboveSMA = Number(P) >= Number(S);
@@ -2333,139 +2437,186 @@ async function explainPatternWithCohere(rsi, sma, bb, signals, coin, timeframe, 
   const bearishLine = isAboveSMA
     ? `- If price closes back below SMA(${PERIOD}) ${S} with RSI < 40, risk shifts toward ${L}.`
     : `- If price loses ${L}, risk expands; distance to lower band was ${DL}% and may extend.`;
-  const lean = Number(R) >= 60 ? "bearish" : Number(R) <= 40 ? "bullish" : "neutral";
   
-  // Dynamic confidence calculation based on signal strength
-  let conf = 60; // Base confidence
-  const rsiNum = Number(R);
-  
-  // RSI confidence boost
-  if (rsiNum >= 70 || rsiNum <= 30) conf += 15; // Strong RSI signals
-  else if (rsiNum >= 60 || rsiNum <= 40) conf += 10; // Moderate RSI signals
-  
-  // Price vs SMA confidence boost
-  const priceDeviation = Number(PV);
-  if (Math.abs(priceDeviation) > 5) conf += 10; // Strong price deviation
-  else if (Math.abs(priceDeviation) > 2) conf += 5; // Moderate price deviation
-  
-  // Band width confidence boost
-  const bandWidth = Number(BW);
-  if (bandWidth > 10) conf += 5; // High volatility = more uncertainty
-  else if (bandWidth < 5) conf += 5; // Low volatility = more predictable
-  
-  // Cap confidence at 90%
-  conf = Math.min(90, conf);
+  // Strict system prompt
+  const systemPrompt = `You are a crypto technical analysis assistant. STRICT RULES:
+1) You may only use the numeric values listed in 'AllowedNumbers'. Do NOT invent or alter any numbers.
+2) Refer to the moving average exactly as 'SMA(${PERIOD})' where PERIOD is provided. Do NOT use labels like '50-day' or '200-day' unless PERIOD equals those values.
+3) Output must be valid JSON (see schema), and any free-text explanation must not contain numeric values not in AllowedNumbers.
+4) Keep the free-text explanation concise; if you cannot comply, return an object with { "ok": false, "reason": "violation" }.`;
 
-  // Create system and user prompts with strict rules
-  const system = [
-    "You are a crypto technical analysis assistant that produces three layers: a beginner-friendly summary, a decision helper, and a detailed section.",
-    "STRICT RULES:",
-    "- Use ONLY the numbers in 'AllowedNumbers'. Do not write any other numeric value.",
-    "- Refer to the moving average exactly as 'SMA(" + PERIOD + ")'. Never say '50/100/200-day' unless provided.",
-    "- Use given percentages verbatim (they may include a %).",
-    "",
-    "OUTPUT FORMAT (Markdown):",
-    "## Simple Summary",
-    "- In plain English (no jargon). Three short bullets: price vs SMA(" + PERIOD + "), what RSI means, and the key support/resistance.",
-    "",
-    "## Decision Helper",
-    "- Three short bullets with clear if/then cues and verbs like 'consider' or 'avoid'.",
-    "- Use ONLY the scenario lines supplied in the user message (do not alter numbers).",
-    "",
-    "## Detailed Guidance",
-    "Write ~120–160 words with sections:",
-    "**Guidance:** 3–5 sentences referencing Context/Derived.",
-    "**Levels to Watch:** bullets with provided levels.",
-    "**Scenario Plan:** two bullets using the exact scenario lines supplied.",
-    "**Invalidation:** one sentence that fits the current baseline.",
-    "**Confidence:** 0–100%.",
-    "",
-    "End with: 'Educational guidance, not financial advice.'"
-  ].join("\n");
+  // Strict user prompt with JSON schema
+  const userPrompt = `Context: coin=${coin.toUpperCase()}, timeframe=${TF} days. AllowedNumbers: ${P}, ${R}, ${S}, ${L}, ${U}, ${PERIOD}, ${TF}.
 
-  const user = [
-    `Coin: ${coin.toUpperCase()} — Timeframe: ${TF} days`,
-    `Context: price=${P}, RSI=${R}, SMA(${PERIOD})=${S}, BB=[${L}-${U}]`,
-    `Derived: price_vs_sma_pct=${PV}, dist_to_lower_pct=${DL}, dist_to_upper_pct=${DU}, band_width_pct=${BW}`,
-    `AllowedNumbers: ${allowedNumbers.join(", ")}`,
-    "",
-    "Use these scenario lines EXACTLY (do not change numbers):",
-    bullishLine,
-    bearishLine,
-    "",
-    "Remember: Do not use any number not listed in AllowedNumbers."
-  ].join("\n");
+Return a JSON object (no other top-level text) with this exact schema:
+{
+  "ok": true | false,
+  "method": "cohere-chat-api" | "rule-based-fallback",
+  "model": "<cohere-model-name>",
+  "explanation": "<Markdown string no numbers outside AllowedNumbers>",
+  "technicalContext": {
+     "currentPrice": <number>,
+     "currentRSI": <number>,
+     "currentSMA": <number>,
+     "smaPeriod": <number>,
+     "bb": { "lower": <number>, "upper": <number> },
+     "timeframe": <number>
+  },
+  "timestamp": "<ISO timestamp>"
+}
 
-  console.log('🤖 Sending comprehensive explanation request to Cohere...');
+If you cannot produce compliant output, set ok=false and explain short reason.`;
+
+  console.log('[AI] Sending strict prompt to Cohere with AllowedNumbers...');
   
-  // Make request to Cohere Chat API v2
-  const response = await fetch('https://api.cohere.com/v2/chat', {
+  // First attempt
+  let response = await fetch('https://api.cohere.com/v2/chat', {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${env.COHERE_API_KEY}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-        model: 'command-a-03-2025',
+      model: 'command-a-03-2025',
       messages: [
-        {
-          role: 'system',
-          content: system
-        },
-        {
-          role: 'user',
-          content: user
-        }
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
       ],
-      temperature: 0.4,
+      temperature: 0.3,
       max_tokens: 1500
     }),
   });
   
   if (!response.ok) {
     const errorBody = await response.text();
-    console.log('Cohere Chat API explanation error:', errorBody);
+    console.log('[AI] Cohere API error:', errorBody);
     throw new Error(`Cohere Chat API error: ${response.status}`);
   }
   
   const data = await response.json();
-  console.log('🤖 Cohere explanation API success');
-
-  // Extract the explanation
-  let explanation = data.message?.content?.[0]?.text || 'No explanation generated';
+  const messageContent = data.message?.content?.[0]?.text || '';
   
-  // Guardrails: validate that AI only uses allowed numbers
-  const okNums = new Set(allowedNumbers);
-  function hasDisallowedNumber(text) {
-    // capture numbers like 41,280.41 or 42502.07 or 60
-    const matches = text.match(/\b\d{1,3}(?:,\d{3})*(?:\.\d+)?\b/g) || [];
-    return matches.some(n => !okNums.has(n));
-  }
-  function wrongLabel(text) {
-    return /(?:\b|^)(?:50|100|200)[-\s]day\s+SMA|\bMA(?:50|100|200)\b/i.test(text);
-  }
-  
-  // If AI violates rules, use strict rule-based explanation
-  if (hasDisallowedNumber(explanation) || wrongLabel(explanation)) {
-    console.log('🤖 AI violated number/label rules, using strict fallback');
-    explanation = buildRuleBasedExplanationStrict({
-      coin, P, R, S, L, U, PERIOD, TF, PV, DL, DU, BW
-    });
-  }
-  
-  return jsonResponse({
-    explanation: explanation,
-    method: 'cohere-chat-api',
-    coin: coin,
-    timestamp: new Date().toISOString(),
-    technicalContext: {
-      currentPrice: Number(P),
-      currentRSI: Number(R),
-      currentSMA: Number(S),
-      timeframe: TF,
-      smaPeriod: PERIOD
+  // Parse JSON from response
+  let result;
+  try {
+    const jsonMatch = messageContent.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      result = JSON.parse(jsonMatch[0]);
+    } else {
+      throw new Error('No JSON object found in response');
     }
-  });
+  } catch (parseError) {
+    console.log('[AI] Failed to parse Cohere response:', parseError.message);
+    throw new Error('Invalid response format from Cohere');
+  }
+  
+  // Validate response
+  if (result.ok === false) {
+    console.log('[AI] Model returned ok=false, reason:', result.reason);
+    throw new Error(`Model compliance failure: ${result.reason || 'unknown'}`);
+  }
+  
+  let explanation = result.explanation || messageContent;
+  let repaired = false;
+  
+  // Post-response guard: verify numbers and labels
+  const violations = validateExplanation(explanation, allowedNumbers, PERIOD);
+  
+  if (violations.hasViolations) {
+    console.log(`[AI] Model returned disallowed numbers/labels -> retrying repair. Violations: ${violations.details.join(', ')}`);
+    
+    // Repair attempt (single retry)
+    const repairPrompt = `Repair: The previous JSON contained numeric values or labels not in AllowedNumbers. Please rewrite the "explanation" and ensure it uses ONLY the provided AllowedNumbers: ${allowedNumbers.join(', ')} and the label SMA(${PERIOD}). Return the same JSON schema. Do not change numbers. If you cannot comply, set ok=false and reason:"cannot_comply".`;
+    
+    const repairResponse = await fetch('https://api.cohere.com/v2/chat', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${env.COHERE_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'command-a-03-2025',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+          { role: 'assistant', content: messageContent },
+          { role: 'user', content: repairPrompt }
+        ],
+        temperature: 0.2, // Lower temperature for repair
+        max_tokens: 1500
+      }),
+    });
+    
+    if (repairResponse.ok) {
+      const repairData = await repairResponse.json();
+      const repairContent = repairData.message?.content?.[0]?.text || '';
+      
+      try {
+        const repairJsonMatch = repairContent.match(/\{[\s\S]*\}/);
+        if (repairJsonMatch) {
+          const repairResult = JSON.parse(repairJsonMatch[0]);
+          if (repairResult.ok !== false && repairResult.explanation) {
+            explanation = repairResult.explanation;
+            
+            // Re-validate repaired explanation
+            const repairViolations = validateExplanation(explanation, allowedNumbers, PERIOD);
+            if (!repairViolations.hasViolations) {
+              repaired = true;
+              console.log('[AI] Repair successful, explanation now compliant');
+            } else {
+              console.log(`[AI] Repair failed -> returning rule-based fallback. Violations: ${repairViolations.details.join(', ')}`);
+              throw new Error('Repair attempt still contains violations');
+            }
+          } else {
+            throw new Error('Repair response marked as non-compliant');
+          }
+        } else {
+          throw new Error('No JSON found in repair response');
+        }
+      } catch (repairError) {
+        console.log('[AI] Repair parsing failed:', repairError.message);
+        throw new Error('Repair attempt failed');
+      }
+    } else {
+      throw new Error('Repair request failed');
+    }
+  }
+  
+  return {
+    explanation,
+    repaired
+  };
+}
+
+// Validate explanation for disallowed numbers and labels
+function validateExplanation(explanation, allowedNumbers, period) {
+  const violations = {
+    hasViolations: false,
+    details: []
+  };
+  
+  // Build set of allowed numeric strings (strip commas for comparison)
+  const allowedNumsSet = new Set(allowedNumbers.map(n => String(n).replace(/,/g, '')));
+  
+  // Extract all numbers from explanation
+  const numberMatches = explanation.match(/\b\d{1,3}(?:,\d{3})*(?:\.\d+)?\b/g) || [];
+  
+  for (const match of numberMatches) {
+    const cleaned = match.replace(/,/g, '');
+    if (!allowedNumsSet.has(cleaned)) {
+      violations.hasViolations = true;
+      violations.details.push(`disallowed number: ${match}`);
+    }
+  }
+  
+  // Check for forbidden labels (e.g., "200-day SMA" when period is not 200)
+  const forbiddenLabelPattern = new RegExp(`(?:\\b|^)(?:50|100|200)(?:[-\\s]day)?\\s+SMA|\\bMA(?:50|100|200)\\b`, 'i');
+  if (forbiddenLabelPattern.test(explanation) && period !== '50' && period !== '100' && period !== '200') {
+    violations.hasViolations = true;
+    violations.details.push(`forbidden label (not SMA(${period}))`);
+  }
+  
+  return violations;
 }
 
 /**
@@ -2565,23 +2716,9 @@ function explainPatternFallback(rsi, sma, bb, signals, coin, timeframe, liveValu
   const DU = toFixedStr(distToUpperPct, 2);
   const BW = toFixedStr(bandWidthPct, 2);
   
-  const explanation = buildRuleBasedExplanationStrict({
-    coin, P, R, S, L, U, PERIOD, TF, PV, DL, DU, BW
-  });
-  
-  return jsonResponse({
-    explanation: explanation,
-    method: 'rule-based-fallback',
-    coin: coin,
-    timestamp: new Date().toISOString(),
-    technicalContext: {
-      currentPrice: Number(P),
-      currentRSI: Number(R),
-      currentSMA: Number(S),
-      timeframe: TF,
-      smaPeriod: PERIOD
-    }
-  });
+  // This function is no longer used directly - buildRuleBasedExplanationStrict now returns { explanation, technicalContext }
+  // Keeping for backward compatibility but it should not be called
+  throw new Error('explainPatternFallback is deprecated - use buildRuleBasedExplanationStrict directly');
 }
 
 /**

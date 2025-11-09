@@ -1617,9 +1617,23 @@
 				
 				if (response.ok) {
 					const aiExplanation = await response.json();
+					const aiStatus = response.headers.get('X-AI-Status') || 'unknown';
 					console.log('🧠 AI API Explanation result:', aiExplanation);
-					aiExplanationData = aiExplanation;
-					return;
+					console.log('🧠 AI Status:', aiStatus);
+					
+					// Only render if ok === true or method === 'rule-based-fallback'
+					if (aiExplanation.ok === true || aiExplanation.method === 'rule-based-fallback') {
+						aiExplanationData = {
+							explanation: aiExplanation.explanation,
+							method: aiExplanation.method || 'cohere-chat-api',
+							technicalContext: aiExplanation.technicalContext,
+							timestamp: aiExplanation.timestamp,
+							aiStatus: aiStatus
+						};
+						return;
+					} else {
+						throw new Error(`AI explanation marked as non-compliant: ${aiExplanation.error || 'unknown error'}`);
+					}
 				} else {
 					throw new Error(`API error: ${response.status}`);
 				}
@@ -2071,12 +2085,25 @@
 							🧠 AI Pattern Explanation
 							<span class="ai-explain-badge">
 								{aiExplanationData.method === 'cohere-chat-api' ? 'Cohere AI' : 
-								 aiExplanationData.method === 'comprehensive-local-analysis' ? 'AI-Enhanced Local' : 'Rule-based'}
+								 aiExplanationData.method === 'rule-based-fallback' ? 'Rule-based' : 
+								 aiExplanationData.method === 'comprehensive-local-analysis' ? 'AI-Enhanced Local' : 'Unknown'}
 							</span>
+							{#if aiExplanationData.aiStatus === 'repaired'}
+								<span class="ai-status-badge" style="font-size: 0.75rem; color: #ff9800; margin-left: 0.5rem; padding: 0.2rem 0.5rem; background: #fff3cd; border-radius: 12px;">⚠️ Repaired</span>
+							{:else if aiExplanationData.aiStatus === 'fallback'}
+								<span class="ai-status-badge" style="font-size: 0.75rem; color: #9e9e9e; margin-left: 0.5rem; padding: 0.2rem 0.5rem; background: #f5f5f5; border-radius: 12px;">📊 Fallback</span>
+							{/if}
 						</h3>
 						<div class="ai-explanation-content">
 							{@html aiExplanationData.explanation.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br>').replace(/•/g, '&bull;')}
 						</div>
+						{#if aiExplanationData.technicalContext}
+							<div class="ai-technical-context" style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border-color); font-size: 0.85rem; color: var(--text-secondary);">
+								<strong>Technical Context:</strong> Price: ${aiExplanationData.technicalContext.currentPrice?.toFixed(2)}, 
+								RSI: {aiExplanationData.technicalContext.currentRSI?.toFixed(2)}, 
+								SMA({aiExplanationData.technicalContext.smaPeriod}): ${aiExplanationData.technicalContext.currentSMA?.toFixed(2)}
+							</div>
+						{/if}
 					</div>
 				{/if}
 			</div>
