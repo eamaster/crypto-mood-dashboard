@@ -802,8 +802,16 @@ async function handlePrice(request, env) {
     const priceFmt = canonicalFormatNumber(canonicalPrice, 2);
     const priceSource = canonicalPriceObj.priceSource || canonicalPriceObj.source || 'unknown';
     
-    // Get additional data if available from CoinCap response (for change24h, etc.)
-    // Note: getCanonicalPrice returns minimal data, so we may not have change24h
+    // Extract change24h from canonicalPriceObj if available
+    const change24hRaw = canonicalPriceObj.change24h ?? null;
+    const change24h = (change24hRaw == null || Number.isNaN(Number(change24hRaw))) ? null : Number(change24hRaw);
+    const changeFmt = (change24h == null) ? null : canonicalFormatNumber(change24h, 2);
+    
+    // Log warning if change24h is missing (client will compute from OHLC if possible)
+    if (change24h == null) {
+      console.warn(`[Price] missing change24h for ${coinId}; client will compute from OHLC if possible`);
+    }
+    
     const priceData = {
       coin: coinId,
       price: canonicalPrice, // numeric
@@ -813,7 +821,8 @@ async function handlePrice(request, env) {
       timestampMs: timestampMs, // epoch milliseconds (numeric)
       source: priceSource,
       symbol: SUPPORTED_COINS[coinId]?.symbol || coinId.toUpperCase(),
-      change24h: 0 // Default to 0 if not available (will be computed from history if needed)
+      change24h: change24h, // numeric or null (client will compute if null)
+      changeFmt: changeFmt // string formatted to 2 decimals or null
     };
 
     // Prepare observability headers with POP caching
@@ -828,7 +837,7 @@ async function handlePrice(request, env) {
       'X-Price-Source': priceSource
     };
 
-    console.log(`✅ [Price] Returning canonical price priceFmt=$${priceFmt} timestampIso=${timestampIso} timestampMs=${timestampMs} (source=${priceSource}, age=${xdoage}s), totalLatency=${Date.now()-start}ms`);
+    console.log(`✅ [Price] Returning canonical price priceFmt=$${priceFmt} change24h=${change24h} changeFmt=${changeFmt} timestampIso=${timestampIso} timestampMs=${timestampMs} (source=${priceSource}, age=${xdoage}s), totalLatency=${Date.now()-start}ms`);
     return jsonResponse(priceData, 200, headers);
 
   } catch (error) {
@@ -2078,12 +2087,16 @@ async function getCanonicalPrice(coinId, env) {
       if (parsed?.data?.price && parsed?.data?.timestamp) {
         const ageMs = Date.now() - new Date(parsed.data.timestamp).getTime();
         if (ageMs <= PRICE_KV_FRESH_MS) {
-          console.log(`[AI] ai-get-canonical-price-end: source=kv-fresh, price=${parsed.data.price}, age=${Math.floor(ageMs/1000)}s, kvLatency=${kvLatency}ms, totalLatency=${Date.now() - startTime}ms`);
+          // Extract change24h from cached data if available
+          const change24hRaw = parsed.data.change24h ?? parsed.data.changePercent24Hr ?? null;
+          const change24h = (change24hRaw == null || Number.isNaN(Number(change24hRaw))) ? null : Number(change24hRaw);
+          console.log(`[AI] ai-get-canonical-price-end: source=kv-fresh, price=${parsed.data.price}, change24h=${change24h}, age=${Math.floor(ageMs/1000)}s, kvLatency=${kvLatency}ms, totalLatency=${Date.now() - startTime}ms`);
           return {
             price: Number(parsed.data.price),
             timestamp: parsed.data.timestamp,
             source: 'kv-fresh',
-            priceSource: 'kv-fresh'
+            priceSource: 'kv-fresh',
+            change24h: change24h // Include change24h from cache if available
           };
         } else {
           console.log(`[AI] ai-get-canonical-price: KV cache stale (age=${Math.floor(ageMs/1000)}s), fetching live`);
@@ -2113,7 +2126,10 @@ async function getCanonicalPrice(coinId, env) {
     
     if (map && map[coinId]) {
       const coincapLatency = Date.now() - coincapStart;
-      console.log(`[AI] ai-get-canonical-price-end: source=coincap-live, price=${map[coinId].price}, coincapLatency=${coincapLatency}ms, totalLatency=${Date.now() - startTime}ms`);
+      // Extract change24h from CoinCap response
+      const change24hRaw = map[coinId].change24h ?? null;
+      const change24h = (change24hRaw == null || Number.isNaN(Number(change24hRaw))) ? null : Number(change24hRaw);
+      console.log(`[AI] ai-get-canonical-price-end: source=coincap-live, price=${map[coinId].price}, change24h=${change24h}, coincapLatency=${coincapLatency}ms, totalLatency=${Date.now() - startTime}ms`);
       
       // Cache it (non-blocking - don't await if slow)
       env.RATE_LIMIT_KV.put(kvKey, JSON.stringify({
@@ -2126,7 +2142,8 @@ async function getCanonicalPrice(coinId, env) {
         price: Number(map[coinId].price),
         timestamp: new Date().toISOString(),
         source: 'coincap-live',
-        priceSource: 'coincap-live'
+        priceSource: 'coincap-live',
+        change24h: change24h // Include change24h from CoinCap if available
       };
     }
   } catch (e) {

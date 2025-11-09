@@ -39,7 +39,7 @@
 			</div>
 			<div class="price-symbol">{symbol.toUpperCase()}</div>
 			{#if priceSource}
-				<small class="debug-overlay">canonical: ${formatPrice(price)} ({priceSource})</small>
+				<small class="debug-overlay">canonical: ${formatPrice(price)} ({priceSource}) • change: {change >= 0 ? '+' : ''}{formatChange(change)}%</small>
 			{/if}
 		</div>
 	{/if}

@@ -118,6 +118,10 @@ function normalizePriceResponse(resp) {
     // priceFmt canonical (use server-provided or compute)
     const priceFmt = resp.priceFmt || Number(priceNumeric).toFixed(2);
 
+    // change24h: accept server-provided or null (client will compute if null)
+    const change24h = (typeof resp.change24h === 'number' && Number.isFinite(resp.change24h)) ? Number(resp.change24h) : null;
+    const changeFmt = resp.changeFmt || (change24h != null ? Number(change24h).toFixed(2) : null);
+
     return {
         coin: resp.coin,
         price: priceNumeric, // numeric for compatibility
@@ -126,10 +130,19 @@ function normalizePriceResponse(resp) {
         timestampMs: Number(tsMs),
         timestampIso: new Date(tsMs).toISOString(),
         source: resp.source || resp.priceSource || 'unknown',
-        symbol: resp.symbol,
-        change24h: resp.change24h,
+        symbol: resp.symbol || resp.coin?.toUpperCase().substring(0, 3) || 'BTC',
+        change24h: change24h, // numeric or null (client will compute if null)
+        changeFmt: changeFmt, // string formatted to 2 decimals or null
         raw: resp
     };
+}
+
+// Helper function to compute percent change from two numerics
+function computeChangePercent(currentPrice, prevClose) {
+    if (!Number.isFinite(currentPrice) || !Number.isFinite(prevClose) || prevClose === 0) {
+        return null;
+    }
+    return ((currentPrice - prevClose) / prevClose) * 100;
 }
 
 const fetchPrice = async (coinId) => {
@@ -419,6 +432,47 @@ export const initStore = async () => {
             console.warn(`[store] Price data missing priceNumeric, skipping reconciliation`);
         }
 
+        // COMPUTE change24h if server didn't provide it
+        if (priceData && priceData.priceNumeric && priceData.change24h == null) {
+            let lastClose = null;
+            
+            // Try to fetch OHLC data to get lastClosePriceNumeric
+            try {
+                const ohlcData = await fetchOHLC(selectedCoin, 7);
+                if (ohlcData && typeof ohlcData.lastClosePriceNumeric === 'number') {
+                    lastClose = ohlcData.lastClosePriceNumeric;
+                    console.log(`[store] Using OHLC lastClosePriceNumeric=${lastClose} for change24h computation`);
+                }
+            } catch (ohlcErr) {
+                console.warn(`[store] Failed to fetch OHLC for change24h computation:`, ohlcErr.message);
+            }
+            
+            // Fallback to history's second-to-last point if OHLC not available
+            if (lastClose == null && historyData && Array.isArray(historyData) && historyData.length >= 2) {
+                lastClose = historyData[historyData.length - 2].y; // previous day
+                console.log(`[store] Using history second-to-last point=${lastClose} for change24h computation`);
+            }
+            
+            // Compute change24h if we have a previous close
+            if (lastClose != null) {
+                const computedChange = computeChangePercent(priceData.priceNumeric, lastClose);
+                if (computedChange != null) {
+                    priceData.change24h = computedChange;
+                    priceData.changeFmt = Number(computedChange).toFixed(2);
+                    console.log(`[store] Computed change24h=${priceData.changeFmt}% from lastClose=${lastClose}`);
+                } else {
+                    console.warn(`[store] Could not compute change24h (invalid prevClose=${lastClose}). Using 0.00 fallback.`);
+                    priceData.change24h = 0;
+                    priceData.changeFmt = '0.00';
+                }
+            } else {
+                // Final fallback: set to 0 but log warning
+                console.warn(`[store] Could not compute change24h (no OHLC/history prev close). Using 0.00 fallback.`);
+                priceData.change24h = 0;
+                priceData.changeFmt = '0.00';
+            }
+        }
+
         // Fallback: If price failed but history succeeded, extract latest price from history
         // Only use fallback if price normalization truly failed (not just format differences)
         if (!priceData && historyData && historyData.length > 0) {
@@ -562,6 +616,47 @@ export const setCoin = async (coinId) => {
             console.warn(`[store] Price data missing priceNumeric, skipping reconciliation`);
         }
 
+        // COMPUTE change24h if server didn't provide it
+        if (priceData && priceData.priceNumeric && priceData.change24h == null) {
+            let lastClose = null;
+            
+            // Try to fetch OHLC data to get lastClosePriceNumeric
+            try {
+                const ohlcData = await fetchOHLC(coinId, 7);
+                if (ohlcData && typeof ohlcData.lastClosePriceNumeric === 'number') {
+                    lastClose = ohlcData.lastClosePriceNumeric;
+                    console.log(`[store] Using OHLC lastClosePriceNumeric=${lastClose} for change24h computation`);
+                }
+            } catch (ohlcErr) {
+                console.warn(`[store] Failed to fetch OHLC for change24h computation:`, ohlcErr.message);
+            }
+            
+            // Fallback to history's second-to-last point if OHLC not available
+            if (lastClose == null && historyData && Array.isArray(historyData) && historyData.length >= 2) {
+                lastClose = historyData[historyData.length - 2].y; // previous day
+                console.log(`[store] Using history second-to-last point=${lastClose} for change24h computation`);
+            }
+            
+            // Compute change24h if we have a previous close
+            if (lastClose != null) {
+                const computedChange = computeChangePercent(priceData.priceNumeric, lastClose);
+                if (computedChange != null) {
+                    priceData.change24h = computedChange;
+                    priceData.changeFmt = Number(computedChange).toFixed(2);
+                    console.log(`[store] Computed change24h=${priceData.changeFmt}% from lastClose=${lastClose}`);
+                } else {
+                    console.warn(`[store] Could not compute change24h (invalid prevClose=${lastClose}). Using 0.00 fallback.`);
+                    priceData.change24h = 0;
+                    priceData.changeFmt = '0.00';
+                }
+            } else {
+                // Final fallback: set to 0 but log warning
+                console.warn(`[store] Could not compute change24h (no OHLC/history prev close). Using 0.00 fallback.`);
+                priceData.change24h = 0;
+                priceData.changeFmt = '0.00';
+            }
+        }
+
         // Fallback: If price failed but history succeeded, extract latest price from history
         if (!priceData && historyData && historyData.length > 0) {
             // We need to access current state to get coins list, so use update with callback
@@ -581,6 +676,7 @@ export const setCoin = async (coinId) => {
                     priceNumeric: fallbackPrice,
                     priceFmt: Number(fallbackPrice).toFixed(2),
                     change24h: changePercent,
+                    changeFmt: Number(changePercent).toFixed(2),
                     symbol: symbol,
                     source: 'history-fallback',
                     timestampMs: latestHistory.x.getTime(),
