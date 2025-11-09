@@ -2533,27 +2533,7 @@
 		font-size: 0.8rem;
 	}
 
-	.educational-notes {
-		margin-top: 1.5rem;
-		padding-top: 1.5rem;
-		border-top: 1px solid var(--border-color);
-	}
-
-	.educational-notes h4 {
-		color: var(--text-primary);
-		margin: 0 0 1rem 0;
-		font-size: 1.1rem;
-	}
-
-	.educational-content {
-		font-size: 0.9rem;
-		color: var(--text-secondary);
-		line-height: 1.6;
-	}
-
-	.educational-content strong {
-		color: var(--text-primary);
-	}
+	/* Educational Notes moved to left column component - styles removed from sidebar */
 
 	.ai-analysis-section {
 		margin-bottom: 2rem;
