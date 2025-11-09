@@ -8,8 +8,10 @@
 	import { WORKER_URL } from '../../lib/config.js';
 	import EducationalNotes from '$lib/components/EducationalNotes.svelte';
 
-	// ResizeObserver for patterns panel height
-	let patternsPanel;
+	// ResizeObserver for patterns list height (inner scroll container)
+	let patternsListEl; // bind:this to the inner scroll container (.patterns-list)
+	let leftColumnEl; // the left column container (chart area)
+	let rightColumnEl; // right column wrapper
 	let resizeObserver;
 
 	let selectedCoin = 'bitcoin';
@@ -120,40 +122,46 @@
 	function setupPatternsPanelResize() {
 		if (!browser) return;
 
-		const leftCol = document.querySelector('.ta-chart-column.left, .ta-chart-column:first-child');
-		const rightCol = document.querySelector('.ta-chart-column.right, .indicators-panel');
+		// Adapt selectors to actual class names in markup
+		leftColumnEl = document.querySelector('.ta-chart-column.left, .ta-chart-column:first-child');
+		rightColumnEl = document.querySelector('.ta-chart-column.right, .indicators-panel');
 		
-		if (!leftCol || !rightCol || !patternsPanel) return;
+		if (!patternsListEl || !leftColumnEl || !rightColumnEl) {
+			// no-op if structure differs
+			return;
+		}
 
 		function recompute() {
 			try {
-				const leftRect = leftCol.getBoundingClientRect();
-				const panelRect = patternsPanel.getBoundingClientRect();
-				const rightRect = rightCol.getBoundingClientRect();
+				// Compute available vertical space inside the left column
+				const leftRect = leftColumnEl.getBoundingClientRect();
+				const listTopRect = patternsListEl.getBoundingClientRect();
 				
-				// Calculate available height: left column bottom minus patterns panel top, minus some padding
-				const available = Math.max(100, Math.floor(leftRect.bottom - panelRect.top - 16));
+				// If patterns panel top is below left bottom, available will be negative, keep floor
+				const availablePx = Math.max(120, Math.floor(leftRect.bottom - listTopRect.top - 16));
 				
+				// Set max-height on the *inner* list so it scrolls internally
 				// Only set if it's different to avoid unnecessary reflows
-				const currentMaxHeight = patternsPanel.style.maxHeight;
-				const newMaxHeight = `${available}px`;
+				const currentMaxHeight = patternsListEl.style.maxHeight;
+				const newMaxHeight = `${availablePx}px`;
 				
 				if (currentMaxHeight !== newMaxHeight) {
-					patternsPanel.style.maxHeight = newMaxHeight;
+					patternsListEl.style.maxHeight = newMaxHeight;
 				}
-			} catch (e) {
-				// Silently handle errors
+			} catch (err) {
+				// Silently ignore errors
 			}
 		}
 
 		// Initial compute
 		recompute();
 
-		// Respond to resize and content changes
+		// Update on resize and content changes
 		window.addEventListener('resize', recompute);
 		resizeObserver = new ResizeObserver(recompute);
-		resizeObserver.observe(leftCol);
-		resizeObserver.observe(rightCol);
+		resizeObserver.observe(leftColumnEl);
+		resizeObserver.observe(rightColumnEl);
+		// Also observe body to catch font/load changes
 		if (document.body) {
 			resizeObserver.observe(document.body);
 		}
@@ -2171,10 +2179,10 @@
 						
 						<!-- Patterns Panel - fills remaining vertical space -->
 						{#if candlePatterns.length > 0}
-							<div class="patterns-panel" bind:this={patternsPanel}>
+							<div class="patterns-panel">
 								<div class="patterns-section">
 									<h4>🕯️ Patterns Detected ({candlePatterns.length})</h4>
-									<div class="patterns-list">
+									<div class="patterns-list" bind:this={patternsListEl}>
 										{#each candlePatterns as pattern}
 											<div class="pattern-entry">
 												<div class="signal {pattern.signal.toLowerCase()}">{pattern.type}</div>
