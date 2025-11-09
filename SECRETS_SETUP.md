@@ -110,9 +110,9 @@ If you encounter issues:
 
 ## 🛠️ Admin Endpoints
 
-### Purge Legacy Cache
+### Purge Cache
 
-The worker includes an admin endpoint to purge legacy CoinGecko cache entries after migration:
+The worker includes an admin endpoint to purge cache entries:
 
 ```bash
 # Generate a secure admin token first (if not done)
@@ -126,7 +126,7 @@ openssl rand -hex 32
 wrangler secret put ADMIN_PURGE_TOKEN
 # (paste the generated token when prompted)
 
-# Use the admin endpoint to purge legacy cache
+# Use the admin endpoint to purge cache
 curl -X POST "https://crypto-mood-dashboard-production.smah0085.workers.dev/admin/purge-legacy-cache" \
   -H "Content-Type: application/json" \
   -d '{"token":"YOUR_ADMIN_TOKEN_HERE"}'
@@ -147,4 +147,4 @@ curl -X POST "https://crypto-mood-dashboard-production.smah0085.workers.dev/admi
 - The application will gracefully degrade if optional API keys are missing
 - Required API keys (CoinCap, Cohere, NewsAPI, and ADMIN_PURGE_TOKEN) must be present for full functionality
 - All secrets are loaded at runtime and never stored in the codebase
-- The worker automatically detects and purges legacy CoinGecko cache entries when they are accessed
+- Cache entries are automatically managed by the worker

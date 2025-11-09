@@ -163,17 +163,20 @@ git push origin main
 The dashboard includes several performance optimizations:
 
 - **Parallel API fetching**: Price and history load simultaneously
-- **Request timeouts**: 8-second timeout prevents hanging
-- **Cache control**: No-cache headers ensure fresh data
+- **Request timeouts**: Prevents hanging requests (15s for price, 20s for history)
+- **Smart caching**: KV storage with POP caching for faster responses
 - **Error handling**: Graceful fallbacks on failures
+- **Non-blocking operations**: News and sentiment load in background
 
 ## 📝 Environment Variables
 
 ### Required Secrets (Cloudflare Worker)
 
 ```bash
+wrangler secret put COINCAP_API_KEY
 wrangler secret put COHERE_API_KEY
 wrangler secret put NEWSAPI_KEY
+wrangler secret put ADMIN_PURGE_TOKEN
 ```
 
 ### Optional Secrets

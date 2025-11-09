@@ -252,7 +252,7 @@ try {
 - **Cloudflare Workers**: Backend API
 - **Chart.js**: Data visualization
 - **Cohere AI**: Sentiment analysis
-- **CoinGecko API**: Cryptocurrency data
+- **CoinCap Pro API**: Cryptocurrency data
 - **NewsAPI**: News articles
 
 ## 🔗 Resources
