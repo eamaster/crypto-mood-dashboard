@@ -10,12 +10,19 @@ This guide explains how to properly configure API keys and secrets for the Crypt
 
 If you've accidentally committed an API key to the repository:
 
-1. **Rotate the key immediately** in the provider's dashboard (delete old key, create new one)
-2. **Update the key** in Cloudflare Workers: `wrangler secret put COINCAP_API_KEY`
+1. **Rotate the key immediately** in the provider's dashboard:
+   - For CoinCap: Go to [https://pro.coincap.io/dashboard](https://pro.coincap.io/dashboard)
+   - Delete the compromised key
+   - Create a new API key
+2. **Update the key** in Cloudflare Workers: 
+   ```bash
+   npx wrangler secret put COINCAP_API_KEY
+   # Paste the new key when prompted
+   ```
 3. **Remove from git history** if the repository is private (see [SECURITY.md](./SECURITY.md) for instructions)
-4. **Monitor usage** for any unauthorized access
+4. **Monitor usage** for any unauthorized access in the provider's dashboard
 
-**Important**: Even if you delete a file containing a key, it remains in git history and can be accessed by anyone with repository access.
+**Important**: Even if you delete a file containing a key, it remains in git history and can be accessed by anyone with repository access. Always rotate compromised keys immediately.
 
 See [SECURITY.md](./SECURITY.md) for detailed security guidelines and key rotation procedures.
 
@@ -79,6 +86,8 @@ Use Wrangler's secret management system to securely store your API keys:
 
 ```bash
 # Set required secrets
+# IMPORTANT: If a secret was accidentally committed to the repository, 
+# rotate it in the provider's dashboard FIRST before setting it here
 wrangler secret put COINCAP_API_KEY
 wrangler secret put COHERE_API_KEY
 wrangler secret put NEWSAPI_KEY
@@ -90,6 +99,8 @@ wrangler secret put NEWSDATA_KEY
 ```
 
 When prompted, enter your actual API keys. These will be securely stored and encrypted by Cloudflare.
+
+**⚠️ Security Note**: If a secret was accidentally committed to the repository (even if later deleted), rotate it immediately in the provider's dashboard and follow the history-cleanup instructions in [SECURITY.md](./SECURITY.md).
 
 ### Verify Your Setup
 
