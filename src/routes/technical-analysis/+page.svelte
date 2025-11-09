@@ -2582,16 +2582,16 @@
 		line-height: 1.4;
 	}
 
-	/* Patterns Panel - fills remaining vertical space */
+	/* Patterns Panel - flexible container */
 	.patterns-panel {
 		display: flex;
 		flex-direction: column;
-		flex: 1 1 auto; /* Grow to fill available vertical space */
-		min-height: 0; /* Critical for overflow to work inside flex */
+		flex: 0 1 auto; /* Don't force expanding the whole page */
+		min-height: 0;
+		box-sizing: border-box;
 		margin-top: 1rem;
 		padding-top: 1rem;
 		border-top: 1px solid var(--border-color);
-		box-sizing: border-box;
 	}
 
 	.patterns-section {
@@ -2608,28 +2608,15 @@
 		flex-shrink: 0; /* Don't shrink the header */
 	}
 
-	/* Patterns list should scroll internally if it overflows */
-	.patterns-list {
-		flex: 1 1 auto;
-		min-height: 0;
-		overflow-y: auto;
-		display: flex;
-		flex-direction: column;
-		gap: 0.75rem;
-		padding-right: 0.5rem; /* Allow space for scrollbar */
-		box-sizing: border-box;
-	}
-
-	/* Remove any previous fixed max-height rules (override) */
-	.patterns-list[style],
-	.patterns-list {
-		max-height: none !important;
-	}
-
-	/* Legacy class name support - remove max-height */
+	/* INNER scroll container — this must scroll */
+	.patterns-list,
 	.patterns-scroll-container {
-		max-height: none !important;
-		overflow-y: auto;
+		flex: 1 1 auto; /* Fill available vertical area inside patterns-panel */
+		min-height: 0; /* Critical for overflow to work inside flex */
+		overflow-y: auto; /* Keep internal scroll */
+		max-height: none !important; /* Allow JS to set computed max-height if needed */
+		padding-right: 0.5rem; /* Give room for scrollbar */
+		box-sizing: border-box;
 		display: flex;
 		flex-direction: column;
 		gap: 0.75rem;
