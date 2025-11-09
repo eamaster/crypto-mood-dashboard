@@ -1081,7 +1081,10 @@
 			data: { datasets },
 			options: {
 				responsive: true,
-				maintainAspectRatio: false,
+				maintainAspectRatio: false, /* Critical: canvas height follows parent CSS */
+				layout: {
+					padding: { top: 5, bottom: 5, left: 5, right: 5 } /* Minimal padding */
+				},
 				scales: {
 					x: {
 						type: 'time',
@@ -2409,7 +2412,7 @@
 
 	.ta-chart-container h3 {
 		color: var(--text-primary);
-		margin: 0 0 1rem 0;
+		margin: 0 0 0.75rem 0; /* Reduce bottom margin */
 		font-size: 1.3rem;
 	}
 
@@ -2446,14 +2449,15 @@
 
 	.indicators-panel h3 {
 		color: var(--text-primary);
-		margin: 0 0 1.5rem 0;
+		margin: 0 0 1rem 0; /* Reduce bottom margin */
 		font-size: 1.3rem;
 	}
 
 	.indicators-list {
 		display: flex;
 		flex-direction: column;
-		gap: 1.5rem;
+		gap: 1rem; /* Reduce gap between indicators */
+		min-height: 0; /* Allow list to shrink */
 	}
 
 	.indicator {
