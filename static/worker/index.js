@@ -110,8 +110,8 @@ async function getBackoff(kv, assetId) {
   }
 }
 
-  // CoinCap API configuration
-const COINCAP_API_BASE = 'https://api.coincap.io/v2';
+  // CoinCap API configuration (API v3)
+const COINCAP_API_BASE = 'https://rest.coincap.io/v3';
 const COINCAP_BATCH_ENDPOINT = `${COINCAP_API_BASE}/assets`; // supports ?ids=bitcoin,ethereum,...
 
 // Helper to attach CoinCap API key for authenticated requests
@@ -437,12 +437,13 @@ async function fetchAssetHistory(coinId, days, env) {
   
   const fetchOpts = {
     method: 'GET',
-    headers: coinCapAuthHeaders(env),
-    cf: { cacheTtlByStatus: { "200-299": 60 }, cacheEverything: true }
+    headers: coinCapAuthHeaders(env)
+    // Removed cf cache options to ensure requests actually reach CoinCap
   };
   
   try {
     console.log(`🚀 [fetchAssetHistory] Fetching ${days}-day history for ${coinId}`);
+    console.log(`🚀 [fetchAssetHistory] URL: ${url}`);
     const raw = await rateLimitedFetch(url, fetchOpts, env, coinId);
     
     if (!raw || !raw.ok) {
