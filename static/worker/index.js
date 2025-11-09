@@ -116,9 +116,14 @@ const COINCAP_BATCH_ENDPOINT = `${COINCAP_API_BASE}/assets`; // supports ?ids=bi
 
 // Helper to attach CoinCap API key for authenticated requests (500 rpm with Pro key)
 function coinCapAuthHeaders(env) {
-  const headers = { 'Accept': 'application/json' };
+  const headers = { 
+    'Accept': 'application/json',
+    'User-Agent': 'Crypto-Mood-Dashboard/1.0 (Cloudflare Worker)'
+  };
   if (env && env.COINCAP_API_KEY) {
     headers['Authorization'] = `Bearer ${env.COINCAP_API_KEY}`;
+  } else {
+    console.warn('[coinCapAuthHeaders] COINCAP_API_KEY not set, using unauthenticated requests');
   }
   return headers;
 }
@@ -200,10 +205,20 @@ async function rateLimitedFetch(url, options = {}, env, assetId) {
         }
 
         if (resp.status >= 500 && resp.status < 600) {
-          // Server error: backoff smaller
-          const backoffMs = jitter(Math.min(8000, 500 * Math.pow(2, attempt)));
-          lastError = { status: resp.status, message: `Server error ${resp.status}` };
-          console.warn(`[rateLimitedFetch] 5xx error (${resp.status}), backing off ${Math.ceil(backoffMs/1000)}s`);
+          // HTTP 530 is a Cloudflare-specific error (origin timeout/DNS issues)
+          // Use longer backoff for 530 since it often indicates transient connectivity issues
+          const is530 = resp.status === 530;
+          const baseBackoff = is530 ? 2000 : 500; // Longer initial backoff for 530
+          const maxBackoff = is530 ? 16000 : 8000; // Longer max backoff for 530
+          const backoffMs = jitter(Math.min(maxBackoff, baseBackoff * Math.pow(2, attempt)));
+          
+          lastError = { 
+            status: resp.status, 
+            message: is530 ? `Cloudflare error 530 (origin timeout/connection issue)` : `Server error ${resp.status}`,
+            type: is530 ? 'Cloudflare/Origin' : 'HTTP'
+          };
+          
+          console.warn(`[rateLimitedFetch] ${is530 ? '⚠️ Cloudflare' : '5xx'} error (${resp.status}), backing off ${Math.ceil(backoffMs/1000)}s`);
           if (attempt < maxAttempts) {
             await new Promise(r => setTimeout(r, backoffMs));
           }
@@ -244,12 +259,20 @@ async function rateLimitedFetch(url, options = {}, env, assetId) {
     const errorDetails = lastError 
       ? `Last error: ${lastError.type || 'HTTP'} - ${lastError.message || lastError.status}`
       : 'No upstream response';
-    console.error(`[rateLimitedFetch] ❌ Exhausted ${maxAttempts} retries for ${url}. ${errorDetails}`);
+    
+    // Special handling for 530 errors
+    if (lastError && lastError.status === 530) {
+      console.error(`[rateLimitedFetch] ❌ Exhausted ${maxAttempts} retries for ${url}. CoinCap API returned 530 (Cloudflare origin error).`);
+      console.error(`[rateLimitedFetch] This typically means: 1) CoinCap API is temporarily unavailable, 2) Network connectivity issues, or 3) DNS resolution problems.`);
+    } else {
+      console.error(`[rateLimitedFetch] ❌ Exhausted ${maxAttempts} retries for ${url}. ${errorDetails}`);
+    }
     
     const err = new Error(`exhausted-retries: ${errorDetails}`);
     err.code = 'retries_exhausted';
     err.details = errorDetails;
     err.lastError = lastError;
+    err.is530 = lastError && lastError.status === 530;
     throw err;
   })();
 
@@ -786,13 +809,21 @@ async function handlePrice(request, env) {
     if (error.lastError) {
       errorDetails.diagnostic = {
         type: error.lastError.type || 'unknown',
-        message: error.lastError.message
+        message: error.lastError.message,
+        status: error.lastError.status
       };
+      
+      // Special message for 530 errors
+      if (error.lastError.status === 530) {
+        errorDetails.message = 'CoinCap API is experiencing connectivity issues (Cloudflare error 530). This is usually temporary. Please try again in a few moments.';
+        errorDetails.retry_after = 60; // Suggest retry after 60 seconds
+      }
     }
     
     return jsonResponse(errorDetails, status, { 
       'X-Client-Cache': 'no-store',
-      'X-Error-Type': error.code || 'unknown'
+      'X-Error-Type': error.code || 'unknown',
+      'Retry-After': error.lastError?.status === 530 ? '60' : undefined
     });
   }
 }
@@ -915,13 +946,21 @@ async function handleHistory(request, env) {
     if (error.lastError) {
       errorDetails.diagnostic = {
         type: error.lastError.type || 'unknown',
-        message: error.lastError.message
+        message: error.lastError.message,
+        status: error.lastError.status
       };
+      
+      // Special message for 530 errors
+      if (error.lastError.status === 530) {
+        errorDetails.message = 'CoinCap API is experiencing connectivity issues (Cloudflare error 530). This is usually temporary. Please try again in a few moments.';
+        errorDetails.retry_after = 60; // Suggest retry after 60 seconds
+      }
     }
     
     return jsonResponse(errorDetails, status, { 
       'X-Client-Cache': 'no-store',
-      'X-Error-Type': error.code || 'unknown'
+      'X-Error-Type': error.code || 'unknown',
+      'Retry-After': error.lastError?.status === 530 ? '60' : undefined
     });
   }
 }
