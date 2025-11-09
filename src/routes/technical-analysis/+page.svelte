@@ -5,6 +5,7 @@
 	import Chart from 'chart.js/auto';
 	import 'chartjs-adapter-date-fns';
 	import { format } from 'date-fns';
+	import { WORKER_URL } from '../../lib/config.js';
 
 	let selectedCoin = 'bitcoin';
 	let timeframe = 7;
@@ -30,26 +31,78 @@
 	let currentAnalysisData = null;
 	
 	// UI states
-
 	let aiExplanationData = null;
 	
-	// Available coins
-	const coins = [
-		{ id: 'bitcoin', name: 'Bitcoin', symbol: 'BTC' },
-		{ id: 'ethereum', name: 'Ethereum', symbol: 'ETH' },
-		{ id: 'dogecoin', name: 'Dogecoin', symbol: 'DOGE' },
-		{ id: 'cardano', name: 'Cardano', symbol: 'ADA' },
-		{ id: 'solana', name: 'Solana', symbol: 'SOL' },
-		{ id: 'litecoin', name: 'Litecoin', symbol: 'LTC' },
-		{ id: 'bitcoin-cash', name: 'Bitcoin Cash', symbol: 'BCH' },
-		{ id: 'ripple', name: 'Ripple', symbol: 'XRP' }
-	];
+	// Available coins - fetch from worker API (same as main page)
+	let coins = [];
+	let coinsLoading = true;
 
-	import { WORKER_URL } from '../../lib/config.js';
+	// Fetch coins list from worker (same as main page)
+	async function fetchCoins() {
+		try {
+			const response = await fetch(`${WORKER_URL}/coins`);
+			if (!response.ok) throw new Error(`HTTP ${response.status}`);
+			const data = await response.json();
+			if (Array.isArray(data) && data.length > 0) {
+				coins = data;
+				// Ensure bitcoin is selected if available
+				if (!selectedCoin || !coins.find(c => c.id === selectedCoin)) {
+					selectedCoin = coins.find(c => c.id === 'bitcoin') ? 'bitcoin' : coins[0]?.id || 'bitcoin';
+				}
+			} else {
+				// Fallback to default list if API fails
+				coins = [
+					{ id: 'bitcoin', name: 'Bitcoin', symbol: 'BTC' },
+					{ id: 'ethereum', name: 'Ethereum', symbol: 'ETH' },
+					{ id: 'litecoin', name: 'Litecoin', symbol: 'LTC' },
+					{ id: 'bitcoin-cash', name: 'Bitcoin Cash', symbol: 'BCH' },
+					{ id: 'cardano', name: 'Cardano', symbol: 'ADA' },
+					{ id: 'ripple', name: 'Ripple', symbol: 'XRP' },
+					{ id: 'dogecoin', name: 'Dogecoin', symbol: 'DOGE' },
+					{ id: 'polkadot', name: 'Polkadot', symbol: 'DOT' },
+					{ id: 'chainlink', name: 'Chainlink', symbol: 'LINK' },
+					{ id: 'stellar', name: 'Stellar', symbol: 'XLM' },
+					{ id: 'monero', name: 'Monero', symbol: 'XMR' },
+					{ id: 'tezos', name: 'Tezos', symbol: 'XTZ' },
+					{ id: 'eos', name: 'EOS', symbol: 'EOS' },
+					{ id: 'zcash', name: 'Zcash', symbol: 'ZEC' },
+					{ id: 'dash', name: 'Dash', symbol: 'DASH' },
+					{ id: 'solana', name: 'Solana', symbol: 'SOL' }
+				];
+			}
+		} catch (err) {
+			console.error('Failed to fetch coins, using fallback:', err);
+			// Fallback to default list
+			coins = [
+				{ id: 'bitcoin', name: 'Bitcoin', symbol: 'BTC' },
+				{ id: 'ethereum', name: 'Ethereum', symbol: 'ETH' },
+				{ id: 'litecoin', name: 'Litecoin', symbol: 'LTC' },
+				{ id: 'bitcoin-cash', name: 'Bitcoin Cash', symbol: 'BCH' },
+				{ id: 'cardano', name: 'Cardano', symbol: 'ADA' },
+				{ id: 'ripple', name: 'Ripple', symbol: 'XRP' },
+				{ id: 'dogecoin', name: 'Dogecoin', symbol: 'DOGE' },
+				{ id: 'polkadot', name: 'Polkadot', symbol: 'DOT' },
+				{ id: 'chainlink', name: 'Chainlink', symbol: 'LINK' },
+				{ id: 'stellar', name: 'Stellar', symbol: 'XLM' },
+				{ id: 'monero', name: 'Monero', symbol: 'XMR' },
+				{ id: 'tezos', name: 'Tezos', symbol: 'XTZ' },
+				{ id: 'eos', name: 'EOS', symbol: 'EOS' },
+				{ id: 'zcash', name: 'Zcash', symbol: 'ZEC' },
+				{ id: 'dash', name: 'Dash', symbol: 'DASH' },
+				{ id: 'solana', name: 'Solana', symbol: 'SOL' }
+			];
+		} finally {
+			coinsLoading = false;
+		}
+	}
 
-	onMount(() => {
-		// Auto-analyze Bitcoin on load
-		analyzeTA();
+	onMount(async () => {
+		// Fetch coins first, then auto-analyze Bitcoin
+		await fetchCoins();
+		// Defer analysis to next tick to allow UI to render first
+		setTimeout(() => {
+			analyzeTA();
+		}, 100);
 	});
 
 	onDestroy(() => {
@@ -172,11 +225,16 @@
 				timeframe
 			};
 			
-			// Perform AI analysis
-			await performAIAnalysis(priceData, rsi, sma, bb, traditionalSignals, candlePatterns);
-			
+			// Mark loading as complete first (non-blocking)
 			loading = false;
 			candleLoading = false;
+			
+			// Perform AI analysis in background (non-blocking, doesn't delay UI)
+			performAIAnalysis(priceData, rsi, sma, bb, traditionalSignals, candlePatterns)
+				.catch(err => {
+					console.warn('AI analysis failed (non-critical):', err);
+					// AI analysis failure doesn't affect the page
+				});
 			
 		} catch (err) {
 			console.error('Technical analysis error:', err);
@@ -187,35 +245,67 @@
 	}
 
 	async function fetchPriceData(coinId, days) {
-		const response = await fetch(`${WORKER_URL}/history?coin=${coinId}&days=${days}`);
-		if (!response.ok) throw new Error(`HTTP ${response.status}`);
+		// Add timeout to prevent hanging
+		const controller = new AbortController();
+		const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
 		
-		const data = await response.json();
-		if (data.error) throw new Error(data.error);
-		if (!data.prices || data.prices.length === 0) {
-			throw new Error(`No price history found for ${coinId}`);
+		try {
+			const response = await fetch(`${WORKER_URL}/history?coin=${coinId}&days=${days}`, {
+				signal: controller.signal
+			});
+			clearTimeout(timeoutId);
+			
+			if (!response.ok) throw new Error(`HTTP ${response.status}`);
+			
+			const data = await response.json();
+			if (data.error) throw new Error(data.error);
+			if (!data.prices || data.prices.length === 0) {
+				throw new Error(`No price history found for ${coinId}`);
+			}
+			
+			return data.prices.map(item => ({
+				x: new Date(item.timestamp),
+				y: item.price
+			}));
+		} catch (err) {
+			clearTimeout(timeoutId);
+			if (err.name === 'AbortError') {
+				throw new Error('Request timeout - please try again');
+			}
+			throw err;
 		}
-		
-		return data.prices.map(item => ({
-			x: new Date(item.timestamp),
-			y: item.price
-		}));
 	}
 
 	async function fetchOHLCData(coinId, days, fallbackPriceData = null) {
 		try {
-			// Try OHLC endpoint first
-			const response = await fetch(`${WORKER_URL}/ohlc?coin=${coinId}&days=${days}`);
-			if (response.ok) {
-				const data = await response.json();
-				console.log(`✅ Fetched ${data.ohlc.length} OHLC data points from API`);
-				return data.ohlc.map(item => ({
-					x: new Date(item.timestamp),
-					o: parseFloat(item.open),
-					h: parseFloat(item.high),
-					l: parseFloat(item.low),
-					c: parseFloat(item.close)
-				}));
+			// Try OHLC endpoint first (with timeout)
+			const controller = new AbortController();
+			const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout for OHLC
+			
+			try {
+				const response = await fetch(`${WORKER_URL}/ohlc?coin=${coinId}&days=${days}`, {
+					signal: controller.signal
+				});
+				clearTimeout(timeoutId);
+				
+				if (response.ok) {
+					const data = await response.json();
+					console.log(`✅ Fetched ${data.ohlc.length} OHLC data points from API`);
+					return data.ohlc.map(item => ({
+						x: new Date(item.timestamp),
+						o: parseFloat(item.open),
+						h: parseFloat(item.high),
+						l: parseFloat(item.low),
+						c: parseFloat(item.close)
+					}));
+				}
+			} catch (fetchError) {
+				clearTimeout(timeoutId);
+				if (fetchError.name === 'AbortError') {
+					console.log('🔄 OHLC endpoint timeout, simulating from price data...');
+				} else {
+					throw fetchError;
+				}
 			}
 		} catch (error) {
 			console.log('🔄 OHLC endpoint not available, simulating from price data...');
@@ -1285,31 +1375,45 @@
 			
 			console.log('🤖 Starting AI analysis with Cohere...');
 			
-			// Try Cohere AI analysis first
+			// Try Cohere AI analysis first (with timeout)
 			try {
-				const response = await fetch(`${WORKER_URL}/ai-analysis`, {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({
-						rsi: currentRSI,
-						smaSignal,
-						bbSignal,
-						priceData: priceData.slice(-10), // Send last 10 points to reduce payload
-						coin: selectedCoin,
-						patterns: candlePatterns.map(p => ({ type: p.type, signal: p.signal })) // Simplified patterns
-					})
-				});
+				const controller = new AbortController();
+				const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout for AI analysis
 				
-				if (response.ok) {
-					const result = await response.json();
-					console.log('🤖 Cohere AI analysis successful:', result);
-					aiAnalysis = {
-						...result,
-						method: result.method || 'cohere-ai'
-					};
-					return;
-				} else {
-					console.log('🤖 AI analysis endpoint returned error:', response.status);
+				try {
+					const response = await fetch(`${WORKER_URL}/ai-analysis`, {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						signal: controller.signal,
+						body: JSON.stringify({
+							rsi: currentRSI,
+							smaSignal,
+							bbSignal,
+							priceData: priceData.slice(-10), // Send last 10 points to reduce payload
+							coin: selectedCoin,
+							patterns: candlePatterns.map(p => ({ type: p.type, signal: p.signal })) // Simplified patterns
+						})
+					});
+					clearTimeout(timeoutId);
+				
+					if (response.ok) {
+						const result = await response.json();
+						console.log('🤖 Cohere AI analysis successful:', result);
+						aiAnalysis = {
+							...result,
+							method: result.method || 'cohere-ai'
+						};
+						return;
+					} else {
+						console.log('🤖 AI analysis endpoint returned error:', response.status);
+					}
+				} catch (fetchError) {
+					clearTimeout(timeoutId);
+					if (fetchError.name === 'AbortError') {
+						console.log('🤖 AI analysis timeout, using local analysis...');
+					} else {
+						throw fetchError;
+					}
 				}
 			} catch (error) {
 				console.log('🤖 AI analysis endpoint failed:', error.message);
@@ -1762,11 +1866,17 @@
 	<section class="controls">
 		<div class="control-group">
 			<label for="coinSelect">Cryptocurrency:</label>
-			<select bind:value={selectedCoin} on:change={analyzeTA}>
-				{#each coins as coin}
-					<option value={coin.id}>{coin.name} ({coin.symbol})</option>
-				{/each}
-			</select>
+			{#if coinsLoading}
+				<select disabled>
+					<option>Loading coins...</option>
+				</select>
+			{:else}
+				<select id="coinSelect" bind:value={selectedCoin} on:change={analyzeTA}>
+					{#each coins as coin}
+						<option value={coin.id}>{coin.name} ({coin.symbol})</option>
+					{/each}
+				</select>
+			{/if}
 		</div>
 		
 		<div class="control-group">

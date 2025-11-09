@@ -211,15 +211,16 @@ const fetchHistoryThrottled = async (coinId, days = 7, force = false) => {
 const fetchNews = async (coinId) => {
     const url = `${WORKER_URL}/news?coin=${encodeURIComponent(coinId)}&_=${Date.now()}`;
     try {
-        const res = await fetchWithTimeout(url, { method: 'GET', credentials: 'omit' }, 8000);
+        const res = await fetchWithTimeout(url, { method: 'GET', credentials: 'omit' }, 5000); // Reduced to 5s - non-critical
         const data = res.json ?? JSON.parse(res.text || '{}');
         if (!validateNews(data)) {
             throw new Error('Invalid news data');
         }
         return data;
     } catch (error) {
-        console.error(`Error fetching news for ${coinId}:`, error);
-        throw error;
+        console.warn(`News fetch failed for ${coinId} (non-critical):`, error.message);
+        // Return null instead of throwing - news is optional
+        return null;
     }
 };
 
@@ -230,14 +231,14 @@ const fetchSentiment = async (headlines) => {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ headlines })
-        }, 10000);
+        }, 8000); // Reduced to 8s - non-critical
         const data = res.json ?? JSON.parse(res.text || '{}');
         if (!validateSentiment(data)) {
             throw new Error('Invalid sentiment data');
         }
         return data;
     } catch (error) {
-        console.error('Error fetching sentiment:', error);
+        console.warn('Sentiment fetch failed (non-critical):', error.message);
         return null; // Sentiment is optional, return null on failure
     }
 };
@@ -310,31 +311,36 @@ export const initStore = async () => {
 
         // Fetch news and sentiment in background (non-blocking, async)
         // This happens after UI is rendered to improve perceived load time
-        fetchNews(selectedCoin)
-            .then(newsData => {
-                if (newsData?.headlines) {
-                    return fetchSentiment(newsData.headlines)
-                        .then(sentimentData => {
-                            update(state => ({
-                                ...state,
-                                newsData: newsData ? { ...newsData, sentiment: sentimentData } : null
-                            }));
-                        })
-                        .catch(sentimentErr => {
-                            console.warn('Sentiment fetch failed:', sentimentErr.message);
-                            update(state => ({
-                                ...state,
-                                newsData: newsData ? { ...newsData, sentiment: null } : null
-                            }));
-                        });
-                } else {
-                    update(state => ({ ...state, newsData: null }));
-                }
-            })
-            .catch(newsErr => {
-                console.warn('News fetch failed:', newsErr.message);
-                // Don't update state - keep existing newsData or null
-            });
+        // Use setTimeout to defer even further - don't start immediately
+        setTimeout(() => {
+            fetchNews(selectedCoin)
+                .then(newsData => {
+                    if (newsData?.headlines && newsData.headlines.length > 0) {
+                        // Only fetch sentiment if we have headlines
+                        return fetchSentiment(newsData.headlines)
+                            .then(sentimentData => {
+                                update(state => ({
+                                    ...state,
+                                    newsData: { ...newsData, sentiment: sentimentData }
+                                }));
+                            })
+                            .catch(sentimentErr => {
+                                console.warn('Sentiment fetch failed:', sentimentErr.message);
+                                update(state => ({
+                                    ...state,
+                                    newsData: { ...newsData, sentiment: null }
+                                }));
+                            });
+                    } else {
+                        // No news data - don't update state (keep it as is)
+                        return null;
+                    }
+                })
+                .catch(newsErr => {
+                    console.warn('News fetch failed (non-critical):', newsErr.message);
+                    // Don't update state - news is optional
+                });
+        }, 500); // Defer by 500ms to let critical data render first
 
     } catch (error) {
         console.error('❌ Failed to initialize store:', error);
@@ -433,31 +439,36 @@ export const setCoin = async (coinId) => {
 
         // Fetch news and sentiment in background (non-blocking, async)
         // This happens after UI is updated to improve perceived load time
-        fetchNews(coinId)
-            .then(newsData => {
-                if (newsData?.headlines) {
-                    return fetchSentiment(newsData.headlines)
-                        .then(sentimentData => {
-                            update(state => ({
-                                ...state,
-                                newsData: newsData ? { ...newsData, sentiment: sentimentData } : null
-                            }));
-                        })
-                        .catch(sentimentErr => {
-                            console.warn('Sentiment fetch failed:', sentimentErr.message);
-                            update(state => ({
-                                ...state,
-                                newsData: newsData ? { ...newsData, sentiment: null } : null
-                            }));
-                        });
-                } else {
-                    update(state => ({ ...state, newsData: null }));
-                }
-            })
-            .catch(newsErr => {
-                console.warn('News fetch failed:', newsErr.message);
-                // Don't update state - keep existing newsData or null
-            });
+        // Use setTimeout to defer - don't start immediately
+        setTimeout(() => {
+            fetchNews(coinId)
+                .then(newsData => {
+                    if (newsData?.headlines && newsData.headlines.length > 0) {
+                        // Only fetch sentiment if we have headlines
+                        return fetchSentiment(newsData.headlines)
+                            .then(sentimentData => {
+                                update(state => ({
+                                    ...state,
+                                    newsData: { ...newsData, sentiment: sentimentData }
+                                }));
+                            })
+                            .catch(sentimentErr => {
+                                console.warn('Sentiment fetch failed:', sentimentErr.message);
+                                update(state => ({
+                                    ...state,
+                                    newsData: { ...newsData, sentiment: null }
+                                }));
+                            });
+                    } else {
+                        // No news data - don't update state
+                        return null;
+                    }
+                })
+                .catch(newsErr => {
+                    console.warn('News fetch failed (non-critical):', newsErr.message);
+                    // Don't update state - news is optional
+                });
+        }, 500); // Defer by 500ms to let critical data render first
     } catch (error) {
         console.error(`❌ Error in setCoin for ${coinId}:`, error);
         update(state => ({
