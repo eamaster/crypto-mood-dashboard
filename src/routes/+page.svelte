@@ -89,7 +89,7 @@
 		price: $cryptoStore.priceData.price,
 		change: $cryptoStore.priceData.change24h,
 		symbol: $cryptoStore.priceData.symbol
-	} : { price: 0, change: 0, symbol: 'BTC' };
+	} : null; // null instead of default values - let PriceCard handle loading/error state
 
 	$: moodData = $cryptoStore.newsData?.sentiment ? {
 		badge: getMoodBadge($cryptoStore.newsData.sentiment.category),
@@ -154,11 +154,11 @@
 <section class="dashboard-grid">
 	<!-- Price Card -->
 	<PriceCard 
-		price={priceData.price} 
-		change={priceData.change} 
-		symbol={priceData.symbol}
+		price={priceData?.price || 0} 
+		change={priceData?.change || 0} 
+		symbol={priceData?.symbol || 'BTC'}
 		loading={$cryptoStore.loading}
-		error={$cryptoStore.error}
+		error={$cryptoStore.error || (!$cryptoStore.loading && !priceData ? 'Price data unavailable' : null)}
 	/>
 
 	<!-- Mood Card -->

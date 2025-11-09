@@ -82,7 +82,7 @@ const fetchPrice = async (coinId) => {
     const url = `${WORKER_URL}/price?coin=${encodeURIComponent(coinId)}&_=${Date.now()}`;
     try {
         console.log(`🔍 Fetching price for ${coinId}`);
-        const res = await fetchWithTimeout(url, { method: 'GET', credentials: 'omit' }, 10000); // Reduced to 10s - worker responds in ~2s
+        const res = await fetchWithTimeout(url, { method: 'GET', credentials: 'omit' }, 15000); // 15s timeout for safety
         console.log(`📊 Price response: ${res.status}, headers:`, {
             cache: res.headers.get('cache-control'),
             xcache: res.headers.get('X-Cache-Status'),
@@ -144,7 +144,7 @@ const fetchHistory = async (coinId, days = 7) => {
     const url = `${WORKER_URL}/history?coin=${encodeURIComponent(coinId)}&days=${days}&_=${Date.now()}`;
     try {
         console.log(`🔍 Fetching history for ${coinId}`);
-        const res = await fetchWithTimeout(url, { method: 'GET', credentials: 'omit' }, 15000); // Reduced to 15s - worker responds in ~2s
+        const res = await fetchWithTimeout(url, { method: 'GET', credentials: 'omit' }, 20000); // 20s timeout for safety
         console.log(`📊 History response: ${res.status}, headers:`, {
             cache: res.headers.get('cache-control'),
             xcache: res.headers.get('X-Cache-Status'),
@@ -278,6 +278,27 @@ export const initStore = async () => {
             console.error('History fetch failed:', historyResult.reason?.message || historyResult.reason);
         }
 
+        // Fallback: If price failed but history succeeded, extract latest price from history
+        if (!priceData && historyData && historyData.length > 0) {
+            const latestHistory = historyData[historyData.length - 1];
+            const previousHistory = historyData.length > 1 ? historyData[historyData.length - 2] : latestHistory;
+            const changePercent = previousHistory ? ((latestHistory.y - previousHistory.y) / previousHistory.y) * 100 : 0;
+            
+            // Use coins list from the closure (already fetched above)
+            const coinInfo = coins.find(c => c.id === selectedCoin);
+            const symbol = coinInfo?.symbol || selectedCoin.toUpperCase().substring(0, 3);
+            
+            priceData = {
+                price: latestHistory.y,
+                change24h: changePercent,
+                symbol: symbol,
+                source: 'coincap',
+                timestamp: latestHistory.x.getTime(),
+                fallback: true // Mark as fallback data
+            };
+            console.log('⚠️ Using history data as price fallback:', priceData);
+        }
+
         // Update UI immediately with price/history (non-blocking)
         update(state => ({
             ...state,
@@ -366,14 +387,49 @@ export const setCoin = async (coinId) => {
             console.error('History fetch failed:', historyResult.reason?.message || historyResult.reason);
         }
 
-        // Update UI immediately with price/history (non-blocking)
-        update(state => ({
-            ...state,
-            priceData,
-            historyData,
-            loading: false,
-            error: (!priceData && !historyData) ? 'Failed to load price data' : null
-        }));
+        // Fallback: If price failed but history succeeded, extract latest price from history
+        if (!priceData && historyData && historyData.length > 0) {
+            // We need to access current state to get coins list, so use update with callback
+            let fallbackPriceData = null;
+            update(currentState => {
+                const latestHistory = historyData[historyData.length - 1];
+                const previousHistory = historyData.length > 1 ? historyData[historyData.length - 2] : latestHistory;
+                const changePercent = previousHistory ? ((latestHistory.y - previousHistory.y) / previousHistory.y) * 100 : 0;
+                
+                // Get coin info from current state
+                const coinInfo = currentState.coins?.find(c => c.id === coinId);
+                const symbol = coinInfo?.symbol || coinId.toUpperCase().substring(0, 3);
+                
+                fallbackPriceData = {
+                    price: latestHistory.y,
+                    change24h: changePercent,
+                    symbol: symbol,
+                    source: 'coincap',
+                    timestamp: latestHistory.x.getTime(),
+                    fallback: true // Mark as fallback data
+                };
+                console.log('⚠️ Using history data as price fallback:', fallbackPriceData);
+                
+                // Return updated state
+                return {
+                    ...currentState,
+                    priceData: fallbackPriceData,
+                    historyData,
+                    loading: false,
+                    error: null
+                };
+            });
+            priceData = fallbackPriceData; // Update local variable for news fetch
+        } else {
+            // Update UI immediately with price/history (non-blocking)
+            update(state => ({
+                ...state,
+                priceData,
+                historyData,
+                loading: false,
+                error: (!priceData && !historyData) ? 'Failed to load price data' : null
+            }));
+        }
 
         // Fetch news and sentiment in background (non-blocking, async)
         // This happens after UI is updated to improve perceived load time
