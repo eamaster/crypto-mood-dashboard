@@ -2297,6 +2297,7 @@ export default {
   async fetch(request, env, ctx) {
     // Debug: Check if secrets are accessible
     console.log('🔑 Environment check:');
+    console.log(`- COINCAP_API_KEY: ${env.COINCAP_API_KEY ? 'SET' : 'NOT SET'}`);
     console.log(`- COHERE_API_KEY: ${env.COHERE_API_KEY ? 'SET' : 'NOT SET'}`);
     console.log(`- NEWSAPI_KEY: ${env.NEWSAPI_KEY ? 'SET' : 'NOT SET'}`);
     console.log(`- ENVIRONMENT: ${env.ENVIRONMENT || 'NOT SET'}`);
