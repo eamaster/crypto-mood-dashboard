@@ -2496,9 +2496,11 @@
 		padding-bottom: 1rem; /* Reduce bottom padding */
 		border-radius: 8px;
 		border: 1px solid var(--border-color);
-		height: fit-content;
+		height: 100%; /* Stretch to match left column */
 		min-height: 0; /* Allow panel to shrink */
 		box-sizing: border-box;
+		display: flex;
+		flex-direction: column;
 	}
 
 	.indicators-panel h3 {
