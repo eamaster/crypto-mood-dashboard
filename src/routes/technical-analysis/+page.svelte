@@ -8,6 +8,10 @@
 	import { WORKER_URL } from '../../lib/config.js';
 	import EducationalNotes from '$lib/components/EducationalNotes.svelte';
 
+	// ResizeObserver for patterns panel height
+	let patternsPanel;
+	let resizeObserver;
+
 	let selectedCoin = 'bitcoin';
 	let timeframe = 7;
 	let loading = false;
@@ -104,7 +108,56 @@
 		setTimeout(() => {
 			analyzeTA();
 		}, 100);
+
+		// ResizeObserver fallback for patterns panel height
+		if (browser) {
+			setTimeout(() => {
+				setupPatternsPanelResize();
+			}, 500); // Wait for charts to render
+		}
 	});
+
+	function setupPatternsPanelResize() {
+		if (!browser) return;
+
+		const leftCol = document.querySelector('.ta-chart-column.left, .ta-chart-column:first-child');
+		const rightCol = document.querySelector('.ta-chart-column.right, .indicators-panel');
+		
+		if (!leftCol || !rightCol || !patternsPanel) return;
+
+		function recompute() {
+			try {
+				const leftRect = leftCol.getBoundingClientRect();
+				const panelRect = patternsPanel.getBoundingClientRect();
+				const rightRect = rightCol.getBoundingClientRect();
+				
+				// Calculate available height: left column bottom minus patterns panel top, minus some padding
+				const available = Math.max(100, Math.floor(leftRect.bottom - panelRect.top - 16));
+				
+				// Only set if it's different to avoid unnecessary reflows
+				const currentMaxHeight = patternsPanel.style.maxHeight;
+				const newMaxHeight = `${available}px`;
+				
+				if (currentMaxHeight !== newMaxHeight) {
+					patternsPanel.style.maxHeight = newMaxHeight;
+				}
+			} catch (e) {
+				// Silently handle errors
+			}
+		}
+
+		// Initial compute
+		recompute();
+
+		// Respond to resize and content changes
+		window.addEventListener('resize', recompute);
+		resizeObserver = new ResizeObserver(recompute);
+		resizeObserver.observe(leftCol);
+		resizeObserver.observe(rightCol);
+		if (document.body) {
+			resizeObserver.observe(document.body);
+		}
+	}
 
 	onDestroy(() => {
 		// Clean up charts
@@ -114,6 +167,12 @@
 		if (candleChartInstance) {
 			candleChartInstance.destroy();
 		}
+		
+		// Clean up ResizeObserver
+		if (resizeObserver) {
+			resizeObserver.disconnect();
+		}
+		window.removeEventListener('resize', setupPatternsPanelResize);
 	});
 
 	async function analyzeTA() {
@@ -2110,18 +2169,20 @@
 							</div>
 						{/each}
 						
-						<!-- Patterns -->
+						<!-- Patterns Panel - fills remaining vertical space -->
 						{#if candlePatterns.length > 0}
-							<div class="patterns-section">
-								<h4>🕯️ Patterns Detected ({candlePatterns.length})</h4>
-								<div class="patterns-scroll-container">
-									{#each candlePatterns as pattern}
-										<div class="pattern-entry">
-											<div class="signal {pattern.signal.toLowerCase()}">{pattern.type}</div>
-											<div class="signal-strength">{pattern.strength} Signal</div>
-											<div class="explanation">{pattern.reason}</div>
-										</div>
-									{/each}
+							<div class="patterns-panel" bind:this={patternsPanel}>
+								<div class="patterns-section">
+									<h4>🕯️ Patterns Detected ({candlePatterns.length})</h4>
+									<div class="patterns-list">
+										{#each candlePatterns as pattern}
+											<div class="pattern-entry">
+												<div class="signal {pattern.signal.toLowerCase()}">{pattern.type}</div>
+												<div class="signal-strength">{pattern.strength} Signal</div>
+												<div class="explanation">{pattern.reason}</div>
+											</div>
+										{/each}
+									</div>
 								</div>
 							</div>
 						{/if}
@@ -2510,20 +2571,53 @@
 		line-height: 1.4;
 	}
 
-	.patterns-section {
+	/* Patterns Panel - fills remaining vertical space */
+	.patterns-panel {
+		display: flex;
+		flex-direction: column;
+		flex: 1 1 auto; /* Grow to fill available vertical space */
+		min-height: 0; /* Critical for overflow to work inside flex */
 		margin-top: 1rem;
 		padding-top: 1rem;
 		border-top: 1px solid var(--border-color);
+		box-sizing: border-box;
+	}
+
+	.patterns-section {
+		display: flex;
+		flex-direction: column;
+		flex: 1 1 auto;
+		min-height: 0;
 	}
 
 	.patterns-section h4 {
 		color: var(--text-primary);
 		margin: 0 0 1rem 0;
 		font-size: 1.1rem;
+		flex-shrink: 0; /* Don't shrink the header */
 	}
 
+	/* Patterns list should scroll internally if it overflows */
+	.patterns-list {
+		flex: 1 1 auto;
+		min-height: 0;
+		overflow-y: auto;
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
+		padding-right: 0.5rem; /* Allow space for scrollbar */
+		box-sizing: border-box;
+	}
+
+	/* Remove any previous fixed max-height rules (override) */
+	.patterns-list[style],
+	.patterns-list {
+		max-height: none !important;
+	}
+
+	/* Legacy class name support - remove max-height */
 	.patterns-scroll-container {
-		max-height: 200px;
+		max-height: none !important;
 		overflow-y: auto;
 		display: flex;
 		flex-direction: column;
