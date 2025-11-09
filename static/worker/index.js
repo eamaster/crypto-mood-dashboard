@@ -2654,7 +2654,7 @@ function buildRuleBasedExplanationStrict({ coin, P, R, S, L, U, PERIOD, TF, PV, 
     ? `- If price closes back below SMA(${PERIOD}) ${S} with RSI < 40, risk shifts toward ${L}.`
     : `- If price loses ${L}, risk expands; distance to lower band was ${DL}% and may extend.`;
 
-  return [
+  const explanation = [
     "## Simple Summary",
     `- Price is ${isAboveSMA ? "above" : "below"} SMA(${PERIOD}) ${S}; current price $${P}.`,
     `- RSI ${R} indicates ${mood} conditions.`,
@@ -2683,6 +2683,18 @@ function buildRuleBasedExplanationStrict({ coin, P, R, S, L, U, PERIOD, TF, PV, 
     "",
     "Educational guidance, not financial advice."
   ].join("\n");
+  
+  return {
+    explanation,
+    technicalContext: {
+      currentPrice: Number(P),
+      currentRSI: Number(R),
+      currentSMA: Number(S),
+      smaPeriod: Number(PERIOD),
+      bb: { lower: Number(L), upper: Number(U) },
+      timeframe: Number(TF)
+    }
+  };
 }
 
 /**
@@ -2716,23 +2728,9 @@ function explainPatternFallback(rsi, sma, bb, signals, coin, timeframe, liveValu
   const DU = toFixedStr(distToUpperPct, 2);
   const BW = toFixedStr(bandWidthPct, 2);
   
-  const explanation = buildRuleBasedExplanationStrict({
-    coin, P, R, S, L, U, PERIOD, TF, PV, DL, DU, BW
-  });
-  
-  return jsonResponse({
-    explanation: explanation,
-    method: 'rule-based-fallback',
-    coin: coin,
-    timestamp: new Date().toISOString(),
-    technicalContext: {
-      currentPrice: Number(P),
-      currentRSI: Number(R),
-      currentSMA: Number(S),
-      timeframe: TF,
-      smaPeriod: PERIOD
-    }
-  });
+  // This function is no longer used directly - buildRuleBasedExplanationStrict now returns { explanation, technicalContext }
+  // Keeping for backward compatibility but it should not be called
+  throw new Error('explainPatternFallback is deprecated - use buildRuleBasedExplanationStrict directly');
 }
 
 /**

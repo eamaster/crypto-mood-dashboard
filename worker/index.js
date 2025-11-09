@@ -2654,7 +2654,7 @@ function buildRuleBasedExplanationStrict({ coin, P, R, S, L, U, PERIOD, TF, PV, 
     ? `- If price closes back below SMA(${PERIOD}) ${S} with RSI < 40, risk shifts toward ${L}.`
     : `- If price loses ${L}, risk expands; distance to lower band was ${DL}% and may extend.`;
 
-  return [
+  const explanation = [
     "## Simple Summary",
     `- Price is ${isAboveSMA ? "above" : "below"} SMA(${PERIOD}) ${S}; current price $${P}.`,
     `- RSI ${R} indicates ${mood} conditions.`,
@@ -2683,6 +2683,18 @@ function buildRuleBasedExplanationStrict({ coin, P, R, S, L, U, PERIOD, TF, PV, 
     "",
     "Educational guidance, not financial advice."
   ].join("\n");
+  
+  return {
+    explanation,
+    technicalContext: {
+      currentPrice: Number(P),
+      currentRSI: Number(R),
+      currentSMA: Number(S),
+      smaPeriod: Number(PERIOD),
+      bb: { lower: Number(L), upper: Number(U) },
+      timeframe: Number(TF)
+    }
+  };
 }
 
 /**
