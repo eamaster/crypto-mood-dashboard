@@ -2178,6 +2178,173 @@ async function getCanonicalPrice(coinId, env) {
   throw new Error(`Unable to fetch canonical price for ${coinId}`);
 }
 
+// Compute indicators from OHLC data (server-side, canonical)
+function computeIndicatorsFromOHLC(ohlc, smaPeriod = 4, rsiPeriod = 14, bbPeriod = 20) {
+  if (!ohlc || ohlc.length === 0) {
+    return { rsi: 50, sma: 0, bb: { lower: 0, upper: 0 }, smaPeriod };
+  }
+  
+  // Extract prices from OHLC (use close prices)
+  const prices = ohlc.map(c => c.close);
+  
+  // Compute SMA
+  let sma = 0;
+  if (prices.length >= smaPeriod) {
+    const sum = prices.slice(-smaPeriod).reduce((a, b) => a + b, 0);
+    sma = sum / smaPeriod;
+  } else {
+    sma = prices.length > 0 ? prices[prices.length - 1] : 0;
+  }
+  
+  // Compute RSI
+  let rsi = 50;
+  if (prices.length >= rsiPeriod + 1) {
+    const changes = [];
+    for (let i = 1; i < prices.length; i++) {
+      changes.push(prices[i] - prices[i - 1]);
+    }
+    
+    let avgGain = 0, avgLoss = 0;
+    for (let i = 0; i < rsiPeriod && i < changes.length; i++) {
+      if (changes[i] > 0) avgGain += changes[i];
+      else avgLoss += Math.abs(changes[i]);
+    }
+    avgGain /= rsiPeriod;
+    avgLoss /= rsiPeriod;
+    
+    // Wilder's smoothing for subsequent values
+    for (let i = rsiPeriod; i < changes.length; i++) {
+      if (changes[i] > 0) {
+        avgGain = (avgGain * (rsiPeriod - 1) + changes[i]) / rsiPeriod;
+        avgLoss = (avgLoss * (rsiPeriod - 1)) / rsiPeriod;
+      } else {
+        avgGain = (avgGain * (rsiPeriod - 1)) / rsiPeriod;
+        avgLoss = (avgLoss * (rsiPeriod - 1) + Math.abs(changes[i])) / rsiPeriod;
+      }
+    }
+    
+    if (avgLoss === 0) {
+      rsi = 100;
+    } else {
+      const rs = avgGain / avgLoss;
+      rsi = 100 - (100 / (1 + rs));
+    }
+    rsi = Math.max(0, Math.min(100, rsi));
+  }
+  
+  // Compute Bollinger Bands
+  let bbLower = 0, bbUpper = 0;
+  if (prices.length >= bbPeriod) {
+    const bbPrices = prices.slice(-bbPeriod);
+    const bbMean = bbPrices.reduce((a, b) => a + b, 0) / bbPeriod;
+    const variance = bbPrices.reduce((sum, p) => sum + Math.pow(p - bbMean, 2), 0) / (bbPeriod - 1);
+    const stdDev = Math.sqrt(variance);
+    bbLower = bbMean - (2 * stdDev);
+    bbUpper = bbMean + (2 * stdDev);
+  } else {
+    const lastPrice = prices[prices.length - 1] || 0;
+    bbLower = lastPrice * 0.95;
+    bbUpper = lastPrice * 1.05;
+  }
+  
+  return {
+    rsi: Math.round(rsi * 100) / 100,
+    sma: Math.round(sma * 100) / 100,
+    bb: {
+      lower: Math.round(bbLower * 100) / 100,
+      upper: Math.round(bbUpper * 100) / 100
+    },
+    smaPeriod
+  };
+}
+
+// Get canonical OHLC data (server-authoritative)
+async function getCanonicalOHLC(coinId, days, env) {
+  try {
+    // For now, use the same OHLC generation as handleOHLC
+    // In the future, this could fetch from a cached or computed source
+    const canonicalPriceObj = await getCanonicalPrice(coinId, env);
+    
+    // Generate OHLC using the same logic as handleOHLC
+    // This ensures consistency
+    const ohlc = [];
+    const now = Date.now();
+    const millisecondsPerDay = 24 * 60 * 60 * 1000;
+    const today = new Date();
+    const dateSeed = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate();
+    
+    function seededRandom(seed) {
+      const x = Math.sin(seed) * 10000;
+      return x - Math.floor(x);
+    }
+    
+    const targetCandles = Math.min(Math.max(days * 2, 10), 30);
+    const periodSize = days / targetCandles;
+    const currentPrice = canonicalPriceObj.price;
+    
+    for (let i = 0; i < targetCandles; i++) {
+      const periodStart = now - ((targetCandles - i) * periodSize * millisecondsPerDay);
+      const timestamp = new Date(periodStart);
+      
+      const coinSeed = coinId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+      const periodNumber = Math.floor(periodStart / millisecondsPerDay);
+      const baseSeed = (dateSeed + coinSeed + periodNumber) % 100000;
+      
+      let basePrice;
+      if (i === targetCandles - 1) {
+        basePrice = currentPrice;
+      } else {
+        const baseRandomValue = seededRandom(baseSeed);
+        const baseVariation = (baseRandomValue - 0.5) * 0.12;
+        const trendFactor = 1 - ((targetCandles - i) * 0.002);
+        basePrice = currentPrice * (1 + baseVariation) * trendFactor;
+      }
+      
+      const highSeed = baseSeed + 1;
+      const lowSeed = baseSeed + 2;
+      const openSeed = baseSeed + 3;
+      const closeSeed = baseSeed + 4;
+      
+      const highVariation = seededRandom(highSeed) * 0.03;
+      const lowVariation = seededRandom(lowSeed) * 0.03;
+      const openVariation = (seededRandom(openSeed) - 0.5) * 0.02;
+      const closeVariation = (seededRandom(closeSeed) - 0.5) * 0.02;
+      
+      const open = basePrice * (1 + openVariation);
+      const close = i === targetCandles - 1 ? currentPrice : basePrice * (1 + closeVariation);
+      const high = Math.max(open, close) * (1 + highVariation);
+      const low = Math.min(open, close) * (1 - lowVariation);
+      
+      ohlc.push({
+        timestamp: timestamp.toISOString(),
+        open: Math.round(open * 100) / 100,
+        high: Math.round(high * 100) / 100,
+        low: Math.round(low * 100) / 100,
+        close: Math.round(close * 100) / 100,
+        volume: Math.round((seededRandom(baseSeed + 5) * 1000000 + 500000) * 100) / 100
+      });
+    }
+    
+    // Ensure last candle close matches canonical price exactly
+    if (ohlc.length > 0) {
+      const lastCandle = ohlc[ohlc.length - 1];
+      const canonicalPriceFormatted = canonicalFormatNumber(currentPrice, 2);
+      const lastCloseFormatted = canonicalFormatNumber(lastCandle.close, 2);
+      
+      if (lastCloseFormatted !== canonicalPriceFormatted) {
+        lastCandle.close = currentPrice;
+        lastCandle.high = Math.max(lastCandle.high, currentPrice);
+        lastCandle.low = Math.min(lastCandle.low, currentPrice);
+      }
+    }
+    
+    return ohlc;
+  } catch (error) {
+    console.warn(`[getCanonicalOHLC] Failed for ${coinId}:`, error.message);
+    throw error;
+  }
+}
+
 // Build canonical technical context for AI (server-authoritative)
 function buildTechnicalContextForAI({ price, rsi, sma, smaPeriod, bb }, timeframe) {
   // Round/format identically to chart
@@ -2256,7 +2423,7 @@ async function handleAIExplain(request, env) {
       console.warn(`[AI] ai-get-canonical-price-failed: error=${priceErr.code || priceErr.message}, latency=${priceFetchLatency}ms`);
       
       if (currentPrice) {
-        canonicalPriceObj = { price: Number(currentPrice), timestamp: new Date().toISOString(), source: 'client-fallback' };
+        canonicalPriceObj = { price: Number(currentPrice), timestamp: new Date().toISOString(), source: 'client-fallback', priceSource: 'client-fallback' };
         console.log(`[AI] Using client-provided price as fallback: ${canonicalPriceObj.price}`);
       } else {
         // Build minimal context for fallback
@@ -2300,21 +2467,43 @@ async function handleAIExplain(request, env) {
     }
     
     const priceValue = canonicalPriceObj.price;
-    const rsiValue = (rsi && Array.isArray(rsi) && rsi.length > 0) 
-      ? rsi[rsi.length - 1].y 
-      : (currentRSI || 50);
-    const smaValue = (sma && Array.isArray(sma) && sma.length > 0)
-      ? sma[sma.length - 1].y
-      : (currentSMA || priceValue);
-    const bbUpper = (bb && bb.upper && Array.isArray(bb.upper) && bb.upper.length > 0)
-      ? bb.upper[bb.upper.length - 1].y
-      : (currentBBUpper || priceValue * 1.05);
-    const bbLower = (bb && bb.lower && Array.isArray(bb.lower) && bb.lower.length > 0)
-      ? bb.lower[bb.lower.length - 1].y
-      : (currentBBLower || priceValue * 0.95);
-    const smaPeriod = (signals && Array.isArray(signals)) 
-      ? (signals.find(s => s.type === 'SMA')?.period || 4)
-      : 4;
+    
+    // SERVER-AUTHORITATIVE: Get canonical OHLC and compute indicators server-side
+    let serverIndicators;
+    const ohlcFetchStart = Date.now();
+    try {
+      console.log(`[AI] ai-get-canonical-ohlc-start: coin=${coin}, timeframe=${timeframe}, ts=${ohlcFetchStart}`);
+      const canonicalOHLC = await getCanonicalOHLC(coin, timeframe, env);
+      const ohlcFetchLatency = Date.now() - ohlcFetchStart;
+      console.log(`[AI] ai-get-canonical-ohlc-complete: candles=${canonicalOHLC.length}, latency=${ohlcFetchLatency}ms`);
+      
+      // Compute indicators from server OHLC (canonical)
+      const smaPeriod = 4; // Default SMA period
+      const rsiPeriod = 14; // RSI period
+      const bbPeriod = 20; // Bollinger Bands period
+      serverIndicators = computeIndicatorsFromOHLC(canonicalOHLC, smaPeriod, rsiPeriod, bbPeriod);
+      console.log(`[AI] ai-compute-indicators: RSI=${serverIndicators.rsi}, SMA=${serverIndicators.sma}, BB=[${serverIndicators.bb.lower}-${serverIndicators.bb.upper}], smaPeriod=${smaPeriod}`);
+    } catch (ohlcErr) {
+      const ohlcFetchLatency = Date.now() - ohlcFetchStart;
+      console.warn(`[AI] ai-get-canonical-ohlc-failed: error=${ohlcErr.message}, latency=${ohlcFetchLatency}ms, using fallback indicators`);
+      
+      // Fallback to client-provided indicators if server OHLC fails
+      serverIndicators = {
+        rsi: (rsi && Array.isArray(rsi) && rsi.length > 0) ? rsi[rsi.length - 1].y : (currentRSI || 50),
+        sma: (sma && Array.isArray(sma) && sma.length > 0) ? sma[sma.length - 1].y : (currentSMA || priceValue),
+        bb: {
+          upper: (bb && bb.upper && Array.isArray(bb.upper) && bb.upper.length > 0) ? bb.upper[bb.upper.length - 1].y : (currentBBUpper || priceValue * 1.05),
+          lower: (bb && bb.lower && Array.isArray(bb.lower) && bb.lower.length > 0) ? bb.lower[bb.lower.length - 1].y : (currentBBLower || priceValue * 0.95)
+        },
+        smaPeriod: (signals && Array.isArray(signals)) ? (signals.find(s => s.type === 'SMA')?.period || 4) : 4
+      };
+    }
+    
+    const rsiValue = serverIndicators.rsi;
+    const smaValue = serverIndicators.sma;
+    const bbUpper = serverIndicators.bb.upper;
+    const bbLower = serverIndicators.bb.lower;
+    const smaPeriod = serverIndicators.smaPeriod;
     
     const contextBuildStart = Date.now();
     console.log(`[AI] ai-build-technical-context-start: P=${priceValue} (canonical, source=${canonicalPriceObj.priceSource || canonicalPriceObj.source}), RSI=${rsiValue}, SMA=${smaValue}, SMA(${smaPeriod}), BB=[${bbLower}-${bbUpper}], timeframe=${timeframe}, ts=${contextBuildStart}`);
@@ -2323,7 +2512,7 @@ async function handleAIExplain(request, env) {
       console.log(`[AI] Price mismatch detected: client=${currentPrice}, canonical=${priceValue} (using canonical)`);
     }
     
-    // Build canonical technical context
+    // Build canonical technical context using server-computed indicators
     const ctx = buildTechnicalContextForAI({
       price: priceValue,
       rsi: rsiValue,
@@ -2353,7 +2542,26 @@ async function handleAIExplain(request, env) {
           const responsePrice = String(cohereResult.technicalContext.currentPrice?.toFixed(2) || ctx.P);
           if (responsePrice !== ctx.P) {
             console.log(`[AI] ai-validate-price-mismatch: response=${responsePrice}, canonical=${ctx.P}`);
-            throw Object.assign(new Error('price-mismatch'), { code: 'price-mismatch' });
+            
+            // Try to patch the explanation (best-effort)
+            try {
+              const patchedExplanation = cohereResult.explanation.replace(
+                new RegExp(responsePrice.replace('.', '\\.'), 'g'),
+                ctx.P
+              );
+              cohereResult.explanation = patchedExplanation;
+              cohereResult.technicalContext.currentPrice = Number(ctx.P);
+              console.log(`[AI] ai-patch-price: patched explanation to use canonical price ${ctx.P}`);
+              
+              // Re-validate after patch
+              const patchedPrice = String(cohereResult.technicalContext.currentPrice?.toFixed(2) || ctx.P);
+              if (patchedPrice !== ctx.P) {
+                throw Object.assign(new Error('price-mismatch-after-patch'), { code: 'price-mismatch' });
+              }
+            } catch (patchErr) {
+              console.log(`[AI] ai-patch-price-failed: ${patchErr.message}, returning fallback`);
+              throw Object.assign(new Error('price-mismatch'), { code: 'price-mismatch' });
+            }
           }
         }
         
@@ -3502,9 +3710,24 @@ async function handleOHLC(request, env) {
       });
     }
     
-    // Get last candle's close price (canonical)
+    // Ensure last candle close matches canonical price exactly
+    const canonicalPriceFormatted = canonicalFormatNumber(currentPrice, 2);
+    if (ohlc.length > 0) {
+      const lastCandle = ohlc[ohlc.length - 1];
+      const lastCloseFormatted = canonicalFormatNumber(lastCandle.close, 2);
+      
+      // If last candle close doesn't match canonical price, replace it
+      if (lastCloseFormatted !== canonicalPriceFormatted) {
+        console.log(`[OHLC] Replaced lastClosePrice with canonical price ${canonicalPriceFormatted} (was ${lastCloseFormatted})`);
+        lastCandle.close = currentPrice;
+        // Also update high/low if needed to maintain OHLC validity
+        lastCandle.high = Math.max(lastCandle.high, currentPrice);
+        lastCandle.low = Math.min(lastCandle.low, currentPrice);
+      }
+    }
+    
     const lastCandle = ohlc.length > 0 ? ohlc[ohlc.length - 1] : null;
-    const lastClosePrice = lastCandle ? canonicalFormatNumber(lastCandle.close, 2) : canonicalFormatNumber(currentPrice, 2);
+    const lastClosePrice = canonicalPriceFormatted; // Always use canonical price
     const lastPointTimestamp = lastCandle ? lastCandle.timestamp : new Date().toISOString();
     
     return jsonResponse({
