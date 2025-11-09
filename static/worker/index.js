@@ -1548,24 +1548,41 @@ async function buildSentimentSummary(coin, env, options = { force: false }) {
   // Step 3: Analyze sentiment (Cohere or rule-based)
   let sentimentResult;
   let source = 'rule-based';
+  let confidence = 'normal';
   
   if (headlines.length > 0) {
+    // Check headline freshness and count
+    if (headlines.length < 3) {
+      confidence = 'low';
+      console.log(`[SENT] Low confidence: only ${headlines.length} headlines available`);
+    }
+    
     try {
       if (env.COHERE_API_KEY) {
-        // Try Cohere first
-        const cohereResult = await analyzeSentimentWithCohereV2(headlines, env);
-        sentimentResult = {
-          score: cohereResult.score,
-          label: cohereResult.label,
-          summary: cohereResult.summary
-        };
-        source = 'cohere';
-        console.log(`[buildSentimentSummary] Cohere analysis for ${coin}: score=${sentimentResult.score}, label=${sentimentResult.label}`);
+        // Try Cohere first (with timeout)
+        const cohereTimeout = 8000; // 8s timeout for Cohere sentiment
+        try {
+          const cohereResult = await Promise.race([
+            analyzeSentimentWithCohereV2(headlines, env),
+            new Promise((_, reject) => 
+              setTimeout(() => reject(Object.assign(new Error('cohere-sentiment-timeout'), { code: 'cohere-timeout' })), cohereTimeout)
+            )
+          ]);
+          sentimentResult = {
+            score: cohereResult.score,
+            label: cohereResult.label,
+            summary: cohereResult.summary
+          };
+          source = 'cohere';
+          console.log(`[SENT] Headlines fetched: ${headlines.length}, score=${sentimentResult.score.toFixed(2)}, label=${sentimentResult.label}, source=cohere`);
+        } catch (cohereErr) {
+          console.log(`[SENT] Cohere timeout/failed for ${coin}, using rule-based:`, cohereErr.code || cohereErr.message);
+          throw cohereErr; // Fall through to rule-based
+        }
       } else {
         throw new Error('Cohere API key not available');
       }
     } catch (cohereErr) {
-      console.log(`[buildSentimentSummary] Cohere failed for ${coin}, using rule-based:`, cohereErr.message);
       // Fallback to rule-based
       const ruleResult = computeRuleBasedSentimentScore(headlines);
       sentimentResult = {
@@ -1574,15 +1591,23 @@ async function buildSentimentSummary(coin, env, options = { force: false }) {
         summary: [] // Rule-based doesn't generate summary
       };
       source = 'rule-based';
+      console.log(`[SENT] Headlines fetched: ${headlines.length}, score=${sentimentResult.score.toFixed(2)}, label=${sentimentResult.label}, source=rule-based`);
+    }
+    
+    // If score is exactly 0.5 and confidence is low, treat as low-confidence Neutral
+    if (sentimentResult.score === 0.5 && confidence === 'low') {
+      console.log(`[SENT] Low confidence Neutral: score=0.50 with only ${headlines.length} headlines`);
     }
   } else {
-    // No headlines - return neutral
+    // No headlines - return neutral with low confidence
     sentimentResult = {
       score: 0.5,
       label: 'Neutral',
       summary: []
     };
     source = 'rule-based';
+    confidence = 'low';
+    console.log(`[SENT] No headlines available for ${coin}, using neutral sentiment (confidence=low)`);
   }
   
   // Step 4: Build result object
@@ -1597,7 +1622,8 @@ async function buildSentimentSummary(coin, env, options = { force: false }) {
       publishedAt: h.publishedAt
     })),
     source: source,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    confidence: confidence
   };
   
   // Add summary if available (Cohere)
@@ -1611,12 +1637,13 @@ async function buildSentimentSummary(coin, env, options = { force: false }) {
       ts: Date.now(),
       data: result
     }));
-    console.log(`[buildSentimentSummary] Cached sentiment for ${coin} with source=sentiment_v2`);
+    console.log(`[SENT] Cached sentiment for ${coin} with source=sentiment_v2, score=${result.score.toFixed(2)}, label=${result.label}, confidence=${confidence}`);
   } catch (kvErr) {
-    console.warn(`[buildSentimentSummary] Failed to cache sentiment for ${coin}:`, kvErr.message);
+    console.warn(`[SENT] Failed to cache sentiment for ${coin}:`, kvErr.message);
   }
   
   const latency = Date.now() - startTime;
+  console.log(`[SENT] buildSentimentSummary completed for ${coin} in ${latency}ms`);
   console.log(`[buildSentimentSummary] Built sentiment for ${coin} in ${latency}ms (source: ${source})`);
   
   return {
@@ -2149,7 +2176,7 @@ function buildTechnicalContextForAI({ price, rsi, sma, smaPeriod, bb }, timefram
 
 async function handleAIExplain(request, env) {
   const startTime = Date.now();
-  let aiStatus = 'ok'; // ok | repaired | fallback
+  console.log('[AI] ai-explain-request-start');
   
   try {
     if (request.method !== 'POST') {
@@ -2170,20 +2197,49 @@ async function handleAIExplain(request, env) {
       console.log(`[AI] canonicalPriceObj = { price: ${canonicalPriceObj.price}, ts: ${canonicalPriceObj.timestamp}, source: ${canonicalPriceObj.source} }`);
     } catch (priceErr) {
       console.warn(`[AI] Failed to get canonical price for ${coin}:`, priceErr.message);
-      // Fallback to client-provided currentPrice if available
       if (currentPrice) {
         canonicalPriceObj = { price: Number(currentPrice), timestamp: new Date().toISOString(), source: 'client-fallback' };
         console.log(`[AI] Using client-provided price as fallback: ${canonicalPriceObj.price}`);
       } else {
-        throw new Error('Unable to determine canonical price');
+        // Build minimal context for fallback
+        const minimalCtx = buildTechnicalContextForAI({
+          price: 0,
+          rsi: 50,
+          sma: 0,
+          smaPeriod: 4,
+          bb: { lower: 0, upper: 0 }
+        }, timeframe);
+        const fallback = buildRuleBasedExplanationStrict({
+          coin,
+          P: '0.00',
+          R: '50.00',
+          S: '0.00',
+          L: '0.00',
+          U: '0.00',
+          PERIOD: '4',
+          TF: String(timeframe),
+          PV: '0.00',
+          DL: '0.00',
+          DU: '0.00',
+          BW: '0.00'
+        });
+        return jsonResponse({
+          ok: true,
+          method: 'rule-based-fallback',
+          model: null,
+          explanation: fallback.explanation,
+          technicalContext: fallback.technicalContext,
+          timestamp: new Date().toISOString(),
+          fallbackReason: 'Unable to determine canonical price'
+        }, 200, {
+          'X-AI-Status': 'fallback',
+          'X-AI-Reason': 'price-fetch-failed',
+          'X-Latency-ms': String(Date.now() - startTime)
+        });
       }
     }
     
-    // Use canonical price (server-authoritative)
     const priceValue = canonicalPriceObj.price;
-    
-    // Extract other indicators from client data (validated server-side)
-    // Use latest values from arrays or fallback to provided current values
     const rsiValue = (rsi && Array.isArray(rsi) && rsi.length > 0) 
       ? rsi[rsi.length - 1].y 
       : (currentRSI || 50);
@@ -2196,15 +2252,12 @@ async function handleAIExplain(request, env) {
     const bbLower = (bb && bb.lower && Array.isArray(bb.lower) && bb.lower.length > 0)
       ? bb.lower[bb.lower.length - 1].y
       : (currentBBLower || priceValue * 0.95);
-    
-    // Determine SMA period from signals or default to 4
     const smaPeriod = (signals && Array.isArray(signals)) 
       ? (signals.find(s => s.type === 'SMA')?.period || 4)
       : 4;
     
     console.log(`[AI] Built technicalContext for ${coin}: P=${priceValue} (canonical), RSI=${rsiValue}, SMA=${smaValue}, SMA(${smaPeriod}), BB=[${bbLower}-${bbUpper}], timeframe=${timeframe}`);
     
-    // Price mismatch detection (client vs server)
     if (currentPrice && Math.abs(currentPrice - priceValue) > 0.01) {
       console.log(`[AI] Price mismatch detected: client=${currentPrice}, canonical=${priceValue} (using canonical)`);
     }
@@ -2220,41 +2273,65 @@ async function handleAIExplain(request, env) {
     
     console.log(`[AI] AllowedNumbers: [${ctx.allowedNumbers.join(', ')}]`);
     
-    // Try Cohere AI explanation with strict validation
-    try {
-      const cohereResult = await explainPatternWithCohereStrict(coin, ctx, env);
-      
-      // Check if repair was needed
-      let aiReason = null;
-      if (cohereResult.repaired) {
-        aiStatus = 'repaired';
-        aiReason = cohereResult.violationReason || 'model-violation-repaired';
-        console.log(`[AI] Model output repaired, returning validated explanation`);
+    // Execute explain flow with overall timeout
+    const doExplain = async () => {
+      try {
+        const cohereResult = await explainPatternWithCohereStrict(coin, ctx, env);
+        
+        // Price mismatch guard: verify response price matches canonical
+        if (cohereResult.explanation && cohereResult.technicalContext) {
+          const responsePrice = String(cohereResult.technicalContext.currentPrice?.toFixed(2) || ctx.P);
+          if (responsePrice !== ctx.P) {
+            console.log(`[AI] Price mismatch in response: response=${responsePrice}, canonical=${ctx.P}`);
+            throw Object.assign(new Error('price-mismatch'), { code: 'price-mismatch' });
+          }
+        }
+        
+        return {
+          result: {
+            ok: true,
+            method: 'cohere-chat-api',
+            model: 'command-a-03-2025',
+            explanation: cohereResult.explanation,
+            technicalContext: ctx.technicalContext,
+            timestamp: new Date().toISOString()
+          },
+          status: cohereResult.repaired ? 'repaired' : 'ok',
+          reason: cohereResult.violationReason || null
+        };
+      } catch (error) {
+        console.log(`[AI] Cohere flow failed: ${error.code || error.message}, using fallback`);
+        throw error;
       }
+    };
+    
+    // Race against total timeout
+    let explainResult;
+    try {
+      explainResult = await Promise.race([
+        doExplain(),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(Object.assign(new Error('ai-total-timeout'), { code: 'ai-total-timeout' })), AI_TOTAL_TIMEOUT_MS)
+        )
+      ]);
       
-      const responseHeaders = {
-        'X-AI-Status': aiStatus,
+      // Success path
+      const headers = {
+        'X-AI-Status': explainResult.status,
         'X-Latency-ms': String(Date.now() - startTime)
       };
       
-      if (aiReason) {
-        responseHeaders['X-AI-Reason'] = aiReason;
+      if (explainResult.reason) {
+        headers['X-AI-Reason'] = explainResult.reason;
       }
       
-      return jsonResponse({
-        ok: true,
-        method: 'cohere-chat-api',
-        model: 'command-a-03-2025',
-        explanation: cohereResult.explanation,
-        technicalContext: ctx.technicalContext,
-        timestamp: new Date().toISOString()
-      }, 200, responseHeaders);
+      console.log(`[AI] ai-explain-request-end: status=${explainResult.status}, latency=${Date.now() - startTime}ms`);
+      return jsonResponse(explainResult.result, 200, headers);
       
-    } catch (cohereError) {
-      console.log(`[AI] Cohere failed: ${cohereError.message}, using rule-based fallback`);
-      aiStatus = 'fallback';
+    } catch (error) {
+      // Timeout or error - use fallback
+      console.log(`[AI] ai-fallback-returned: ${error.code || error.message}`);
       
-      // Use deterministic rule-based fallback
       const fallbackResult = buildRuleBasedExplanationStrict({
         coin,
         P: ctx.P,
@@ -2270,29 +2347,62 @@ async function handleAIExplain(request, env) {
         BW: ctx.BW
       });
       
+      const reason = error.code || error.message || 'unknown';
+      const headers = {
+        'X-AI-Status': 'fallback',
+        'X-AI-Reason': String(reason),
+        'X-Latency-ms': String(Date.now() - startTime)
+      };
+      
+      console.log(`[AI] ai-explain-request-end: status=fallback, reason=${reason}, latency=${Date.now() - startTime}ms`);
       return jsonResponse({
         ok: true,
         method: 'rule-based-fallback',
         model: null,
         explanation: fallbackResult.explanation,
-        technicalContext: ctx.technicalContext,
+        technicalContext: fallbackResult.technicalContext,
         timestamp: new Date().toISOString(),
-        fallbackReason: cohereError.message
-      }, 200, {
-        'X-AI-Status': aiStatus,
-        'X-AI-Reason': 'cohere-failed',
-        'X-Latency-ms': String(Date.now() - startTime)
-      });
+        fallbackReason: String(reason)
+      }, 200, headers);
     }
     
   } catch (error) {
-    console.error('[AI] Explanation error:', error);
+    console.error('[AI] ai-explain-error:', error);
+    
+    // Final safety net - always return something
+    const minimalCtx = buildTechnicalContextForAI({
+      price: 0,
+      rsi: 50,
+      sma: 0,
+      smaPeriod: 4,
+      bb: { lower: 0, upper: 0 }
+    }, 7);
+    const fallback = buildRuleBasedExplanationStrict({
+      coin: 'bitcoin',
+      P: '0.00',
+      R: '50.00',
+      S: '0.00',
+      L: '0.00',
+      U: '0.00',
+      PERIOD: '4',
+      TF: '7',
+      PV: '0.00',
+      DL: '0.00',
+      DU: '0.00',
+      BW: '0.00'
+    });
+    
     return jsonResponse({
-      ok: false,
-      error: 'Failed to generate AI explanation',
-      details: error.message
-    }, 500, {
-      'X-AI-Status': 'error',
+      ok: true,
+      method: 'rule-based-fallback',
+      model: null,
+      explanation: fallback.explanation,
+      technicalContext: fallback.technicalContext,
+      timestamp: new Date().toISOString(),
+      fallbackReason: error.message || 'unknown-error'
+    }, 200, {
+      'X-AI-Status': 'fallback',
+      'X-AI-Reason': 'handler-error',
       'X-Latency-ms': String(Date.now() - startTime)
     });
   }
@@ -2524,26 +2634,16 @@ async function classifyMarketMoodWithCohereEnhanced(rsi, smaSignal, bbSignal, pr
 /**
  * Explain trading patterns using Cohere Chat API v2
  */
-// Strict Cohere explanation with validation and repair
-async function explainPatternWithCohereStrict(coin, ctx, env) {
+// Call Cohere model with timeout
+async function callModelWithTimeout(coin, ctx, timeoutMs, env) {
   const { P, R, S, L, U, PERIOD, TF, PV, DL, DU, BW, allowedNumbers } = ctx;
   
-  // Dynamic logic for scenario planning
-  const isAboveSMA = Number(P) >= Number(S);
-  const bullVerb = isAboveSMA ? "holds above" : "reclaims";
-  const bullishLine = `- If price ${bullVerb} SMA(${PERIOD}) ${S} with RSI > 60, look for follow-through toward ${U}.`;
-  const bearishLine = isAboveSMA
-    ? `- If price closes back below SMA(${PERIOD}) ${S} with RSI < 40, risk shifts toward ${L}.`
-    : `- If price loses ${L}, risk expands; distance to lower band was ${DL}% and may extend.`;
-  
-  // Strict system prompt
   const systemPrompt = `You are a crypto technical analysis assistant. STRICT RULES:
 1) You may only use the numeric values listed in 'AllowedNumbers'. Do NOT invent or alter any numbers.
 2) Refer to the moving average exactly as 'SMA(${PERIOD})' where PERIOD is provided. Do NOT use labels like '50-day' or '200-day' unless PERIOD equals those values.
 3) Output must be valid JSON (see schema), and any free-text explanation must not contain numeric values not in AllowedNumbers.
 4) Keep the free-text explanation concise; if you cannot comply, return an object with { "ok": false, "reason": "violation" }.`;
 
-  // Strict user prompt with JSON schema
   const userPrompt = `Context: coin=${coin.toUpperCase()}, timeframe=${TF} days. AllowedNumbers: ${P}, ${R}, ${S}, ${L}, ${U}, ${PERIOD}, ${TF}.
 
 Return a JSON object (no other top-level text) with this exact schema:
@@ -2565,68 +2665,111 @@ Return a JSON object (no other top-level text) with this exact schema:
 
 If you cannot produce compliant output, set ok=false and explain short reason.`;
 
-  console.log('[AI] Sending strict prompt to Cohere with AllowedNumbers...');
+  console.log(`[AI] ai-model-call-start: calling Cohere with timeout=${timeoutMs}ms`);
   
-  // First attempt
-  let response = await fetch('https://api.cohere.com/v2/chat', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${env.COHERE_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'command-a-03-2025',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt }
-      ],
-      temperature: 0.3,
-      max_tokens: 1500
-    }),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   
-  if (!response.ok) {
-    const errorBody = await response.text();
-    console.log('[AI] Cohere API error:', errorBody);
-    throw new Error(`Cohere Chat API error: ${response.status}`);
-  }
-  
-  const data = await response.json();
-  const messageContent = data.message?.content?.[0]?.text || '';
-  
-  // Parse JSON from response
-  let result;
   try {
-    const jsonMatch = messageContent.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      result = JSON.parse(jsonMatch[0]);
-    } else {
-      throw new Error('No JSON object found in response');
-    }
-  } catch (parseError) {
-    console.log('[AI] Failed to parse Cohere response:', parseError.message);
-    throw new Error('Invalid response format from Cohere');
-  }
-  
-  // Validate response
-  if (result.ok === false) {
-    console.log('[AI] Model returned ok=false, reason:', result.reason);
-    throw new Error(`Model compliance failure: ${result.reason || 'unknown'}`);
-  }
-  
-  let explanation = result.explanation || messageContent;
-  let repaired = false;
-  let violationReason = null;
-  
-  // Post-response guard: verify numbers, labels, and logical consistency
-  const violations = validateExplanation(explanation, allowedNumbers, PERIOD, { P, R, S, L, U, PERIOD, TF });
-  
-  if (violations.hasViolations) {
-    console.log(`[AI] Model returned violations -> retrying repair. Violations: ${violations.details.join('; ')}`);
-    violationReason = violations.reason || 'unknown-violation';
+    const response = await Promise.race([
+      fetch('https://api.cohere.com/v2/chat', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${env.COHERE_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'command-a-03-2025',
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt }
+          ],
+          temperature: 0.3,
+          max_tokens: 1500
+        }),
+        signal: controller.signal
+      }),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(Object.assign(new Error('ai-model-timeout'), { code: 'ai-model-timeout' })), timeoutMs)
+      )
+    ]);
     
-    // Repair attempt (single retry)
-    const repairPrompt = `Repair: The previous explanation contained violations:
+    clearTimeout(timeoutId);
+    
+    if (!response.ok) {
+      const errorBody = await response.text();
+      console.log('[AI] Cohere API error:', errorBody);
+      throw Object.assign(new Error(`Cohere Chat API error: ${response.status}`), { code: 'cohere-api-error' });
+    }
+    
+    const data = await response.json();
+    const messageContent = data.message?.content?.[0]?.text || '';
+    
+    // Parse JSON from response
+    let result;
+    try {
+      const jsonMatch = messageContent.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        result = JSON.parse(jsonMatch[0]);
+      } else {
+        throw new Error('No JSON object found in response');
+      }
+    } catch (parseError) {
+      console.log('[AI] Failed to parse Cohere response:', parseError.message);
+      throw Object.assign(new Error('Invalid response format from Cohere'), { code: 'cohere-parse-error' });
+    }
+    
+    if (result.ok === false) {
+      console.log('[AI] Model returned ok=false, reason:', result.reason);
+      throw Object.assign(new Error(`Model compliance failure: ${result.reason || 'unknown'}`), { code: 'model-compliance-failure' });
+    }
+    
+    console.log('[AI] ai-model-call-end: received valid response');
+    return {
+      explanation: result.explanation || messageContent,
+      technicalContext: result.technicalContext || ctx.technicalContext,
+      rawResponse: messageContent
+    };
+    
+  } catch (error) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError' || error.code === 'ai-model-timeout') {
+      console.log(`[AI] ai-model-call-timeout: exceeded ${timeoutMs}ms`);
+      throw Object.assign(new Error('ai-model-timeout'), { code: 'ai-model-timeout' });
+    }
+    throw error;
+  }
+}
+
+// Call repair with timeout (single attempt)
+async function callRepairWithTimeout(coin, ctx, modelResult, violations, timeoutMs, env) {
+  const { P, R, S, PERIOD, TF, allowedNumbers } = ctx;
+  
+  const systemPrompt = `You are a crypto technical analysis assistant. STRICT RULES:
+1) You may only use the numeric values listed in 'AllowedNumbers'. Do NOT invent or alter any numbers.
+2) Refer to the moving average exactly as 'SMA(${PERIOD})' where PERIOD is provided. Do NOT use labels like '50-day' or '200-day' unless PERIOD equals those values.
+3) Output must be valid JSON (see schema), and any free-text explanation must not contain numeric values not in AllowedNumbers.`;
+
+  const userPrompt = `Context: coin=${coin.toUpperCase()}, timeframe=${TF} days. AllowedNumbers: ${P}, ${R}, ${S}, ${ctx.L}, ${ctx.U}, ${PERIOD}, ${TF}.
+
+Return a JSON object (no other top-level text) with this exact schema:
+{
+  "ok": true | false,
+  "method": "cohere-chat-api" | "rule-based-fallback",
+  "model": "<cohere-model-name>",
+  "explanation": "<Markdown string no numbers outside AllowedNumbers>",
+  "technicalContext": {
+     "currentPrice": <number>,
+     "currentRSI": <number>,
+     "currentSMA": <number>,
+     "smaPeriod": <number>,
+     "bb": { "lower": <number>, "upper": <number> },
+     "timeframe": <number>
+  },
+  "timestamp": "<ISO timestamp>"
+}`;
+
+  const repairPrompt = `Repair: The previous explanation contained violations:
 ${violations.details.join('\n')}
 
 CRITICAL CONSISTENCY RULES:
@@ -2643,68 +2786,121 @@ Please rewrite the "explanation" ensuring:
 3. Be logically consistent with the canonical values
 
 Return the same JSON schema. If you cannot comply, set ok=false and reason:"cannot_comply".`;
-    
-    const repairResponse = await fetch('https://api.cohere.com/v2/chat', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${env.COHERE_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'command-a-03-2025',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-          { role: 'assistant', content: messageContent },
-          { role: 'user', content: repairPrompt }
-        ],
-        temperature: 0.2, // Lower temperature for repair
-        max_tokens: 1500
-      }),
-    });
-    
-    if (repairResponse.ok) {
-      const repairData = await repairResponse.json();
-      const repairContent = repairData.message?.content?.[0]?.text || '';
-      
-      try {
-        const repairJsonMatch = repairContent.match(/\{[\s\S]*\}/);
-        if (repairJsonMatch) {
-          const repairResult = JSON.parse(repairJsonMatch[0]);
-          if (repairResult.ok !== false && repairResult.explanation) {
-            explanation = repairResult.explanation;
-            
-            // Re-validate repaired explanation
-            const repairViolations = validateExplanation(explanation, allowedNumbers, PERIOD, { P, R, S, L, U, PERIOD, TF });
-            if (!repairViolations.hasViolations) {
-              repaired = true;
-              console.log('[AI] Repair successful, explanation now compliant and logically consistent');
-              violationReason = null; // Clear reason on successful repair
-            } else {
-              console.log(`[AI] Repair failed -> returning rule-based fallback. Violations: ${repairViolations.details.join('; ')}`);
-              violationReason = repairViolations.reason || 'repair-failed';
-              throw new Error('Repair attempt still contains violations');
-            }
-          } else {
-            throw new Error('Repair response marked as non-compliant');
-          }
-        } else {
-          throw new Error('No JSON found in repair response');
-        }
-      } catch (repairError) {
-        console.log('[AI] Repair parsing failed:', repairError.message);
-        throw new Error('Repair attempt failed');
-      }
-    } else {
-      throw new Error('Repair request failed');
-    }
-  }
+
+  console.log(`[AI] ai-repair-start: attempting repair with timeout=${timeoutMs}ms`);
   
-  return {
-    explanation,
-    repaired,
-    violationReason
-  };
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  
+  try {
+    const response = await Promise.race([
+      fetch('https://api.cohere.com/v2/chat', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${env.COHERE_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'command-a-03-2025',
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+            { role: 'assistant', content: modelResult.rawResponse || modelResult.explanation },
+            { role: 'user', content: repairPrompt }
+          ],
+          temperature: 0.2,
+          max_tokens: 1500
+        }),
+        signal: controller.signal
+      }),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(Object.assign(new Error('ai-repair-timeout'), { code: 'ai-repair-timeout' })), timeoutMs)
+      )
+    ]);
+    
+    clearTimeout(timeoutId);
+    
+    if (!response.ok) {
+      throw Object.assign(new Error(`Repair request failed: ${response.status}`), { code: 'repair-api-error' });
+    }
+    
+    const data = await response.json();
+    const repairContent = data.message?.content?.[0]?.text || '';
+    
+    const repairJsonMatch = repairContent.match(/\{[\s\S]*\}/);
+    if (!repairJsonMatch) {
+      throw Object.assign(new Error('No JSON found in repair response'), { code: 'repair-parse-error' });
+    }
+    
+    const repairResult = JSON.parse(repairJsonMatch[0]);
+    if (repairResult.ok === false || !repairResult.explanation) {
+      throw Object.assign(new Error('Repair response marked as non-compliant'), { code: 'repair-non-compliant' });
+    }
+    
+    console.log('[AI] ai-repair-end: received repair response');
+    return {
+      explanation: repairResult.explanation,
+      technicalContext: repairResult.technicalContext || ctx.technicalContext
+    };
+    
+  } catch (error) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError' || error.code === 'ai-repair-timeout') {
+      console.log(`[AI] ai-repair-timeout: exceeded ${timeoutMs}ms`);
+      throw Object.assign(new Error('ai-repair-timeout'), { code: 'ai-repair-timeout' });
+    }
+    throw error;
+  }
+}
+
+// Strict Cohere explanation with validation and repair (refactored with timeouts)
+async function explainPatternWithCohereStrict(coin, ctx, env) {
+  const { P, R, S, L, U, PERIOD, TF, allowedNumbers } = ctx;
+  
+  try {
+    // Step 1: Call model with timeout
+    console.log('[AI] ai-model-call-start');
+    const modelResult = await callModelWithTimeout(coin, ctx, AI_MODEL_TIMEOUT_MS, env);
+    console.log('[AI] ai-model-call-end');
+    
+    // Step 2: Validate response
+    console.log('[AI] ai-validate: checking for violations');
+    const violations = validateExplanation(modelResult.explanation, allowedNumbers, PERIOD, { P, R, S, L, U, PERIOD, TF });
+    
+    if (!violations.hasViolations) {
+      console.log('[AI] ai-validate: passed validation');
+      return {
+        explanation: modelResult.explanation,
+        repaired: false,
+        violationReason: null
+      };
+    }
+    
+    // Step 3: Repair attempt (single shot)
+    console.log(`[AI] ai-repair-start: violations detected: ${violations.details.join('; ')}`);
+    const repairResult = await callRepairWithTimeout(coin, ctx, modelResult, violations, AI_REPAIR_TIMEOUT_MS, env);
+    console.log('[AI] ai-repair-end');
+    
+    // Step 4: Re-validate repaired response
+    const repairViolations = validateExplanation(repairResult.explanation, allowedNumbers, PERIOD, { P, R, S, L, U, PERIOD, TF });
+    
+    if (!repairViolations.hasViolations) {
+      console.log('[AI] ai-validate: repair passed validation');
+      return {
+        explanation: repairResult.explanation,
+        repaired: true,
+        violationReason: violations.reason || 'model-violation-repaired'
+      };
+    }
+    
+    // Repair failed validation - throw to trigger fallback
+    console.log(`[AI] ai-repair-failed: repair still has violations: ${repairViolations.details.join('; ')}`);
+    throw Object.assign(new Error('Repair attempt still contains violations'), { code: 'repair-failed' });
+    
+  } catch (error) {
+    console.log(`[AI] explainPatternWithCohereStrict error: ${error.code || error.message}`);
+    throw error; // Re-throw to trigger fallback in handleAIExplain
+  }
 }
 
 // Validate explanation for disallowed numbers, labels, and logical consistency

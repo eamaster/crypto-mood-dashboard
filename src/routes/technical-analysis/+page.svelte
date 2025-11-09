@@ -1548,23 +1548,33 @@
 		};
 	}
 
+	let aiExplanationPending = false;
+	const AI_CLIENT_TIMEOUT_MS = 14000; // 14s client timeout (1s less than server 15s)
+	
 	async function getAIExplanation() {
 		if (!currentAnalysisData) {
 			alert('Please run an analysis first!');
 			return;
 		}
 		
+		if (aiExplanationPending) {
+			console.log('🧠 AI explanation already in progress, skipping duplicate request');
+			return;
+		}
+		
+		aiExplanationPending = true;
+		
 		try {
 			console.log('🧠 Generating comprehensive AI explanation...');
 			
-					// Show loading state
-		aiExplanationData = {
-			explanation: `<div style="display: flex; align-items: center; gap: 10px; color: var(--text-secondary);">
-				<div style="width: 20px; height: 20px; border: 2px solid var(--border-color); border-top: 2px solid var(--accent-color); border-radius: 50%; animation: spin 1s linear infinite;"></div>
-				Generating comprehensive AI explanation...
-			</div>`,
-			method: 'loading'
-		};
+			// Show loading state
+			aiExplanationData = {
+				explanation: `<div style="display: flex; align-items: center; gap: 10px; color: var(--text-secondary);">
+					<div style="width: 20px; height: 20px; border: 2px solid var(--border-color); border-top: 2px solid var(--accent-color); border-radius: 50%; animation: spin 1s linear infinite;"></div>
+					Generating comprehensive AI explanation...
+				</div>`,
+				method: 'loading'
+			};
 			
 			// Extract current values from analysis data
 			const latestPriceData = currentAnalysisData.priceData;
@@ -1582,38 +1592,43 @@
 			console.log(`📊 LIVE Chart Values - Price: $${liveCurrentPrice.toLocaleString()}, RSI: ${liveCurrentRSI.toFixed(1)}, SMA: $${liveCurrentSMA.toLocaleString()}, BB: [$${liveCurrentBBLower.toLocaleString()}-$${liveCurrentBBUpper.toLocaleString()}]`);
 			
 			// Prepare comprehensive data for analysis
-			const comprehensiveData = {
-				...currentAnalysisData,
+			const explanationPayload = {
+				rsi: currentAnalysisData.rsi,
+				sma: currentAnalysisData.sma,
+				bb: currentAnalysisData.bb,
+				signals: currentAnalysisData.signals || [],
+				coin: currentAnalysisData.coin,
+				timeframe: currentAnalysisData.timeframe,
+				priceData: currentAnalysisData.priceData,
 				currentPrice: liveCurrentPrice,
 				currentRSI: liveCurrentRSI,
 				currentSMA: liveCurrentSMA,
 				currentBBUpper: liveCurrentBBUpper,
-				currentBBLower: liveCurrentBBLower
+				currentBBLower: liveCurrentBBLower,
+				candlePatterns: currentAnalysisData.candlePatterns || []
 			};
 			
-			// Try API first, then use comprehensive local analysis as fallback
+			// Create AbortController for client timeout
+			const controller = new AbortController();
+			const timeoutId = setTimeout(() => {
+				controller.abort();
+			}, AI_CLIENT_TIMEOUT_MS);
+			
 			try {
-				const explanationPayload = {
-					rsi: currentAnalysisData.rsi,
-					sma: currentAnalysisData.sma,
-					bb: currentAnalysisData.bb,
-					signals: currentAnalysisData.signals || [],
-					coin: currentAnalysisData.coin,
-					timeframe: currentAnalysisData.timeframe,
-					priceData: currentAnalysisData.priceData,
-					currentPrice: liveCurrentPrice,
-					currentRSI: liveCurrentRSI,
-					currentSMA: liveCurrentSMA,
-					currentBBUpper: liveCurrentBBUpper,
-					currentBBLower: liveCurrentBBLower,
-					candlePatterns: currentAnalysisData.candlePatterns || []
-				};
+				// Try API with client timeout
+				const response = await Promise.race([
+					fetch(`${WORKER_URL}/ai-explain`, {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify(explanationPayload),
+						signal: controller.signal
+					}),
+					new Promise((_, reject) => 
+						setTimeout(() => reject(new Error('Client timeout: AI explanation took too long')), AI_CLIENT_TIMEOUT_MS)
+					)
+				]);
 				
-				const response = await fetch(`${WORKER_URL}/ai-explain`, {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify(explanationPayload)
-				});
+				clearTimeout(timeoutId);
 				
 				if (response.ok) {
 					const aiExplanation = await response.json();
@@ -1641,8 +1656,27 @@
 				} else {
 					throw new Error(`API error: ${response.status}`);
 				}
-			} catch (apiError) {
-				console.log('🧠 AI API not available, using comprehensive local analysis:', apiError.message);
+			} catch (fetchError) {
+				clearTimeout(timeoutId);
+				
+				// Check if it's a timeout or abort
+				if (fetchError.name === 'AbortError' || fetchError.message.includes('timeout')) {
+					console.warn('🧠 AI explanation timed out on client side');
+					aiExplanationData = {
+						explanation: `<div style="color: var(--warning-color);">
+							<strong>⏱️ AI Explanation Timed Out</strong><br>
+							The AI explanation request took longer than expected. The server may still be processing your request.<br><br>
+							<em>Please try again in a moment, or refer to the technical indicators above for manual analysis.</em>
+						</div>`,
+						method: 'timeout',
+						aiStatus: 'timeout',
+						aiReason: 'client-timeout'
+					};
+					return;
+				}
+				
+				// Other errors - use local fallback
+				console.log('🧠 AI API not available, using comprehensive local analysis:', fetchError.message);
 				
 				// Use comprehensive local analysis (matching original HTML)
 				const localExplanation = generateLocalExplanation();
@@ -1658,8 +1692,12 @@
 					${error.message}<br><br>
 					<em>Try again in a moment or refer to the technical indicators above for manual analysis.</em>
 				</div>`,
-				method: 'error'
+				method: 'error',
+				aiStatus: 'error',
+				aiReason: error.message
 			};
+		} finally {
+			aiExplanationPending = false;
 		}
 	}
 
@@ -1911,7 +1949,9 @@
 				{loading ? '🔄 Analyzing...' : '🔍 Analyze'}
 			</button>
 			{#if aiAnalysis}
-				<button on:click={getAIExplanation}>🤖 AI Explain This</button>
+				<button on:click={getAIExplanation} disabled={aiExplanationPending}>
+					{aiExplanationPending ? '⏳ Generating...' : '🤖 AI Explain This'}
+				</button>
 			{/if}
 		</div>
 	</section>
