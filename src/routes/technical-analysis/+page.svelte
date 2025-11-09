@@ -6,6 +6,7 @@
 	import 'chartjs-adapter-date-fns';
 	import { format } from 'date-fns';
 	import { WORKER_URL } from '../../lib/config.js';
+	import EducationalNotes from '$lib/components/EducationalNotes.svelte';
 
 	let selectedCoin = 'bitcoin';
 	let timeframe = 7;
@@ -2083,6 +2084,15 @@
 						<div class="error">{candleError}</div>
 					{/if}
 				</div>
+
+				<!-- Educational Notes Card -->
+				{#if indicators.length > 0 || candlePatterns.length > 0}
+					<EducationalNotes 
+						priceDataLength={priceData.length}
+						indicatorsLength={indicators.length}
+						candlePatternsLength={candlePatterns.length}
+					/>
+				{/if}
 			</div>
 
 			<div class="ta-chart-column right">
@@ -2116,40 +2126,7 @@
 							</div>
 						{/if}
 						
-						<!-- Enhanced Educational Notes -->
-						{#if indicators.length > 0 || candlePatterns.length > 0}
-							<div class="educational-notes">
-								<h4>📚 Educational Notes</h4>
-								<div class="educational-content">
-									<strong>• Adaptive Indicators:</strong> Period lengths automatically adjust based on available data ({priceData.length} points)
-									<br><strong>• Technical Indicators:</strong> 
-									{#if indicators.length > 0}
-										RSI, SMA, and Bollinger Bands with adaptive periods provide quantitative analysis
-									{:else}
-										RSI, SMA, and Bollinger Bands provide quantitative analysis
-									{/if}
-									<br><strong>• Pattern Analysis:</strong> 
-									{#if candlePatterns.length > 0}
-										{candlePatterns.length} patterns detected for market psychology insights
-									{:else}
-										Visual patterns reveal market psychology and sentiment
-									{/if}
-									<br><strong>• Combined Analysis:</strong> Both technical indicators and price patterns work together for comprehensive market analysis
-									<br><strong>• Pattern Recognition:</strong> Doji = indecision, Hammer = potential reversal, Strong candles = momentum, Continuation = trend persistence
-									<br><strong>• AI Enhancement:</strong> Machine learning analyzes all signals together for improved accuracy and market mood classification
-									<br><strong>• Data Quality:</strong> 
-									{#if priceData.length >= 50}
-										Optimal data quality (50+ points) - Highly reliable indicators
-									{:else if priceData.length >= 20}
-										Reliable data quality (20+ points) - Good indicator accuracy
-									{:else if priceData.length >= 10}
-										Sufficient data quality (10+ points) - Moderate indicator reliability
-									{:else}
-										Limited data quality (&lt;10 points) - Use with caution, consider longer timeframe
-									{/if}
-								</div>
-							</div>
-						{/if}
+						<!-- Educational Notes moved to left column - removed from sidebar -->
 					</div>
 				</div>
 			</div>
