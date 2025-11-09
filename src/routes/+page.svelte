@@ -92,10 +92,22 @@
 	} : null; // null instead of default values - let PriceCard handle loading/error state
 
 	$: moodData = $cryptoStore.newsData?.sentiment ? {
-		badge: getMoodBadge($cryptoStore.newsData.sentiment.category),
-		score: $cryptoStore.newsData.sentiment.score,
-		source: `Based on ${$cryptoStore.newsData.headlines?.length || 0} headlines`
-	} : { badge: '😐 Neutral', score: 0, source: 'Based on 0 headlines' };
+		badge: getMoodBadge($cryptoStore.newsData.sentiment.category || $cryptoStore.newsData.sentiment.label?.toLowerCase() || 'neutral'),
+		score: $cryptoStore.newsData.sentiment.score || 0.5,
+		source: `Based on ${$cryptoStore.newsData.sentiment.count || $cryptoStore.newsData.headlines?.length || 0} headlines`,
+		category: $cryptoStore.newsData.sentiment.category || $cryptoStore.newsData.sentiment.label?.toLowerCase() || 'neutral',
+		sentimentSource: $cryptoStore.newsData.sentiment.source || null,
+		timestamp: $cryptoStore.newsData.sentiment.timestamp || null,
+		isStale: false // TODO: Extract from response headers if available
+	} : { 
+		badge: '😐 Neutral', 
+		score: 0.5, 
+		source: 'Based on 0 headlines',
+		category: 'neutral',
+		sentimentSource: null,
+		timestamp: null,
+		isStale: false
+	};
 
 	$: newsItems = $cryptoStore.newsData?.headlines || [];
 	$: historyData = $cryptoStore.historyData || [];
@@ -167,7 +179,10 @@
 		score={moodData.score}
 		source={moodData.source}
 		newsItems={newsItems}
-		category={sentimentData?.category || 'neutral'}
+		category={moodData.category}
+		sentimentSource={moodData.sentimentSource}
+		timestamp={moodData.timestamp}
+		isStale={moodData.isStale}
 		loading={$cryptoStore.loading}
 		error={$cryptoStore.error}
 	/>

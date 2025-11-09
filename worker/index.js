@@ -1246,6 +1246,466 @@ function getDateDaysAgo(days) {
   return date.toISOString().split('T')[0];
 }
 
+// Helper: Fetch news headlines for a coin (extracted from handleNews for reuse)
+async function fetchNewsForCoin(coinName, env) {
+  if (!env.NEWSAPI_KEY) {
+    throw new Error('NewsAPI key not configured');
+  }
+  
+  const coinInfo = SUPPORTED_COINS[coinName];
+  const searchTerms = [
+    coinInfo ? coinInfo.name : coinName,
+    coinInfo ? coinInfo.symbol : coinName.toUpperCase(),
+    'cryptocurrency',
+    'crypto'
+  ];
+  
+  const searchQuery = searchTerms.join(' OR ');
+  
+  const response = await fetch(
+    `https://newsapi.org/v2/everything?q=${encodeURIComponent(searchQuery)}&language=en&sortBy=publishedAt&pageSize=20&from=${getDateDaysAgo(1)}&apiKey=${env.NEWSAPI_KEY}`,
+    {
+      headers: {
+        'User-Agent': 'Crypto-Mood-Dashboard/1.0',
+        'Accept': 'application/json'
+      }
+    }
+  );
+  
+  if (!response.ok) {
+    let errorDetails = '';
+    try {
+      const errorBody = await response.json();
+      errorDetails = errorBody.message ? ` - ${errorBody.message}` : '';
+    } catch (e) {
+      errorDetails = ` - HTTP ${response.status}`;
+    }
+    throw new Error(`NewsAPI error: ${response.status}${errorDetails}`);
+  }
+  
+  const data = await response.json();
+  
+  if (data.status === 'error') {
+    throw new Error(`NewsAPI error: ${data.message}`);
+  }
+  
+  if (!validateNewsData(data)) {
+    throw new Error('Invalid news data structure received');
+  }
+  
+  // Filter and clean news data
+  const headlines = data.articles
+    .filter(article => 
+      article.title && 
+      article.title.length > 10 && 
+      !article.title.includes('[Removed]') &&
+      !article.title.toLowerCase().includes('advertisement')
+    )
+    .map(article => ({
+      title: article.title.trim(),
+      description: article.description ? article.description.trim() : '',
+      url: article.url,
+      source: article.source?.name || 'Unknown',
+      publishedAt: article.publishedAt,
+      author: article.author || null,
+      urlToImage: article.urlToImage || null,
+    }))
+    .slice(0, 15); // Limit to 15 best headlines
+  
+  return headlines;
+}
+
+// Rule-based sentiment aggregator: compute score from headlines using lexicon
+function computeRuleBasedSentimentScore(headlines) {
+  const positiveKeywords = [
+    'soar', 'surge', 'rally', 'bull', 'bullish', 'gain', 'gains', 'rise', 'rising', 
+    'up', 'high', 'moon', 'pump', 'breakthrough', 'adoption', 'institutional',
+    'investment', 'buy', 'support', 'strong', 'growth', 'increase', 'positive',
+    'optimistic', 'confidence', 'milestone', 'achievement', 'success', 'upgrade',
+    'partnership', 'expansion', 'innovation', 'record', 'all-time', 'ath',
+    'boost', 'advance', 'progress', 'breakthrough', 'approve', 'approved'
+  ];
+  
+  const negativeKeywords = [
+    'crash', 'dump', 'bear', 'bearish', 'fall', 'drop', 'down', 'low', 'dip',
+    'decline', 'plunge', 'collapse', 'sell', 'selling', 'pressure', 'fear',
+    'panic', 'concern', 'worry', 'risk', 'volatile', 'uncertainty', 'loss',
+    'losses', 'negative', 'pessimistic', 'regulation', 'ban', 'hack', 'attack',
+    'fraud', 'scam', 'bubble', 'warning', 'alert', 'crisis', 'problem',
+    'reject', 'rejected', 'struggle', 'suffer', 'plummet', 'crash'
+  ];
+  
+  if (!headlines || headlines.length === 0) {
+    return { score: 0.5, label: 'Neutral' }; // Neutral if no headlines
+  }
+  
+  let totalScore = 0;
+  let validHeadlines = 0;
+  
+  headlines.forEach(headline => {
+    const text = ((headline.title || headline) + ' ' + (headline.description || '')).toLowerCase();
+    const positiveMatches = positiveKeywords.filter(keyword => text.includes(keyword)).length;
+    const negativeMatches = negativeKeywords.filter(keyword => text.includes(keyword)).length;
+    
+    // Calculate headline score: -1 to +1
+    let headlineScore = 0;
+    if (positiveMatches > negativeMatches) {
+      headlineScore = Math.min(1, 0.3 + (positiveMatches - negativeMatches) * 0.2);
+    } else if (negativeMatches > positiveMatches) {
+      headlineScore = Math.max(-1, -0.3 - (negativeMatches - positiveMatches) * 0.2);
+    }
+    
+    totalScore += headlineScore;
+    validHeadlines++;
+  });
+  
+  if (validHeadlines === 0) {
+    return { score: 0.5, label: 'Neutral' };
+  }
+  
+  // Average score and normalize to 0..1 (map -1→0, 0→0.5, 1→1)
+  const avgScore = totalScore / validHeadlines;
+  const normalizedScore = (avgScore + 1) / 2; // Map from [-1,1] to [0,1]
+  
+  // Determine label
+  let label = 'Neutral';
+  if (normalizedScore >= 0.66) {
+    label = 'Bullish';
+  } else if (normalizedScore <= 0.33) {
+    label = 'Bearish';
+  }
+  
+  return {
+    score: Math.round(normalizedScore * 100) / 100,
+    label: label
+  };
+}
+
+// Cohere Chat v2: analyze sentiment with strict prompt for mood score 0..1
+async function analyzeSentimentWithCohereV2(headlines, env) {
+  if (!env.COHERE_API_KEY) {
+    throw new Error('Cohere API key not configured');
+  }
+  
+  const textsToAnalyze = headlines
+    .map(h => h.title || h)
+    .filter(text => text && text.length > 5)
+    .slice(0, 10);
+  
+  if (textsToAnalyze.length === 0) {
+    throw new Error('No valid headlines to analyze');
+  }
+  
+  // Strict prompt: return mood score 0..1 and label
+  const prompt = `Analyze the sentiment of these cryptocurrency news headlines and determine the overall market mood.
+
+Headlines:
+${textsToAnalyze.map((text, i) => `${i + 1}. ${text}`).join('\n')}
+
+Respond with ONLY a JSON object in this exact format:
+{
+  "score": 0.75,
+  "label": "Bullish",
+  "summary": ["Point 1", "Point 2", "Point 3"]
+}
+
+Rules:
+- "score": A number between 0 and 1 where:
+  - 0.0-0.33 = Bearish (negative sentiment)
+  - 0.34-0.66 = Neutral (mixed/neutral sentiment)
+  - 0.67-1.0 = Bullish (positive sentiment)
+- "label": One of "Bullish", "Neutral", or "Bearish"
+- "summary": Exactly 3 bullet points (strings) summarizing key sentiment drivers
+- Use ONLY the provided headlines - do not make up data
+- Return ONLY the JSON object, no other text`;
+
+  const response = await fetch('https://api.cohere.com/v2/chat', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${env.COHERE_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'command-a-03-2025',
+      messages: [
+        {
+          role: 'user',
+          content: prompt
+        }
+      ],
+      temperature: 0.3,
+      max_tokens: 500
+    }),
+  });
+  
+  if (!response.ok) {
+    let errorDetails = '';
+    try {
+      const errorBody = await response.text();
+      errorDetails = errorBody;
+    } catch (e) {
+      errorDetails = `HTTP ${response.status}`;
+    }
+    throw new Error(`Cohere API error: ${response.status} - ${errorDetails}`);
+  }
+  
+  const data = await response.json();
+  const messageContent = data.message?.content?.[0]?.text || '';
+  
+  // Extract JSON from response
+  let result;
+  try {
+    const jsonMatch = messageContent.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      result = JSON.parse(jsonMatch[0]);
+    } else {
+      throw new Error('No JSON object found in response');
+    }
+  } catch (parseError) {
+    console.log('Failed to parse Cohere response:', parseError.message);
+    throw new Error('Invalid response format from Cohere');
+  }
+  
+  // Validate and normalize result
+  if (typeof result.score !== 'number' || result.score < 0 || result.score > 1) {
+    throw new Error('Invalid score in Cohere response');
+  }
+  
+  return {
+    score: Math.round(result.score * 100) / 100,
+    label: result.label || (result.score >= 0.66 ? 'Bullish' : result.score <= 0.33 ? 'Bearish' : 'Neutral'),
+    summary: Array.isArray(result.summary) ? result.summary : []
+  };
+}
+
+// Canonical sentiment summary builder with KV caching
+const SENT_TTL_MS = 60 * 1000; // 60 seconds fresh TTL
+const STALE_MAX_MS = 10 * 60 * 1000; // 10 minutes max stale
+
+async function buildSentimentSummary(coin, env, options = { force: false }) {
+  const startTime = Date.now();
+  const cacheKey = `sentiment_${coin}`;
+  
+  // Step 1: Check KV cache (if not forcing)
+  if (!options.force) {
+    try {
+      const cachedRaw = await env.RATE_LIMIT_KV.get(cacheKey);
+      if (cachedRaw) {
+        const cached = JSON.parse(cachedRaw);
+        const age = Date.now() - cached.ts;
+        
+        if (age < SENT_TTL_MS && cached.data && cached.data.source === 'sentiment_v2') {
+          console.log(`[buildSentimentSummary] Returning cached sentiment for ${coin} (age: ${Math.floor(age/1000)}s)`);
+          return {
+            result: cached.data,
+            fromCache: true,
+            age: Math.floor(age / 1000)
+          };
+        }
+      }
+    } catch (e) {
+      console.warn(`[buildSentimentSummary] Cache read failed for ${coin}:`, e.message);
+    }
+  }
+  
+  // Step 2: Fetch latest headlines
+  let headlines = [];
+  try {
+    headlines = await fetchNewsForCoin(coin, env);
+    console.log(`[buildSentimentSummary] Fetched ${headlines.length} headlines for ${coin}`);
+  } catch (newsErr) {
+    console.warn(`[buildSentimentSummary] News fetch failed for ${coin}:`, newsErr.message);
+    
+    // Try to return stale cache if available and within stale window
+    if (!options.force) {
+      try {
+        const staleRaw = await env.RATE_LIMIT_KV.get(cacheKey);
+        if (staleRaw) {
+          const stale = JSON.parse(staleRaw);
+          const staleAge = Date.now() - stale.ts;
+          
+          if (staleAge < STALE_MAX_MS && stale.data && stale.data.source === 'sentiment_v2') {
+            console.log(`[buildSentimentSummary] Returning stale cache for ${coin} (age: ${Math.floor(staleAge/1000)}s) due to news fetch failure`);
+            return {
+              result: stale.data,
+              fromCache: true,
+              staleIfError: true,
+              age: Math.floor(staleAge / 1000)
+            };
+          }
+        }
+      } catch (e) {
+        // Ignore stale cache read errors
+      }
+    }
+    
+    // If no stale cache and no headlines, use empty headlines (will result in neutral)
+    if (headlines.length === 0) {
+      console.warn(`[buildSentimentSummary] No headlines available for ${coin}, using neutral sentiment`);
+    }
+  }
+  
+  // Step 3: Analyze sentiment (Cohere or rule-based)
+  let sentimentResult;
+  let source = 'rule-based';
+  
+  if (headlines.length > 0) {
+    try {
+      if (env.COHERE_API_KEY) {
+        // Try Cohere first
+        const cohereResult = await analyzeSentimentWithCohereV2(headlines, env);
+        sentimentResult = {
+          score: cohereResult.score,
+          label: cohereResult.label,
+          summary: cohereResult.summary
+        };
+        source = 'cohere';
+        console.log(`[buildSentimentSummary] Cohere analysis for ${coin}: score=${sentimentResult.score}, label=${sentimentResult.label}`);
+      } else {
+        throw new Error('Cohere API key not available');
+      }
+    } catch (cohereErr) {
+      console.log(`[buildSentimentSummary] Cohere failed for ${coin}, using rule-based:`, cohereErr.message);
+      // Fallback to rule-based
+      const ruleResult = computeRuleBasedSentimentScore(headlines);
+      sentimentResult = {
+        score: ruleResult.score,
+        label: ruleResult.label,
+        summary: [] // Rule-based doesn't generate summary
+      };
+      source = 'rule-based';
+    }
+  } else {
+    // No headlines - return neutral
+    sentimentResult = {
+      score: 0.5,
+      label: 'Neutral',
+      summary: []
+    };
+    source = 'rule-based';
+  }
+  
+  // Step 4: Build result object
+  const result = {
+    coin: coin,
+    score: sentimentResult.score,
+    label: sentimentResult.label,
+    count: headlines.length,
+    headlines: headlines.slice(0, 10).map(h => ({
+      title: h.title,
+      url: h.url,
+      publishedAt: h.publishedAt
+    })),
+    source: source,
+    timestamp: new Date().toISOString()
+  };
+  
+  // Add summary if available (Cohere)
+  if (sentimentResult.summary && sentimentResult.summary.length > 0) {
+    result.summary = sentimentResult.summary;
+  }
+  
+  // Step 5: Store to KV with source:'sentiment_v2'
+  try {
+    await env.RATE_LIMIT_KV.put(cacheKey, JSON.stringify({
+      ts: Date.now(),
+      data: result
+    }));
+    console.log(`[buildSentimentSummary] Cached sentiment for ${coin} with source=sentiment_v2`);
+  } catch (kvErr) {
+    console.warn(`[buildSentimentSummary] Failed to cache sentiment for ${coin}:`, kvErr.message);
+  }
+  
+  const latency = Date.now() - startTime;
+  console.log(`[buildSentimentSummary] Built sentiment for ${coin} in ${latency}ms (source: ${source})`);
+  
+  return {
+    result: result,
+    fromCache: false,
+    age: 0,
+    latency: latency
+  };
+}
+
+// Canonical sentiment summary endpoint handler
+async function handleSentimentSummary(request, env) {
+  const startTime = Date.now();
+  try {
+    const url = new URL(request.url);
+    const coin = url.searchParams.get('coin') || 'bitcoin';
+    const force = isForceRefresh(request.url) || url.searchParams.get('force') === 'true';
+    
+    console.log(`[handleSentimentSummary] Request for ${coin}, force=${force}`);
+    
+    // Build sentiment summary
+    const buildResult = await buildSentimentSummary(coin, env, { force });
+    
+    const result = buildResult.result;
+    const fromCache = buildResult.fromCache;
+    const staleIfError = buildResult.staleIfError || false;
+    const age = buildResult.age || 0;
+    const latency = buildResult.latency || (Date.now() - startTime);
+    
+    // Prepare headers
+    const cacheStatus = staleIfError ? 'stale-if-error' : (fromCache ? 'fresh' : 'miss');
+    const extraHeaders = {
+      'Cache-Control': 's-maxage=60, max-age=0, must-revalidate',
+      'X-Cache-Status': cacheStatus,
+      'X-DO-Age': String(age),
+      'X-Latency-ms': String(latency)
+    };
+    
+    // Add Warning header for stale-if-error
+    if (staleIfError) {
+      extraHeaders['Warning'] = '110 - stale response used due to upstream error';
+    }
+    
+    return jsonResponse(result, 200, extraHeaders);
+    
+  } catch (error) {
+    console.error('[handleSentimentSummary] Error:', error);
+    
+    // Try to return stale cache on error (if not forcing)
+    const url = new URL(request.url);
+    const coin = url.searchParams.get('coin') || 'bitcoin';
+    const force = isForceRefresh(request.url) || url.searchParams.get('force') === 'true';
+    
+    if (!force) {
+      try {
+        const cacheKey = `sentiment_${coin}`;
+        const staleRaw = await env.RATE_LIMIT_KV.get(cacheKey);
+        if (staleRaw) {
+          const stale = JSON.parse(staleRaw);
+          const staleAge = Date.now() - stale.ts;
+          
+          if (staleAge < STALE_MAX_MS && stale.data && stale.data.source === 'sentiment_v2') {
+            console.log(`[handleSentimentSummary] Returning stale cache for ${coin} due to error (age: ${Math.floor(staleAge/1000)}s)`);
+            return jsonResponse(stale.data, 200, {
+              'Cache-Control': 's-maxage=60, max-age=0, must-revalidate',
+              'X-Cache-Status': 'stale-if-error',
+              'X-DO-Age': String(Math.floor(staleAge / 1000)),
+              'X-Latency-ms': String(Date.now() - startTime),
+              'Warning': '110 - stale response used due to upstream error'
+            });
+          }
+        }
+      } catch (staleErr) {
+        // Ignore stale cache errors, fall through to error response
+      }
+    }
+    
+    // No stale cache available - return error
+    return jsonResponse({
+      error: 'Failed to fetch sentiment',
+      details: error.message,
+      code: 'sentiment_fetch_failed'
+    }, 502, {
+      'X-Cache-Status': 'miss',
+      'X-Latency-ms': String(Date.now() - startTime)
+    });
+  }
+}
+
 async function handleSentiment(request, env) {
   try {
     if (request.method !== 'POST') {
@@ -2518,6 +2978,9 @@ export default {
           
         case '/sentiment':
           return await handleSentiment(request, env);
+          
+        case '/api/sentiment-summary':
+          return await handleSentimentSummary(request, env);
           
         case '/ai-analysis':
           return await handleAIAnalysis(request, env);

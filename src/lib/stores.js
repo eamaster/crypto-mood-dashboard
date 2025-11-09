@@ -224,23 +224,62 @@ const fetchNews = async (coinId) => {
     }
 };
 
-const fetchSentiment = async (headlines) => {
-    const url = `${WORKER_URL}/sentiment`;
-    try {
-        const res = await fetchWithTimeout(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ headlines })
-        }, 8000); // Reduced to 8s - non-critical
-        const data = res.json ?? JSON.parse(res.text || '{}');
-        if (!validateSentiment(data)) {
-            throw new Error('Invalid sentiment data');
+// Per-coin sentiment cache (for throttling)
+const _lastSentimentFetch = new Map(); // coinId -> { ts, data }
+
+// Fetch canonical sentiment summary from worker
+const fetchSentimentSummary = async (coinId, force = false) => {
+    // Throttle: return cached if within THROTTLE_MS (unless force)
+    if (!force && _lastSentimentFetch.has(coinId)) {
+        const cached = _lastSentimentFetch.get(coinId);
+        const age = Date.now() - cached.ts;
+        if (age < THROTTLE_MS) {
+            console.log(`[fetchSentimentSummary] Returning throttled cache for ${coinId} (age: ${Math.floor(age/1000)}s)`);
+            return cached.data;
         }
+    }
+    
+    const url = `${WORKER_URL}/api/sentiment-summary?coin=${encodeURIComponent(coinId)}${force ? '&force=true' : ''}&_=${Date.now()}`;
+    try {
+        console.log(`🔍 Fetching sentiment summary for ${coinId}`);
+        const res = await fetchWithTimeout(url, {
+            method: 'GET',
+            cache: 'no-store'
+        }, 10000); // 10s timeout for sentiment
+        const data = res.json ?? JSON.parse(res.text || '{}');
+        
+        // Validate response structure
+        if (!data || typeof data.score !== 'number' || !data.label) {
+            throw new Error('Invalid sentiment summary data');
+        }
+        
+        // Cache result
+        _lastSentimentFetch.set(coinId, { ts: Date.now(), data });
+        console.log(`✅ Sentiment summary received for ${coinId}: score=${data.score}, label=${data.label}, source=${data.source}`);
         return data;
     } catch (error) {
-        console.warn('Sentiment fetch failed (non-critical):', error.message);
+        console.warn('Sentiment summary fetch failed (non-critical):', error.message);
+        // Return cached data if available (even if stale)
+        if (_lastSentimentFetch.has(coinId)) {
+            const cached = _lastSentimentFetch.get(coinId);
+            console.log(`⚠️ Using cached sentiment for ${coinId} due to fetch failure`);
+            return cached.data;
+        }
         return null; // Sentiment is optional, return null on failure
     }
+};
+
+// Throttled wrapper for sentiment fetch
+const fetchSentimentThrottled = async (coinId, force = false) => {
+    return fetchSentimentSummary(coinId, force);
+};
+
+// Legacy fetchSentiment for backward compatibility (maps to new endpoint)
+const fetchSentiment = async (headlines) => {
+    // This is deprecated - use fetchSentimentSummary instead
+    // But keep for backward compatibility with old code
+    console.warn('fetchSentiment(headlines) is deprecated - use fetchSentimentSummary(coinId) instead');
+    return null;
 };
 
 // Function to initialize the store (optimized for fast initial load)
@@ -309,36 +348,36 @@ export const initStore = async () => {
             error: (!priceData && !historyData) ? 'Failed to load price data' : null
         }));
 
-        // Fetch news and sentiment in background (non-blocking, async)
+        // Fetch sentiment in background (non-blocking, async) using canonical endpoint
         // This happens after UI is rendered to improve perceived load time
         // Use setTimeout to defer even further - don't start immediately
         setTimeout(() => {
-            fetchNews(selectedCoin)
-                .then(newsData => {
-                    if (newsData?.headlines && newsData.headlines.length > 0) {
-                        // Only fetch sentiment if we have headlines
-                        return fetchSentiment(newsData.headlines)
-                            .then(sentimentData => {
-                                update(state => ({
-                                    ...state,
-                                    newsData: { ...newsData, sentiment: sentimentData }
-                                }));
-                            })
-                            .catch(sentimentErr => {
-                                console.warn('Sentiment fetch failed:', sentimentErr.message);
-                                update(state => ({
-                                    ...state,
-                                    newsData: { ...newsData, sentiment: null }
-                                }));
-                            });
-                    } else {
-                        // No news data - don't update state (keep it as is)
-                        return null;
+            // Fetch sentiment summary directly (includes headlines)
+            fetchSentimentThrottled(selectedCoin, false)
+                .then(sentimentData => {
+                    if (sentimentData) {
+                        // Update state with sentiment data
+                        // Note: sentimentData includes headlines, so we can use it for newsData too
+                        update(state => ({
+                            ...state,
+                            newsData: {
+                                headlines: sentimentData.headlines || [],
+                                sentiment: {
+                                    score: sentimentData.score,
+                                    category: sentimentData.label.toLowerCase(),
+                                    label: sentimentData.label,
+                                    source: sentimentData.source,
+                                    count: sentimentData.count,
+                                    timestamp: sentimentData.timestamp,
+                                    summary: sentimentData.summary || []
+                                }
+                            }
+                        }));
                     }
                 })
-                .catch(newsErr => {
-                    console.warn('News fetch failed (non-critical):', newsErr.message);
-                    // Don't update state - news is optional
+                .catch(sentimentErr => {
+                    console.warn('Sentiment fetch failed (non-critical):', sentimentErr.message);
+                    // Don't update state - sentiment is optional
                 });
         }, 500); // Defer by 500ms to let critical data render first
 
@@ -437,36 +476,36 @@ export const setCoin = async (coinId) => {
             }));
         }
 
-        // Fetch news and sentiment in background (non-blocking, async)
+        // Fetch sentiment in background (non-blocking, async) using canonical endpoint
         // This happens after UI is updated to improve perceived load time
         // Use setTimeout to defer - don't start immediately
         setTimeout(() => {
-            fetchNews(coinId)
-                .then(newsData => {
-                    if (newsData?.headlines && newsData.headlines.length > 0) {
-                        // Only fetch sentiment if we have headlines
-                        return fetchSentiment(newsData.headlines)
-                            .then(sentimentData => {
-                                update(state => ({
-                                    ...state,
-                                    newsData: { ...newsData, sentiment: sentimentData }
-                                }));
-                            })
-                            .catch(sentimentErr => {
-                                console.warn('Sentiment fetch failed:', sentimentErr.message);
-                                update(state => ({
-                                    ...state,
-                                    newsData: { ...newsData, sentiment: null }
-                                }));
-                            });
-                    } else {
-                        // No news data - don't update state
-                        return null;
+            // Fetch sentiment summary directly (includes headlines) with force=true for user-initiated coin change
+            fetchSentimentThrottled(coinId, true)
+                .then(sentimentData => {
+                    if (sentimentData) {
+                        // Update state with sentiment data
+                        // Note: sentimentData includes headlines, so we can use it for newsData too
+                        update(state => ({
+                            ...state,
+                            newsData: {
+                                headlines: sentimentData.headlines || [],
+                                sentiment: {
+                                    score: sentimentData.score,
+                                    category: sentimentData.label.toLowerCase(),
+                                    label: sentimentData.label,
+                                    source: sentimentData.source,
+                                    count: sentimentData.count,
+                                    timestamp: sentimentData.timestamp,
+                                    summary: sentimentData.summary || []
+                                }
+                            }
+                        }));
                     }
                 })
-                .catch(newsErr => {
-                    console.warn('News fetch failed (non-critical):', newsErr.message);
-                    // Don't update state - news is optional
+                .catch(sentimentErr => {
+                    console.warn('Sentiment fetch failed (non-critical):', sentimentErr.message);
+                    // Don't update state - sentiment is optional
                 });
         }, 500); // Defer by 500ms to let critical data render first
     } catch (error) {
