@@ -2137,9 +2137,20 @@ async function handleAIExplain(request, env) {
       const cohereResult = await explainPatternWithCohereStrict(coin, ctx, env);
       
       // Check if repair was needed
+      let aiReason = null;
       if (cohereResult.repaired) {
         aiStatus = 'repaired';
+        aiReason = cohereResult.violationReason || 'model-violation-repaired';
         console.log(`[AI] Model output repaired, returning validated explanation`);
+      }
+      
+      const responseHeaders = {
+        'X-AI-Status': aiStatus,
+        'X-Latency-ms': String(Date.now() - startTime)
+      };
+      
+      if (aiReason) {
+        responseHeaders['X-AI-Reason'] = aiReason;
       }
       
       return jsonResponse({
@@ -2149,10 +2160,7 @@ async function handleAIExplain(request, env) {
         explanation: cohereResult.explanation,
         technicalContext: ctx.technicalContext,
         timestamp: new Date().toISOString()
-      }, 200, {
-        'X-AI-Status': aiStatus,
-        'X-Latency-ms': String(Date.now() - startTime)
-      });
+      }, 200, responseHeaders);
       
     } catch (cohereError) {
       console.log(`[AI] Cohere failed: ${cohereError.message}, using rule-based fallback`);
@@ -2180,9 +2188,11 @@ async function handleAIExplain(request, env) {
         model: null,
         explanation: fallbackResult.explanation,
         technicalContext: ctx.technicalContext,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        fallbackReason: cohereError.message
       }, 200, {
         'X-AI-Status': aiStatus,
+        'X-AI-Reason': 'cohere-failed',
         'X-Latency-ms': String(Date.now() - startTime)
       });
     }
@@ -2518,15 +2528,33 @@ If you cannot produce compliant output, set ok=false and explain short reason.`;
   
   let explanation = result.explanation || messageContent;
   let repaired = false;
+  let violationReason = null;
   
-  // Post-response guard: verify numbers and labels
-  const violations = validateExplanation(explanation, allowedNumbers, PERIOD);
+  // Post-response guard: verify numbers, labels, and logical consistency
+  const violations = validateExplanation(explanation, allowedNumbers, PERIOD, { P, R, S, L, U, PERIOD, TF });
   
   if (violations.hasViolations) {
-    console.log(`[AI] Model returned disallowed numbers/labels -> retrying repair. Violations: ${violations.details.join(', ')}`);
+    console.log(`[AI] Model returned violations -> retrying repair. Violations: ${violations.details.join('; ')}`);
+    violationReason = violations.reason || 'unknown-violation';
     
     // Repair attempt (single retry)
-    const repairPrompt = `Repair: The previous JSON contained numeric values or labels not in AllowedNumbers. Please rewrite the "explanation" and ensure it uses ONLY the provided AllowedNumbers: ${allowedNumbers.join(', ')} and the label SMA(${PERIOD}). Return the same JSON schema. Do not change numbers. If you cannot comply, set ok=false and reason:"cannot_comply".`;
+    const repairPrompt = `Repair: The previous explanation contained violations:
+${violations.details.join('\n')}
+
+CRITICAL CONSISTENCY RULES:
+- If price ${P} >= SMA ${S}, say "above SMA(${PERIOD})" NOT "below"
+- If price ${P} < SMA ${S}, say "below SMA(${PERIOD})" NOT "above"
+- If RSI ${R} >= 60, baseline leans bearish (potential reversal down)
+- If RSI ${R} <= 40, baseline leans bullish (potential reversal up)
+- If RSI ${R} >= 70, it is "overbought" NOT "oversold"
+- If RSI ${R} <= 30, it is "oversold" NOT "overbought"
+
+Please rewrite the "explanation" ensuring:
+1. Use ONLY AllowedNumbers: ${allowedNumbers.join(', ')}
+2. Use label SMA(${PERIOD}) exactly
+3. Be logically consistent with the canonical values
+
+Return the same JSON schema. If you cannot comply, set ok=false and reason:"cannot_comply".`;
     
     const repairResponse = await fetch('https://api.cohere.com/v2/chat', {
       method: 'POST',
@@ -2559,12 +2587,14 @@ If you cannot produce compliant output, set ok=false and explain short reason.`;
             explanation = repairResult.explanation;
             
             // Re-validate repaired explanation
-            const repairViolations = validateExplanation(explanation, allowedNumbers, PERIOD);
+            const repairViolations = validateExplanation(explanation, allowedNumbers, PERIOD, { P, R, S, L, U, PERIOD, TF });
             if (!repairViolations.hasViolations) {
               repaired = true;
-              console.log('[AI] Repair successful, explanation now compliant');
+              console.log('[AI] Repair successful, explanation now compliant and logically consistent');
+              violationReason = null; // Clear reason on successful repair
             } else {
-              console.log(`[AI] Repair failed -> returning rule-based fallback. Violations: ${repairViolations.details.join(', ')}`);
+              console.log(`[AI] Repair failed -> returning rule-based fallback. Violations: ${repairViolations.details.join('; ')}`);
+              violationReason = repairViolations.reason || 'repair-failed';
               throw new Error('Repair attempt still contains violations');
             }
           } else {
@@ -2584,21 +2614,23 @@ If you cannot produce compliant output, set ok=false and explain short reason.`;
   
   return {
     explanation,
-    repaired
+    repaired,
+    violationReason
   };
 }
 
-// Validate explanation for disallowed numbers and labels
-function validateExplanation(explanation, allowedNumbers, period) {
+// Validate explanation for disallowed numbers, labels, and logical consistency
+function validateExplanation(explanation, allowedNumbers, period, ctx) {
   const violations = {
     hasViolations: false,
-    details: []
+    details: [],
+    reason: null // For X-AI-Reason header
   };
   
   // Build set of allowed numeric strings (strip commas for comparison)
   const allowedNumsSet = new Set(allowedNumbers.map(n => String(n).replace(/,/g, '')));
   
-  // Extract all numbers from explanation
+  // 1. Validate numeric tokens
   const numberMatches = explanation.match(/\b\d{1,3}(?:,\d{3})*(?:\.\d+)?\b/g) || [];
   
   for (const match of numberMatches) {
@@ -2606,14 +2638,81 @@ function validateExplanation(explanation, allowedNumbers, period) {
     if (!allowedNumsSet.has(cleaned)) {
       violations.hasViolations = true;
       violations.details.push(`disallowed number: ${match}`);
+      if (!violations.reason) violations.reason = 'disallowed-numbers';
     }
   }
   
-  // Check for forbidden labels (e.g., "200-day SMA" when period is not 200)
+  // 2. Validate labels (e.g., "200-day SMA" when period is not 200)
   const forbiddenLabelPattern = new RegExp(`(?:\\b|^)(?:50|100|200)(?:[-\\s]day)?\\s+SMA|\\bMA(?:50|100|200)\\b`, 'i');
   if (forbiddenLabelPattern.test(explanation) && period !== '50' && period !== '100' && period !== '200') {
     violations.hasViolations = true;
     violations.details.push(`forbidden label (not SMA(${period}))`);
+    if (!violations.reason) violations.reason = 'label-violation';
+  }
+  
+  // 3. Logical consistency checks (only if ctx provided)
+  if (ctx) {
+    const price = Number(ctx.P);
+    const sma = Number(ctx.S);
+    const rsi = Number(ctx.R);
+    const lowerBand = Number(ctx.L);
+    const upperBand = Number(ctx.U);
+    
+    // 3a. Price vs SMA consistency
+    const priceAboveSMA = price >= sma;
+    const textSaysAbove = /(?:price|Price)\s+(?:is\s+)?(?:above|stays\s+above|holds\s+above|breaks\s+above)/i.test(explanation);
+    const textSaysBelow = /(?:price|Price)\s+(?:is\s+)?(?:below|falls\s+below|drops\s+below|closes\s+below)/i.test(explanation);
+    
+    if (priceAboveSMA && textSaysBelow && !textSaysAbove) {
+      violations.hasViolations = true;
+      violations.details.push(`logical contradiction: price ${ctx.P} >= SMA ${ctx.S} but text says 'below SMA'`);
+      if (!violations.reason) violations.reason = 'logical-contradiction';
+    }
+    if (!priceAboveSMA && textSaysAbove && !textSaysBelow) {
+      violations.hasViolations = true;
+      violations.details.push(`logical contradiction: price ${ctx.P} < SMA ${ctx.S} but text says 'above SMA'`);
+      if (!violations.reason) violations.reason = 'logical-contradiction';
+    }
+    
+    // 3b. RSI consistency (baseline leaning vs RSI value)
+    // RSI <= 30 = oversold (bullish signal), RSI >= 70 = overbought (bearish signal)
+    const textSaysBullishLeaning = /baseline\s+leaning:\s*bullish|leaning:\s*bullish/i.test(explanation);
+    const textSaysBearishLeaning = /baseline\s+leaning:\s*bearish|leaning:\s*bearish/i.test(explanation);
+    
+    // Determine expected leaning based on canonical rules
+    let expectedLeaning = 'neutral';
+    if (rsi >= 60) expectedLeaning = 'bearish'; // High RSI suggests potential reversal down
+    else if (rsi <= 40) expectedLeaning = 'bullish'; // Low RSI suggests potential reversal up
+    else if (priceAboveSMA) expectedLeaning = 'bullish'; // Price above SMA
+    else expectedLeaning = 'neutral';
+    
+    // Check for contradictions
+    if (expectedLeaning === 'bearish' && textSaysBullishLeaning) {
+      violations.hasViolations = true;
+      violations.details.push(`logical contradiction: RSI ${ctx.R} (>= 60) should lean bearish but text says bullish`);
+      if (!violations.reason) violations.reason = 'logical-contradiction';
+    }
+    if (expectedLeaning === 'bullish' && textSaysBearishLeaning) {
+      violations.hasViolations = true;
+      violations.details.push(`logical contradiction: RSI ${ctx.R} (<= 40) should lean bullish but text says bearish`);
+      if (!violations.reason) violations.reason = 'logical-contradiction';
+    }
+    
+    // 3c. RSI mood consistency
+    const rsiMood = rsi >= 70 ? 'overbought' : rsi <= 30 ? 'oversold' : 'neutral';
+    const textSaysOverbought = /overbought/i.test(explanation);
+    const textSaysOversold = /oversold/i.test(explanation);
+    
+    if (rsiMood === 'overbought' && textSaysOversold) {
+      violations.hasViolations = true;
+      violations.details.push(`logical contradiction: RSI ${ctx.R} is overbought but text says oversold`);
+      if (!violations.reason) violations.reason = 'logical-contradiction';
+    }
+    if (rsiMood === 'oversold' && textSaysOverbought) {
+      violations.hasViolations = true;
+      violations.details.push(`logical contradiction: RSI ${ctx.R} is oversold but text says overbought`);
+      if (!violations.reason) violations.reason = 'logical-contradiction';
+    }
   }
   
   return violations;

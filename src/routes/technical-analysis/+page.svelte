@@ -1618,8 +1618,10 @@
 				if (response.ok) {
 					const aiExplanation = await response.json();
 					const aiStatus = response.headers.get('X-AI-Status') || 'unknown';
+					const aiReason = response.headers.get('X-AI-Reason') || null;
 					console.log('🧠 AI API Explanation result:', aiExplanation);
 					console.log('🧠 AI Status:', aiStatus);
+					if (aiReason) console.log('🧠 AI Reason:', aiReason);
 					
 					// Only render if ok === true or method === 'rule-based-fallback'
 					if (aiExplanation.ok === true || aiExplanation.method === 'rule-based-fallback') {
@@ -1628,7 +1630,9 @@
 							method: aiExplanation.method || 'cohere-chat-api',
 							technicalContext: aiExplanation.technicalContext,
 							timestamp: aiExplanation.timestamp,
-							aiStatus: aiStatus
+							aiStatus: aiStatus,
+							aiReason: aiReason,
+							fallbackReason: aiExplanation.fallbackReason || null
 						};
 						return;
 					} else {
@@ -2089,9 +2093,11 @@
 								 aiExplanationData.method === 'comprehensive-local-analysis' ? 'AI-Enhanced Local' : 'Unknown'}
 							</span>
 							{#if aiExplanationData.aiStatus === 'repaired'}
-								<span class="ai-status-badge" style="font-size: 0.75rem; color: #ff9800; margin-left: 0.5rem; padding: 0.2rem 0.5rem; background: #fff3cd; border-radius: 12px;">⚠️ Repaired</span>
+								<span class="ai-status-badge" style="font-size: 0.75rem; color: #ff9800; margin-left: 0.5rem; padding: 0.2rem 0.5rem; background: #fff3cd; border-radius: 12px;" title={aiExplanationData.aiReason || 'Model violation repaired'}>⚠️ Repaired</span>
 							{:else if aiExplanationData.aiStatus === 'fallback'}
-								<span class="ai-status-badge" style="font-size: 0.75rem; color: #9e9e9e; margin-left: 0.5rem; padding: 0.2rem 0.5rem; background: #f5f5f5; border-radius: 12px;">📊 Fallback</span>
+								<span class="ai-status-badge" style="font-size: 0.75rem; color: #9e9e9e; margin-left: 0.5rem; padding: 0.2rem 0.5rem; background: #f5f5f5; border-radius: 12px;" title={aiExplanationData.aiReason || aiExplanationData.fallbackReason || 'Using rule-based fallback'}>📊 Fallback</span>
+							{:else if aiExplanationData.aiStatus === 'ok'}
+								<span class="ai-status-badge" style="font-size: 0.75rem; color: #4caf50; margin-left: 0.5rem; padding: 0.2rem 0.5rem; background: #e8f5e9; border-radius: 12px;">✅ Validated</span>
 							{/if}
 						</h3>
 						<div class="ai-explanation-content">
