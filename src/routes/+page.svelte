@@ -201,6 +201,5 @@
 		coinId={$cryptoStore.selectedCoin}
 		loading={$cryptoStore.loading}
 		error={$cryptoStore.error}
-		largePatch={largePatch}
 	/>
 </section>

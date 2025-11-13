@@ -10,23 +10,11 @@
 	export let coinId = 'bitcoin';
 	export let error = null;
 	export let loading = false;
-	export let largePatch = null; // { diffAbs, diffPct, priceSource } when patch is large
 	
 	let chartCanvas;
 	let chartInstance = null;
 	let chartContainer;
 	let isChartReady = false;
-	
-	// Helper function to format price for display
-	function formatPrice(price) {
-		if (typeof price !== 'number' || isNaN(price)) return '$0.00';
-		return price.toLocaleString('en-US', { 
-			style: 'currency', 
-			currency: 'USD',
-			minimumFractionDigits: 2, 
-			maximumFractionDigits: 2 
-		});
-	}
 	
 	// Debug logging for props and DOM
 	function logState(phase) {
@@ -266,12 +254,6 @@
 			</div>
 		</div>
 	{:else}
-		{#if largePatch}
-			<div class="patch-banner">
-				Chart updated to live price (adjusted {formatPrice(largePatch.diffAbs)}). Data provenance: {largePatch.priceSource}
-			</div>
-		{/if}
-		
 		<div class="chart-container" bind:this={chartContainer}>
 			<canvas bind:this={chartCanvas} id="mainChart"></canvas>
 		</div>
@@ -323,17 +305,6 @@
 </div>
 
 <style>
-	.patch-banner {
-		background-color: var(--warning-bg, #fff3cd);
-		border: 1px solid var(--warning-border, #ffc107);
-		border-radius: 4px;
-		padding: 0.5rem 1rem;
-		margin-bottom: 1rem;
-		font-size: 0.875rem;
-		color: var(--warning-text, #856404);
-		text-align: center;
-	}
-	
 	.chart-container {
 		height: 400px;
 		margin: 1rem 0;
