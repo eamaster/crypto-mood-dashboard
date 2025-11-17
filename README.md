@@ -102,8 +102,6 @@ Contributions are welcome! Please see [DEVELOPER.md](./DEVELOPER.md) for develop
 
 - **Live Demo**: https://hesam.me/crypto-mood-dashboard/
 - **GitHub Repository**: https://github.com/eamaster/crypto-mood-dashboard
-- **Worker URL**: https://crypto-mood-dashboard-production.smah0085.workers.dev
-
 ---
 
 **Status**: ✅ Production Ready  
