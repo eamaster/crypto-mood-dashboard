@@ -267,13 +267,6 @@
 					{/if}
 				</button>
 				<button
-					class="btn-icon-mobile"
-					title="Search"
-					aria-label="Search"
-				>
-					🔍
-				</button>
-				<button
 					class="btn-icon-mobile mobile-more-button"
 					on:click={toggleMobileMenu}
 					title="More actions"
