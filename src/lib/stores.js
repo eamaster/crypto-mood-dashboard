@@ -29,11 +29,11 @@ const LARGE_PATCH_PCT_THRESHOLD = 1.0;    // banner threshold: > 1.0%
 
 // Helper function to format price for display
 function formatPriceForLog(price) {
-    return Number(price).toLocaleString('en-US', { 
-        style: 'currency', 
+    return Number(price).toLocaleString('en-US', {
+        style: 'currency',
         currency: 'USD',
-        minimumFractionDigits: 2, 
-        maximumFractionDigits: 2 
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
     });
 }
 
@@ -42,7 +42,7 @@ async function fetchWithTimeout(url, opts = {}, timeoutMs = 8000) {
     const controller = new AbortController();
     const signal = controller.signal;
     let timeoutId = null;
-    
+
     try {
         const mergedOpts = { cache: 'no-store', ...opts, signal };
         timeoutId = setTimeout(() => {
@@ -174,14 +174,14 @@ const fetchPrice = async (coinId) => {
             xdoage: res.headers.get('X-DO-Age'),
             xlat: res.headers.get('X-Latency-ms')
         });
-        
+
         const data = res.json ?? JSON.parse(res.text || '{}');
-        
+
         // Normalize and validate price response
         try {
             const normalized = normalizePriceResponse(data);
             console.log(`✅ Fetched canonical price: $${normalized.priceFmt} (source: ${normalized.source}, timestampMs: ${normalized.timestampMs})`);
-            
+
             // Update cache with normalized data
             _lastPriceFetch.set(coinId, { ts: Date.now(), data: normalized });
             return normalized;
@@ -203,20 +203,39 @@ const fetchPrice = async (coinId) => {
 const fetchPriceThrottled = async (coinId, force = false) => {
     const now = Date.now();
     const last = _lastPriceFetch.get(coinId);
+    const MAX_CACHE_AGE_MS = 5 * 60 * 1000; // 5 minutes - never return data older than this
 
     if (!force && last && (now - last.ts) < THROTTLE_MS) {
-        console.log(`⏱️ Client throttle: returning cached price for ${coinId}`);
-        return last.data;
+        // Check if cached data is not too old
+        if (last.data && last.data.timestampMs) {
+            const dataAge = now - last.data.timestampMs;
+            if (dataAge > MAX_CACHE_AGE_MS) {
+                console.warn(`⚠️ Cached price for ${coinId} is too old (${Math.floor(dataAge / 1000)}s), refetching...`);
+                // Don't use cache - fall through to fetch
+            } else {
+                console.log(`⏱️ Client throttle: returning cached price for ${coinId}`);
+                return last.data;
+            }
+        } else {
+            console.log(`⏱️ Client throttle: returning cached price for ${coinId}`);
+            return last.data;
+        }
     }
 
     try {
         const data = await fetchPrice(coinId);
         return data;
     } catch (err) {
-        // If we have a cached value, return stale value instead of throwing
+        // If we have a cached value that's not too old, return it instead of throwing
         if (last && last.data) {
-            console.warn(`fetchPriceThrottled: upstream failed, returning cached data for ${coinId}`, err.message);
-            return last.data;
+            const dataAge = last.data.timestampMs ? (now - last.data.timestampMs) : (now - last.ts);
+            if (dataAge < MAX_CACHE_AGE_MS) {
+                console.warn(`fetchPriceThrottled: upstream failed, returning cached data for ${coinId} (age: ${Math.floor(dataAge / 1000)}s)`, err.message);
+                return last.data;
+            } else {
+                console.error(`fetchPriceThrottled: upstream failed and cache too old (${Math.floor(dataAge / 1000)}s), propagating error for ${coinId}`);
+                throw err;
+            }
         }
         // No cached data: propagate error so UI shows network error
         throw err;
@@ -235,24 +254,24 @@ const fetchHistory = async (coinId, days = 7) => {
             xdoage: res.headers.get('X-DO-Age'),
             xlat: res.headers.get('X-Latency-ms')
         });
-        
+
         const data = res.json ?? JSON.parse(res.text || '{}');
         console.log(`✅ History data received:`, data);
-        
+
         if (!data || !Array.isArray(data.prices)) {
             throw new Error('Invalid history payload');
         }
-        
+
         const historyData = data.prices.map(item => ({
             x: new Date(item.timestamp),
             y: item.price
         }));
-        
+
         if (!validateHistory(historyData)) {
             console.error(`❌ Invalid history data after transformation:`, historyData);
             throw new Error('Invalid history data');
         }
-        
+
         // Update cache
         _lastHistoryFetch.set(`${coinId}_${days}`, { ts: Date.now(), data: historyData });
         return historyData;
@@ -271,20 +290,53 @@ const fetchHistoryThrottled = async (coinId, days = 7, force = false) => {
     const key = `${coinId}_${days}`;
     const now = Date.now();
     const last = _lastHistoryFetch.get(key);
+    const MAX_CACHE_AGE_MS = 5 * 60 * 1000; // 5 minutes - never return data older than this
 
     if (!force && last && (now - last.ts) < THROTTLE_MS) {
-        console.log(`⏱️ Client throttle: returning cached history for ${coinId}`);
-        return last.data;
+        // Check if cached data is not too old (use most recent data point timestamp)
+        if (last.data && Array.isArray(last.data) && last.data.length > 0) {
+            const lastPoint = last.data[last.data.length - 1];
+            if (lastPoint.x instanceof Date) {
+                const dataAge = now - lastPoint.x.getTime();
+                if (dataAge > MAX_CACHE_AGE_MS) {
+                    console.warn(`⚠️ Cached history for ${coinId} is too old (${Math.floor(dataAge / 1000)}s), refetching...`);
+                    // Don't use cache - fall through to fetch
+                } else {
+                    console.log(`⏱️ Client throttle: returning cached history for ${coinId}`);
+                    return last.data;
+                }
+            } else {
+                console.log(`⏱️ Client throttle: returning cached history for ${coinId}`);
+                return last.data;
+            }
+        } else {
+            console.log(`⏱️ Client throttle: returning cached history for ${coinId}`);
+            return last.data;
+        }
     }
 
     try {
         const data = await fetchHistory(coinId, days);
         return data;
     } catch (err) {
-        // If we have a cached value, return stale value instead of throwing
+        // If we have a cached value that's not too old, return it instead of throwing
         if (last && last.data) {
-            console.warn(`fetchHistoryThrottled: upstream failed, returning cached history for ${key}`, err.message);
-            return last.data;
+            let dataAge = now - last.ts;
+            // Try to get more accurate age from data timestamp if available
+            if (Array.isArray(last.data) && last.data.length > 0) {
+                const lastPoint = last.data[last.data.length - 1];
+                if (lastPoint.x instanceof Date) {
+                    dataAge = now - lastPoint.x.getTime();
+                }
+            }
+
+            if (dataAge < MAX_CACHE_AGE_MS) {
+                console.warn(`fetchHistoryThrottled: upstream failed, returning cached history for ${key} (age: ${Math.floor(dataAge / 1000)}s)`, err.message);
+                return last.data;
+            } else {
+                console.error(`fetchHistoryThrottled: upstream failed and cache too old (${Math.floor(dataAge / 1000)}s), propagating error for ${key}`);
+                throw err;
+            }
         }
         // No cached data: propagate error so UI shows network error
         throw err;
@@ -298,11 +350,11 @@ const fetchOHLC = async (coinId, days = 7) => {
         console.log(`🔍 Fetching OHLC data for ${coinId} (${days} days)`);
         const res = await fetchWithTimeout(url, { method: 'GET', credentials: 'omit' }, 15000);
         const data = res.json ?? JSON.parse(res.text || '{}');
-        
+
         if (!data || !Array.isArray(data.ohlc)) {
             throw new Error('Invalid OHLC payload');
         }
-        
+
         console.log(`✅ OHLC data received: ${data.ohlc.length} candles, lastClosePrice=${data.lastClosePrice}, priceSource=${data.priceSource || 'unknown'}`);
         return data;
     } catch (err) {
@@ -341,11 +393,11 @@ const fetchSentimentSummary = async (coinId, force = false) => {
         const cached = _lastSentimentFetch.get(coinId);
         const age = Date.now() - cached.ts;
         if (age < THROTTLE_MS) {
-            console.log(`[fetchSentimentSummary] Returning throttled cache for ${coinId} (age: ${Math.floor(age/1000)}s)`);
+            console.log(`[fetchSentimentSummary] Returning throttled cache for ${coinId} (age: ${Math.floor(age / 1000)}s)`);
             return cached.data;
         }
     }
-    
+
     const url = `${WORKER_URL}/api/sentiment-summary?coin=${encodeURIComponent(coinId)}${force ? '&force=true' : ''}&_=${Date.now()}`;
     try {
         console.log(`🔍 Fetching sentiment summary for ${coinId}`);
@@ -354,12 +406,12 @@ const fetchSentimentSummary = async (coinId, force = false) => {
             cache: 'no-store'
         }, 10000); // 10s timeout for sentiment
         const data = res.json ?? JSON.parse(res.text || '{}');
-        
+
         // Validate response structure
         if (!data || typeof data.score !== 'number' || !data.label) {
             throw new Error('Invalid sentiment summary data');
         }
-        
+
         // Cache result
         _lastSentimentFetch.set(coinId, { ts: Date.now(), data });
         console.log(`✅ Sentiment summary received for ${coinId}: score=${data.score}, label=${data.label}, source=${data.source}`);
@@ -392,7 +444,7 @@ const fetchSentiment = async (headlines) => {
 // Function to initialize the store (optimized for fast initial load)
 export const initStore = async () => {
     update(state => ({ ...state, loading: true, error: null }));
-    
+
     // Fetch coins first (required for UI)
     const coins = await fetchCoins();
     const selectedCoin = coins.find(c => c.id === 'bitcoin') ? 'bitcoin' : (coins[0]?.id || 'bitcoin');
@@ -441,24 +493,24 @@ export const initStore = async () => {
                 const diffAbs = Math.abs(canonicalPrice - lastClose);
                 const diffPct = lastClose > 0 ? Math.abs((canonicalPrice - lastClose) / lastClose) * 100 : 0;
                 const canonicalTimestampMs = priceData.timestampMs || Date.now();
-                
+
                 // Only log detailed patch messages when difference is meaningful
                 if (diffAbs > PRICE_PATCH_ABS_THRESHOLD || diffPct > PRICE_PATCH_PCT_THRESHOLD) {
                     console.warn(`[store] Price/history mismatch: canonicalPrice=${formatPriceForLog(canonicalPrice)} lastClose=${formatPriceForLog(lastClose)} -> patching last point (diff=${formatPriceForLog(diffAbs)}, ${diffPct.toFixed(2)}%)`);
                 } else {
                     console.debug(`[store] Minor price mismatch: patching last point (diff=${formatPriceForLog(diffAbs)})`);
                 }
-                
+
                 // Replace last point close with canonical price (keep timestamp)
                 historyData[historyData.length - 1] = { x: lastPoint.x, y: canonicalPrice };
                 // Update cache with modified history so throttling returns consistent data
                 _lastHistoryFetch.set(`${selectedCoin}_7`, { ts: Date.now(), data: historyData });
-                
+
                 // Log confirmation only for material diffs
                 if (diffAbs > PRICE_PATCH_ABS_THRESHOLD || diffPct > PRICE_PATCH_PCT_THRESHOLD) {
                     console.info(`[store] Patched history last point to canonical price: ${formatPriceForLog(canonicalPrice)}`);
                 }
-                
+
                 // Track large patches for UI banner
                 if (diffAbs > LARGE_PATCH_ABS_THRESHOLD || diffPct > LARGE_PATCH_PCT_THRESHOLD) {
                     largePatch = {
@@ -477,7 +529,7 @@ export const initStore = async () => {
         // COMPUTE change24h if server didn't provide it
         if (priceData && priceData.priceNumeric && priceData.change24h == null) {
             let lastClose = null;
-            
+
             // Try to fetch OHLC data to get lastClosePriceNumeric
             try {
                 const ohlcData = await fetchOHLC(selectedCoin, 7);
@@ -488,13 +540,13 @@ export const initStore = async () => {
             } catch (ohlcErr) {
                 console.warn(`[store] Failed to fetch OHLC for change24h computation:`, ohlcErr.message);
             }
-            
+
             // Fallback to history's second-to-last point if OHLC not available
             if (lastClose == null && historyData && Array.isArray(historyData) && historyData.length >= 2) {
                 lastClose = historyData[historyData.length - 2].y; // previous day
                 console.log(`[store] Using history second-to-last point=${lastClose} for change24h computation`);
             }
-            
+
             // Compute change24h if we have a previous close
             if (lastClose != null) {
                 const computedChange = computeChangePercent(priceData.priceNumeric, lastClose);
@@ -521,11 +573,11 @@ export const initStore = async () => {
             const latestHistory = historyData[historyData.length - 1];
             const previousHistory = historyData.length > 1 ? historyData[historyData.length - 2] : latestHistory;
             const changePercent = previousHistory ? ((latestHistory.y - previousHistory.y) / previousHistory.y) * 100 : 0;
-            
+
             // Use coins list from the closure (already fetched above)
             const coinInfo = coins.find(c => c.id === selectedCoin);
             const symbol = coinInfo?.symbol || selectedCoin.toUpperCase().substring(0, 3);
-            
+
             const fallbackPrice = latestHistory.y;
             priceData = {
                 price: fallbackPrice,
@@ -600,10 +652,10 @@ export const initStore = async () => {
 // Function to update the selected coin
 export const setCoin = async (coinId) => {
     // Clear old data immediately to prevent showing stale data
-    update(state => ({ 
-        ...state, 
-        loading: true, 
-        error: null, 
+    update(state => ({
+        ...state,
+        loading: true,
+        error: null,
         selectedCoin: coinId,
         priceData: null,
         historyData: null,
@@ -651,24 +703,24 @@ export const setCoin = async (coinId) => {
                 const diffAbs = Math.abs(canonicalPrice - lastClose);
                 const diffPct = lastClose > 0 ? Math.abs((canonicalPrice - lastClose) / lastClose) * 100 : 0;
                 const canonicalTimestampMs = priceData.timestampMs || Date.now();
-                
+
                 // Only log detailed patch messages when difference is meaningful
                 if (diffAbs > PRICE_PATCH_ABS_THRESHOLD || diffPct > PRICE_PATCH_PCT_THRESHOLD) {
                     console.warn(`[store] Price/history mismatch: canonicalPrice=${formatPriceForLog(canonicalPrice)} lastClose=${formatPriceForLog(lastClose)} -> patching last point (diff=${formatPriceForLog(diffAbs)}, ${diffPct.toFixed(2)}%)`);
                 } else {
                     console.debug(`[store] Minor price mismatch: patching last point (diff=${formatPriceForLog(diffAbs)})`);
                 }
-                
+
                 // Replace last point close with canonical price (keep timestamp)
                 historyData[historyData.length - 1] = { x: lastPoint.x, y: canonicalPrice };
                 // Update cache with modified history so throttling returns consistent data
                 _lastHistoryFetch.set(`${coinId}_7`, { ts: Date.now(), data: historyData });
-                
+
                 // Log confirmation only for material diffs
                 if (diffAbs > PRICE_PATCH_ABS_THRESHOLD || diffPct > PRICE_PATCH_PCT_THRESHOLD) {
                     console.info(`[store] Patched history last point to canonical price: ${formatPriceForLog(canonicalPrice)}`);
                 }
-                
+
                 // Track large patches for UI banner
                 if (diffAbs > LARGE_PATCH_ABS_THRESHOLD || diffPct > LARGE_PATCH_PCT_THRESHOLD) {
                     largePatch = {
@@ -687,7 +739,7 @@ export const setCoin = async (coinId) => {
         // COMPUTE change24h if server didn't provide it
         if (priceData && priceData.priceNumeric && priceData.change24h == null) {
             let lastClose = null;
-            
+
             // Try to fetch OHLC data to get lastClosePriceNumeric
             try {
                 const ohlcData = await fetchOHLC(coinId, 7);
@@ -698,13 +750,13 @@ export const setCoin = async (coinId) => {
             } catch (ohlcErr) {
                 console.warn(`[store] Failed to fetch OHLC for change24h computation:`, ohlcErr.message);
             }
-            
+
             // Fallback to history's second-to-last point if OHLC not available
             if (lastClose == null && historyData && Array.isArray(historyData) && historyData.length >= 2) {
                 lastClose = historyData[historyData.length - 2].y; // previous day
                 console.log(`[store] Using history second-to-last point=${lastClose} for change24h computation`);
             }
-            
+
             // Compute change24h if we have a previous close
             if (lastClose != null) {
                 const computedChange = computeChangePercent(priceData.priceNumeric, lastClose);
@@ -733,11 +785,11 @@ export const setCoin = async (coinId) => {
                 const latestHistory = historyData[historyData.length - 1];
                 const previousHistory = historyData.length > 1 ? historyData[historyData.length - 2] : latestHistory;
                 const changePercent = previousHistory ? ((latestHistory.y - previousHistory.y) / previousHistory.y) * 100 : 0;
-                
+
                 // Get coin info from current state
                 const coinInfo = currentState.coins?.find(c => c.id === coinId);
                 const symbol = coinInfo?.symbol || coinId.toUpperCase().substring(0, 3);
-                
+
                 const fallbackPrice = latestHistory.y;
                 fallbackPriceData = {
                     price: fallbackPrice,
@@ -752,7 +804,7 @@ export const setCoin = async (coinId) => {
                     fallback: true // Mark as fallback data
                 };
                 console.warn('⚠️ Using history data as price fallback (canonical price fetch failed):', fallbackPriceData);
-                
+
                 // Return updated state
                 return {
                     ...currentState,
